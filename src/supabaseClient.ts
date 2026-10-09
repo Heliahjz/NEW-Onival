@@ -4,9 +4,6 @@
  * ============================================================================
  * فایل متمرکز تنظیمات و اتصال به سوپابیس (Centralized Supabase Configuration)
  * ============================================================================
- * راهنمای انتقال سریع به هر هاست یا سرور دیگر (Netlify, Vercel, VPS):
- * کافی است متغیرهای محیطی `VITE_SUPABASE_URL` و `VITE_SUPABASE_ANON_KEY` را تنظیم کنید
- * یا مقادیر پیش‌فرض زیر را ویرایش نمایید.
  */
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
@@ -16,19 +13,13 @@ export interface CustomSupabaseConfig {
   supabaseAnonKey: string;
 }
 
-const envUrl =
-  typeof import.meta !== 'undefined' && import.meta.env
-    ? import.meta.env.VITE_SUPABASE_URL
-    : undefined;
-
-const envAnonKey =
-  typeof import.meta !== 'undefined' && import.meta.env
-    ? import.meta.env.VITE_SUPABASE_ANON_KEY
-    : undefined;
+// مقادیر مستقیم و ثابت پروژه شما
+const DEFAULT_SUPABASE_URL = 'https://sppuyexofedtbbiexjem.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_UlrsnfAZb6dXUda0e3B0Gg_WFgZftJ-';
 
 export const SUPABASE_CONFIG: CustomSupabaseConfig = {
-  supabaseUrl: envUrl || 'https://sppuyexofedtbbiexjem.supabase.co',
-  supabaseAnonKey: envAnonKey || 'sb_publishable_UlrsnfAZb6dXUda0e3B0Gg_WFgZftJ-',
+  supabaseUrl: DEFAULT_SUPABASE_URL,
+  supabaseAnonKey: DEFAULT_SUPABASE_ANON_KEY,
 };
 
 const RUNTIME_SUPABASE_CONFIG_KEY = 'onival_custom_supabase_config_v1';
