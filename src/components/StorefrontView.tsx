@@ -41,6 +41,7 @@ import {
   XCircle
 } from 'lucide-react';
 import { Product, ProductCategory, Post, ContactMessage, Order, OrderItem, ProductSize, SiteContent, PaymentConfig } from '../types';
+import { apiFetch } from '../services/firebaseSync';
 
 interface StorefrontViewProps {
   products: Product[];
@@ -647,7 +648,7 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
     setReceiptUploadError('');
     setIsUploadingReceipt(true);
     try {
-      const res = await fetch(`/api/orders/${encodeURIComponent(orderTrackingCode)}/upload-receipt`, {
+      const res = await apiFetch(`/api/orders/${encodeURIComponent(orderTrackingCode)}/upload-receipt`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -699,7 +700,7 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
   const handleConfirmGatewayPayment = async (orderTrackingCode: string) => {
     setIsConfirmingGateway(true);
     try {
-      const res = await fetch(`/api/orders/${encodeURIComponent(orderTrackingCode)}/confirm-gateway-payment`, {
+      const res = await apiFetch(`/api/orders/${encodeURIComponent(orderTrackingCode)}/confirm-gateway-payment`, {
         method: 'POST',
       });
       if (res.ok) {
@@ -739,7 +740,7 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
   const handleConfirmBalePayment = async (orderTrackingCode: string) => {
     setIsConfirmingBale(true);
     try {
-      const res = await fetch(`/api/orders/${orderTrackingCode}/confirm-bale-payment`, {
+      const res = await apiFetch(`/api/orders/${orderTrackingCode}/confirm-bale-payment`, {
         method: 'POST'
       });
       if (res.ok) {
@@ -781,7 +782,7 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
 
     setIsSubmittingConsult(true);
     try {
-      const res = await fetch('/api/consultations/book', {
+      const res = await apiFetch('/api/consultations/book', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -877,7 +878,7 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
     setTrackingSearched(true);
 
     try {
-      const trackRes = await fetch(`/api/orders/track/${encodeURIComponent(code)}`);
+      const trackRes = await apiFetch(`/api/orders/track/${encodeURIComponent(code)}`);
       if (trackRes.ok) {
         const json = await trackRes.json();
         if (json.found) {
@@ -888,7 +889,7 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
       }
 
       // Fallback check in orders
-      const ordersRes = await fetch('/api/orders');
+      const ordersRes = await apiFetch('/api/orders');
       if (ordersRes.ok) {
         const allOrders: Order[] = await ordersRes.json();
         const foundOrder = allOrders.find(o => o.trackingCode.toUpperCase() === code);
@@ -900,7 +901,7 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
       }
 
       // Fallback check in contact messages
-      const contactRes = await fetch('/api/contact');
+      const contactRes = await apiFetch('/api/contact');
       if (contactRes.ok) {
         const allMessages: ContactMessage[] = await contactRes.json();
         const foundMsg = allMessages.find(m => m.trackingCode.toUpperCase() === code);
@@ -980,7 +981,7 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
 
     setIsAuthenticatingAdmin(true);
     try {
-      const res = await fetch('/api/admin/login', {
+      const res = await apiFetch('/api/admin/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: u, password: p }),
@@ -3630,6 +3631,26 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                   {adminAuthError}
                 </div>
               )}
+
+              <div className="p-2.5 rounded-xl bg-amber-50/80 border border-amber-200/70 text-[11px] text-stone-600 flex items-center justify-between gap-2">
+                <div>
+                  <span className="font-bold text-stone-700">حساب پیش‌فرض فایربیس:</span>{' '}
+                  <code className="font-mono text-amber-800 font-bold">admin</code> یا{' '}
+                  <code className="font-mono text-amber-800 font-bold">admin@onival.com</code> | رمز:{' '}
+                  <code className="font-mono text-amber-800 font-bold">admin</code>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAdminUsernameInput('admin@onival.com');
+                    setAdminPasswordInput('admin');
+                    setAdminAuthError('');
+                  }}
+                  className="px-2 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-800 font-bold text-[10px] shrink-0 cursor-pointer transition"
+                >
+                  درج خودکار
+                </button>
+              </div>
 
               <div className="flex gap-2 pt-2">
                 <button

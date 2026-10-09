@@ -35,6 +35,7 @@ import {
   Server
 } from 'lucide-react';
 import { TelegramConfig, BotActivityLog, ContactMessage, Order, SiteContent } from '../types';
+import { apiFetch } from '../services/firebaseSync';
 
 interface BotSettingsViewProps {
   config: TelegramConfig;
@@ -231,7 +232,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
       const token = platform === 'bale' ? formData.botToken : formData.telegramBotToken;
       const baseUrl = platform === 'bale' ? formData.baseUrl : formData.telegramBaseUrl;
 
-      const res = await fetch('/api/bot/test-connection', {
+      const res = await apiFetch('/api/bot/test-connection', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ platform, botToken: token, baseUrl }),
@@ -261,7 +262,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
     try {
       if (testTargetPlatform === 'both') {
         const [resBale, resTg] = await Promise.all([
-          fetch('/api/bot/send-test-message', {
+          apiFetch('/api/bot/send-test-message', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -272,7 +273,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
               text: testMessageText,
             }),
           }).then((r) => r.json()),
-          fetch('/api/bot/send-test-message', {
+          apiFetch('/api/bot/send-test-message', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -294,7 +295,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
         showToast('پیام تست به هر دو ربات بله و تلگرام ارسال گردید.', 'success');
       } else {
         const isBale = testTargetPlatform === 'bale';
-        const res = await fetch('/api/bot/send-test-message', {
+        const res = await apiFetch('/api/bot/send-test-message', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -328,7 +329,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
     setWebhookLoading(key);
     try {
       const isBale = platform === 'bale';
-      const res = await fetch('/api/bot/webhook-action', {
+      const res = await apiFetch('/api/bot/webhook-action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -353,7 +354,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
   // Clear logs
   const handleClearLogs = async () => {
     try {
-      await fetch('/api/bot/logs', { method: 'DELETE' });
+      await apiFetch('/api/bot/logs', { method: 'DELETE' });
       if (onRefreshData) await onRefreshData();
       showToast('گزارش‌های فعالیت ربات پاکسازی شد.', 'info');
     } catch {

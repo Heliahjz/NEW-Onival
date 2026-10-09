@@ -22,15 +22,19 @@ import {
   Crop
 } from 'lucide-react';
 import { SiteContent } from '../types';
+import { FirebaseMigrationCard } from './FirebaseMigrationCard';
+import { apiFetch } from '../services/firebaseSync';
 
 interface AccountViewProps {
   siteContent?: SiteContent;
   onUpdateSiteContent?: (updated: SiteContent) => Promise<boolean> | void;
+  onRefreshData?: () => Promise<void> | void;
 }
 
 export const AccountView: React.FC<AccountViewProps> = ({
   siteContent,
-  onUpdateSiteContent
+  onUpdateSiteContent,
+  onRefreshData
 }) => {
   const [username, setUsername] = useState('admin');
   const [email, setEmail] = useState('admin@onival.com');
@@ -62,7 +66,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
   const [isSavingCredentials, setIsSavingCredentials] = useState(false);
 
   useEffect(() => {
-    fetch('/api/account/profile')
+    apiFetch('/api/account/profile')
       .then(r => (r.ok ? r.json() : null))
       .then(data => {
         if (data) {
@@ -255,7 +259,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
     setIsSavingLogo(true);
 
     try {
-      const res = await fetch('/api/account/change-credentials', {
+      const res = await apiFetch('/api/account/change-credentials', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -314,7 +318,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
 
     setIsSavingCredentials(true);
     try {
-      const res = await fetch('/api/account/change-credentials', {
+      const res = await apiFetch('/api/account/change-credentials', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -914,6 +918,9 @@ export const AccountView: React.FC<AccountViewProps> = ({
           </div>
         </form>
       </div>
+
+      {/* SECTION 3: FIREBASE SEED DATA, BACKUP & CENTRALIZED MIGRATION */}
+      <FirebaseMigrationCard onRefreshAppData={onRefreshData} />
     </div>
   );
 };

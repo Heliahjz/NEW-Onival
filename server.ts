@@ -2387,6 +2387,61 @@ app.post('/api/site-content/reset', (req: Request, res: Response) => {
   res.json({ success: true, siteContent, message: 'محتوا و چیدمان صفحات به حالت پیش‌فرض بازگردانی شد.' });
 });
 
+// ================= FIREBASE CLOUD SYNC & SEED ENDPOINTS =================
+app.get('/api/firebase/export-state', (req: Request, res: Response) => {
+  res.json({
+    products,
+    productCategories,
+    posts,
+    postCategories,
+    contactMessages,
+    orders,
+    telegramConfig,
+    botActivityLogs,
+    siteContent,
+    adminCredentials
+  });
+});
+
+app.post('/api/firebase/import-state', (req: Request, res: Response) => {
+  const incoming = req.body;
+  if (!incoming || typeof incoming !== 'object') {
+    return res.status(400).json({ error: 'داده‌های ارسالی نامعتبر است' });
+  }
+  if (Array.isArray(incoming.products) && incoming.products.length > 0) {
+    products = incoming.products;
+  }
+  if (Array.isArray(incoming.productCategories) && incoming.productCategories.length > 0) {
+    productCategories = incoming.productCategories;
+  }
+  if (Array.isArray(incoming.posts) && incoming.posts.length > 0) {
+    posts = incoming.posts;
+  }
+  if (Array.isArray(incoming.postCategories) && incoming.postCategories.length > 0) {
+    postCategories = incoming.postCategories;
+  }
+  if (Array.isArray(incoming.contactMessages)) {
+    contactMessages = incoming.contactMessages;
+  }
+  if (Array.isArray(incoming.orders)) {
+    orders = incoming.orders;
+  }
+  if (incoming.telegramConfig && typeof incoming.telegramConfig === 'object') {
+    telegramConfig = { ...telegramConfig, ...incoming.telegramConfig };
+  }
+  if (Array.isArray(incoming.botActivityLogs) && incoming.botActivityLogs.length > 0) {
+    botActivityLogs = incoming.botActivityLogs;
+  }
+  if (incoming.siteContent && typeof incoming.siteContent === 'object') {
+    siteContent = { ...siteContent, ...incoming.siteContent };
+  }
+  if (incoming.adminCredentials && typeof incoming.adminCredentials === 'object') {
+    adminCredentials = { ...adminCredentials, ...incoming.adminCredentials };
+  }
+  savePersistedState();
+  res.json({ ok: true, message: 'دیتابیس سرور با موفقیت از Firebase Firestore همگام‌سازی شد.' });
+});
+
 // ================= VITE / SPA SERVER SETUP =================
 
 async function startServer() {

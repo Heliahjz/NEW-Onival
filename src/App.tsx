@@ -15,6 +15,11 @@ import { StorefrontView } from './components/StorefrontView';
 import { PageEditorView } from './components/PageEditorView';
 import { PaymentSettingsView } from './components/PaymentSettingsView';
 import { ConsultationsAdminView } from './components/ConsultationsAdminView';
+import {
+  apiFetch,
+  ensureFirebaseSeededOnBoot,
+  saveCloudStateToFirebase
+} from './services/firebaseSync';
 import { 
   Product, 
   ProductCategory, 
@@ -75,15 +80,15 @@ export default function App() {
         botRes,
         contentRes,
       ] = await Promise.all([
-        fetch('/api/stats').then((r) => r.json()),
-        fetch('/api/products').then((r) => r.json()),
-        fetch('/api/product-categories').then((r) => r.json()),
-        fetch('/api/posts').then((r) => r.json()),
-        fetch('/api/post-categories').then((r) => r.json()),
-        fetch('/api/contact').then((r) => r.json()),
-        fetch('/api/orders').then((r) => r.json()),
-        fetch('/api/bot/config').then((r) => r.json()),
-        fetch('/api/site-content').then((r) => r.json()).catch(() => null),
+        apiFetch('/api/stats').then((r) => r.json()),
+        apiFetch('/api/products').then((r) => r.json()),
+        apiFetch('/api/product-categories').then((r) => r.json()),
+        apiFetch('/api/posts').then((r) => r.json()),
+        apiFetch('/api/post-categories').then((r) => r.json()),
+        apiFetch('/api/contact').then((r) => r.json()),
+        apiFetch('/api/orders').then((r) => r.json()),
+        apiFetch('/api/bot/config').then((r) => r.json()),
+        apiFetch('/api/site-content').then((r) => r.json()).catch(() => null),
       ]);
 
       if (statsRes) setStats(statsRes);
@@ -104,12 +109,34 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchData();
+    const bootAndSeed = async () => {
+      try {
+        // ۱. اجرای خودکار راه‌اندازی اولیه (Auto-Seed) روی دیتابیس فایربیس به محض لود شدن سایت
+        const cloudInit = await ensureFirebaseSeededOnBoot();
+        if (cloudInit.state) {
+          // اگر دیتابیس فایربیس اطلاعاتی دارد، سرور محلی را هم با آن همگام کن
+          try {
+            await window.fetch('/api/firebase/import-state', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(cloudInit.state),
+            });
+          } catch {
+            // ignore on static hosting
+          }
+        }
+      } catch (e) {
+        console.error('Firebase auto-seed check error:', e);
+      } finally {
+        await fetchData();
+      }
+    };
+    bootAndSeed();
   }, []);
 
   // Handlers for Products
   const handleAddProduct = async (prod: Partial<Product>) => {
-    const res = await fetch('/api/products', {
+    const res = await apiFetch('/api/products', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(prod),
@@ -120,7 +147,7 @@ export default function App() {
   };
 
   const handleEditProduct = async (id: number, prod: Partial<Product>) => {
-    const res = await fetch(`/api/products/${id}`, {
+    const res = await apiFetch(`/api/products/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(prod),
@@ -131,7 +158,7 @@ export default function App() {
   };
 
   const handleDeleteProduct = async (id: number) => {
-    const res = await fetch(`/api/products/${id}`, { method: 'DELETE' });
+    const res = await apiFetch(`/api/products/${id}`, { method: 'DELETE' });
     if (res.ok) {
       await fetchData();
     }
@@ -139,7 +166,7 @@ export default function App() {
 
   // Handlers for Product Categories
   const handleAddProductCategory = async (cat: { title: string; parentId?: number | null }) => {
-    const res = await fetch('/api/product-categories', {
+    const res = await apiFetch('/api/product-categories', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(cat),
@@ -150,7 +177,7 @@ export default function App() {
   };
 
   const handleDeleteProductCategory = async (id: number) => {
-    const res = await fetch(`/api/product-categories/${id}`, { method: 'DELETE' });
+    const res = await apiFetch(`/api/product-categories/${id}`, { method: 'DELETE' });
     if (res.ok) {
       await fetchData();
     }
@@ -158,7 +185,7 @@ export default function App() {
 
   // Handlers for Posts
   const handleAddPost = async (post: Partial<Post>) => {
-    const res = await fetch('/api/posts', {
+    const res = await apiFetch('/api/posts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(post),
@@ -169,7 +196,7 @@ export default function App() {
   };
 
   const handleEditPost = async (id: number, post: Partial<Post>) => {
-    const res = await fetch(`/api/posts/${id}`, {
+    const res = await apiFetch(`/api/posts/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(post),
@@ -180,7 +207,7 @@ export default function App() {
   };
 
   const handleDeletePost = async (id: number) => {
-    const res = await fetch(`/api/posts/${id}`, { method: 'DELETE' });
+    const res = await apiFetch(`/api/posts/${id}`, { method: 'DELETE' });
     if (res.ok) {
       await fetchData();
     }
@@ -188,7 +215,7 @@ export default function App() {
 
   // Handlers for Post Categories
   const handleAddPostCategory = async (cat: { title: string; parentId?: number | null }) => {
-    const res = await fetch('/api/post-categories', {
+    const res = await apiFetch('/api/post-categories', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(cat),
@@ -199,7 +226,7 @@ export default function App() {
   };
 
   const handleDeletePostCategory = async (id: number) => {
-    const res = await fetch(`/api/post-categories/${id}`, { method: 'DELETE' });
+    const res = await apiFetch(`/api/post-categories/${id}`, { method: 'DELETE' });
     if (res.ok) {
       await fetchData();
     }
@@ -207,7 +234,7 @@ export default function App() {
 
   // Handlers for Messages
   const handleRespondMessage = async (id: number, response: string) => {
-    const res = await fetch(`/api/contact/${id}/respond`, {
+    const res = await apiFetch(`/api/contact/${id}/respond`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ response }),
@@ -218,7 +245,7 @@ export default function App() {
   };
 
   const handleDeleteMessage = async (id: number) => {
-    const res = await fetch(`/api/contact/${id}`, { method: 'DELETE' });
+    const res = await apiFetch(`/api/contact/${id}`, { method: 'DELETE' });
     if (res.ok) {
       await fetchData();
     }
@@ -234,7 +261,7 @@ export default function App() {
     status: Order['status'],
     paymentStatus?: Order['paymentStatus']
   ) => {
-    const res = await fetch(`/api/orders/${id}/status`, {
+    const res = await apiFetch(`/api/orders/${id}/status`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status, paymentStatus }),
@@ -245,7 +272,7 @@ export default function App() {
   };
 
   const handleVerifyReceipt = async (id: number, approved: boolean) => {
-    const res = await fetch(`/api/orders/${id}/verify-receipt`, {
+    const res = await apiFetch(`/api/orders/${id}/verify-receipt`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ approved }),
@@ -257,7 +284,7 @@ export default function App() {
 
   // Handlers for Bot
   const handleUpdateBotConfig = async (newConfig: Partial<TelegramConfig>) => {
-    const res = await fetch('/api/bot/config', {
+    const res = await apiFetch('/api/bot/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newConfig),
@@ -270,7 +297,7 @@ export default function App() {
   };
 
   const handleSimulateBotEvent = async (type: string, payload?: any) => {
-    const res = await fetch('/api/bot/simulate-event', {
+    const res = await apiFetch('/api/bot/simulate-event', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type, payload }),
@@ -282,7 +309,7 @@ export default function App() {
 
   // Handlers for Credentials
   const handleUpdateCredentials = async (email: string, newPass: string) => {
-    const res = await fetch('/api/account/change-credentials', {
+    const res = await apiFetch('/api/account/change-credentials', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, newPassword: newPass }),
@@ -295,7 +322,7 @@ export default function App() {
 
   // Handlers for Storefront Actions
   const handlePlaceOrder = async (orderData: Partial<Order>) => {
-    const res = await fetch('/api/orders', {
+    const res = await apiFetch('/api/orders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(orderData),
@@ -307,7 +334,7 @@ export default function App() {
   };
 
   const handleSubmitContact = async (contactData: { fullName: string; phoneNumber?: string; message: string }) => {
-    const res = await fetch('/api/contact', {
+    const res = await apiFetch('/api/contact', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(contactData),
@@ -321,7 +348,7 @@ export default function App() {
 
   // Handlers for Site Content Management
   const handleSaveSiteContent = async (newContent: SiteContent) => {
-    const res = await fetch('/api/site-content', {
+    const res = await apiFetch('/api/site-content', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newContent),
@@ -338,7 +365,7 @@ export default function App() {
   };
 
   const handleResetSiteContent = async () => {
-    const res = await fetch('/api/site-content/reset', { method: 'POST' });
+    const res = await apiFetch('/api/site-content/reset', { method: 'POST' });
     if (res.ok) {
       const data = await res.json();
       if (data.siteContent) {
@@ -578,6 +605,7 @@ export default function App() {
                   <AccountView
                     siteContent={siteContent || undefined}
                     onUpdateSiteContent={handleSaveSiteContent}
+                    onRefreshData={fetchData}
                   />
                 )}
               </>
