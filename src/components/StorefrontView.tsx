@@ -1517,7 +1517,7 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                     alt={selectedProduct.imageAlt || selectedProduct.title} 
                     width={600}
                     height={600}
-                    fetchPriority="high"
+                    {...({ fetchpriority: 'high' } as any)}
                     className="w-full h-full object-cover"
                   />
                   {(selectedProduct.discount || 0) > 0 && (
@@ -1705,7 +1705,7 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                 alt={selectedPost.imageAlt || selectedPost.title} 
                 width={800}
                 height={450}
-                fetchPriority="high"
+                {...({ fetchpriority: 'high' } as any)}
                 className="w-full h-56 sm:h-72 object-cover rounded-2xl mb-5"
               />
 
