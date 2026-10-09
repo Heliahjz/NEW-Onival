@@ -14,6 +14,7 @@ import {
   Percent,
   CreditCard,
   Sparkles,
+  Globe,
   X
 } from 'lucide-react';
 
@@ -29,6 +30,7 @@ export type NavItem =
   | 'orders'
   | 'payment-settings'
   | 'page-editor'
+  | 'seo'
   | 'bot'
   | 'account';
 
@@ -110,6 +112,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: Sliders, 
       badge: 'محتوا', 
       badgeColor: 'bg-amber-500/20 text-amber-300 border border-amber-500/30' 
+    },
+    { 
+      id: 'seo', 
+      label: 'سئو تکنیکال، نقشه سایت و ریدایرکت', 
+      icon: Globe, 
+      badge: 'SEO', 
+      badgeColor: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' 
     },
     { id: 'bot', label: 'ربات بله/تلگرام و ارتباطات پشتیبانی', icon: Bot, badge: 'تست زنده', badgeColor: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' },
     { id: 'account', label: 'تنظیمات و امنیت', icon: KeyRound, badge: null },

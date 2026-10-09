@@ -3,6 +3,17 @@ export interface ProductSize {
   price: number;
 }
 
+export type PublicationStatus = 'published' | 'draft';
+export type StockAvailability = 'InStock' | 'OutOfStock' | 'PreOrder';
+
+export interface SlugRedirect {
+  fromPath: string;
+  toPath: string;
+  entityType: 'product' | 'category' | 'article' | 'article-category';
+  entityId: number;
+  createdAt: string;
+}
+
 export interface Product {
   id: number;
   title: string;
@@ -13,15 +24,35 @@ export interface Product {
   priceSmall?: number;
   priceLarge?: number;
   discount?: number;
+  discountPercent?: number;
+  isAmazingOffer?: boolean;
   features?: string[];
   type?: string;
   categoryId: number;
+  productCategoryId?: number;
   categoryTitle?: string;
+  productCategoryTitle?: string;
+  shortDescription?: string;
+  brand?: string;
   imageName: string;
+  imageAlt?: string;
   description: string;
   content: string;
   isDelete?: boolean;
   creationTime: string;
+  publishedAt?: string;
+  updatedAt?: string;
+  status?: PublicationStatus;
+  availability?: StockAvailability;
+  sku?: string;
+  seoTitle?: string;
+  seoDescription?: string;
+  ogTitle?: string;
+  ogDescription?: string;
+  ogImage?: string;
+  canonicalUrl?: string;
+  robotsNoIndex?: boolean;
+  robotsNoFollow?: boolean;
 }
 
 export interface ProductCategory {
@@ -30,6 +61,15 @@ export interface ProductCategory {
   slug: string;
   parentId?: number | null;
   sortOrder?: number;
+  description?: string;
+  imageName?: string;
+  imageAlt?: string;
+  status?: PublicationStatus;
+  updatedAt?: string;
+  seoTitle?: string;
+  seoDescription?: string;
+  ogImage?: string;
+  robotsNoIndex?: boolean;
 }
 
 export interface Post {
@@ -41,9 +81,21 @@ export interface Post {
   description: string;
   content: string;
   imageName: string;
+  imageAlt?: string;
   viewCount: number;
   authorName: string;
   creationTime: string;
+  publishedAt?: string;
+  updatedAt?: string;
+  status?: PublicationStatus;
+  seoTitle?: string;
+  seoDescription?: string;
+  ogTitle?: string;
+  ogDescription?: string;
+  ogImage?: string;
+  canonicalUrl?: string;
+  robotsNoIndex?: boolean;
+  robotsNoFollow?: boolean;
 }
 
 export interface PostCategory {
@@ -51,6 +103,12 @@ export interface PostCategory {
   title: string;
   slug: string;
   parentId?: number | null;
+  description?: string;
+  status?: PublicationStatus;
+  updatedAt?: string;
+  seoTitle?: string;
+  seoDescription?: string;
+  robotsNoIndex?: boolean;
 }
 
 export interface ConsultationDetails {

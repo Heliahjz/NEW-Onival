@@ -41,15 +41,9 @@ service cloud.firestore {
       allow delete: if isValidId(productId);
     }
 
-    // Admin account configuration collection (seeded automatically on initial boot)
+    // Admin account configuration collection (locked down to authenticated admin UID only)
     match /admin_accounts/{adminId} {
-      allow get: if isValidId(adminId);
-      allow create, update: if isValidId(adminId)
-        && incoming().keys().hasAll(['username', 'email', 'password'])
-        && incoming().username is string && incoming().username.size() <= 120
-        && incoming().email is string && incoming().email.size() <= 180
-        && incoming().password is string && incoming().password.size() <= 180;
-      allow delete: if false;
+      allow read, write: if false;
     }
   }
 }

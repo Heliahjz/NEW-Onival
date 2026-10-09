@@ -7,7 +7,8 @@ import {
   Order,
   TelegramConfig,
   BotActivityLog,
-  SiteContent
+  SiteContent,
+  SlugRedirect
 } from '../types';
 
 export interface AdminCredentialsState {
@@ -28,6 +29,7 @@ export interface FullOnivalCloudState {
   botActivityLogs: BotActivityLog[];
   siteContent: SiteContent;
   adminCredentials: AdminCredentialsState;
+  slugRedirects?: SlugRedirect[];
 }
 
 export const DEFAULT_ADMIN_CREDENTIALS: AdminCredentialsState = {
@@ -703,7 +705,8 @@ export function createInitialSeedState(): FullOnivalCloudState {
       telegramConfig: DEFAULT_TELEGRAM_CONFIG,
       botActivityLogs: DEFAULT_BOT_LOGS,
       siteContent: DEFAULT_SITE_CONTENT,
-      adminCredentials: DEFAULT_ADMIN_CREDENTIALS
+      adminCredentials: DEFAULT_ADMIN_CREDENTIALS,
+      slugRedirects: []
     })
   );
 }

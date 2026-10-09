@@ -1,27 +1,62 @@
 import React, { useState } from 'react';
-import { 
-  Package, 
-  Plus, 
-  Search, 
-  Edit3, 
-  Trash2, 
-  Check, 
-  X, 
-  Image as ImageIcon,
+import {
+  Product,
+  ProductCategory,
+  ProductSize,
+  PublicationStatus,
+  StockAvailability
+} from '../types';
+import {
+  Plus,
+  Edit2,
+  Trash2,
+  Search,
   Tag,
-  AlertTriangle,
+  Package,
+  X,
+  Image as ImageIcon,
+  ListPlus,
+  Upload,
+  Check,
   Percent,
-  Layers
+  Sparkles,
+  Globe,
+  Eye,
+  EyeOff,
+  AlertCircle
 } from 'lucide-react';
-import { Product, ProductCategory, ProductSize } from '../types';
+import { sanitizeSlug, isSlugDuplicate } from '../utils/seo';
 
 interface ProductsViewProps {
   products: Product[];
   categories: ProductCategory[];
-  onAddProduct: (prod: Partial<Product>) => Promise<void>;
-  onEditProduct: (id: number, prod: Partial<Product>) => Promise<void>;
+  onAddProduct: (product: Partial<Product>) => Promise<void>;
+  onEditProduct: (id: number, product: Partial<Product>) => Promise<void>;
   onDeleteProduct: (id: number) => Promise<void>;
 }
+
+const PRESET_PRODUCT_IMAGES = [
+  {
+    label: 'عسل طلایی خالص',
+    url: 'https://images.unsplash.com/photo-1587049352847-4a222e784d38?auto=format&fit=crop&w=900&q=80',
+  },
+  {
+    label: 'شان عسل و موم طبیعی',
+    url: 'https://images.unsplash.com/photo-1558642452-9d2a7deb7f62?auto=format&fit=crop&w=900&q=80',
+  },
+  {
+    label: 'ژل رویال و اکسیر کندو',
+    url: 'https://images.unsplash.com/photo-1471943311424-646960669fbc?auto=format&fit=crop&w=900&q=80',
+  },
+  {
+    label: 'دمنوش و گیاهان دارویی',
+    url: 'https://images.unsplash.com/photo-1597481499750-3e6b22637e12?auto=format&fit=crop&w=900&q=80',
+  },
+  {
+    label: 'گرده گل و فرآورده کوهستانی',
+    url: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=900&q=80',
+  },
+];
 
 export const ProductsView: React.FC<ProductsViewProps> = ({
   products,
@@ -31,677 +66,975 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
   onDeleteProduct,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<number | 'all' | 'discounted'>('all');
-  
-  // Modal states
+  const [selectedCategory, setSelectedCategory] = useState<number | 'all'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'published' | 'draft'>('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [activeModalTab, setActiveModalTab] = useState<'general' | 'seo'>('general');
 
   // Form states
-  const [formData, setFormData] = useState<{
-    title: string;
-    price: string;
-    hasSize: boolean;
-    sizes: { name: string; price: string }[];
-    discount: string;
-    categoryId: number;
-    imageName: string;
-    description: string;
-    content: string;
-  }>({
-    title: '',
-    price: '',
-    hasSize: false,
-    sizes: [
-      { name: '۵۰۰ گرم', price: '' },
-      { name: '۱ کیلوگرم', price: '' }
-    ],
-    discount: '0',
-    categoryId: categories[0]?.id || 1,
-    imageName: '',
-    description: '',
-    content: ''
-  });
+  const [title, setTitle] = useState('');
+  const [slug, setSlug] = useState('');
+  const [price, setPrice] = useState('');
+  const [hasSize, setHasSize] = useState(false);
+  const [sizes, setSizes] = useState<ProductSize[]>([
+    { name: 'نیم کیلوگرم (۵۰۰ گرم)', price: 200000 },
+    { name: 'یک کیلوگرم (۱۰۰۰ گرم)', price: 380000 },
+  ]);
+  const [shortDescription, setShortDescription] = useState('');
+  const [description, setDescription] = useState('');
+  const [productCategoryId, setProductCategoryId] = useState<number>(categories[0]?.id || 1);
+  const [imageName, setImageName] = useState('');
+  const [imageAlt, setImageAlt] = useState('');
+  const [discountPercent, setDiscountPercent] = useState<number>(0);
+  const [isAmazingOffer, setIsAmazingOffer] = useState<boolean>(false);
+
+  // SEO & Publishing states
+  const [status, setStatus] = useState<PublicationStatus>('published');
+  const [availability, setAvailability] = useState<StockAvailability>('InStock');
+  const [sku, setSku] = useState('');
+  const [brand, setBrand] = useState('اونیوال | ONIVAL');
+  const [seoTitle, setSeoTitle] = useState('');
+  const [seoDescription, setSeoDescription] = useState('');
+  const [canonicalUrl, setCanonicalUrl] = useState('');
+  const [ogTitle, setOgTitle] = useState('');
+  const [ogDescription, setOgDescription] = useState('');
+  const [ogImage, setOgImage] = useState('');
+  const [robotsNoIndex, setRobotsNoIndex] = useState(false);
+  const [robotsNoFollow, setRobotsNoFollow] = useState(false);
 
   const openAddModal = () => {
     setEditingProduct(null);
-    setFormData({
-      title: '',
-      price: '',
-      hasSize: false,
-      sizes: [
-        { name: '۵۰۰ گرم', price: '' },
-        { name: '۱ کیلوگرم', price: '' }
-      ],
-      discount: '0',
-      categoryId: categories[0]?.id || 1,
-      imageName: 'https://images.unsplash.com/photo-1587049359535-b64d3dd0d716?w=800&auto=format&fit=crop&q=80',
-      description: '',
-      content: ''
-    });
+    setFormError('');
+    setActiveModalTab('general');
+    setTitle('');
+    setSlug('');
+    setPrice('');
+    setHasSize(false);
+    setSizes([
+      { name: 'نیم کیلوگرم (۵۰۰ گرم)', price: 200000 },
+      { name: 'یک کیلوگرم (۱۰۰۰ گرم)', price: 380000 },
+    ]);
+    setShortDescription('');
+    setDescription('');
+    setProductCategoryId(categories[0]?.id || 1);
+    setImageName(PRESET_PRODUCT_IMAGES[0].url);
+    setImageAlt('');
+    setDiscountPercent(0);
+    setIsAmazingOffer(false);
+    setStatus('published');
+    setAvailability('InStock');
+    setSku('');
+    setBrand('اونیوال | ONIVAL');
+    setSeoTitle('');
+    setSeoDescription('');
+    setCanonicalUrl('');
+    setOgTitle('');
+    setOgDescription('');
+    setOgImage('');
+    setRobotsNoIndex(false);
+    setRobotsNoFollow(false);
     setIsModalOpen(true);
   };
 
-  const openEditModal = (p: Product) => {
-    setEditingProduct(p);
-    let initialSizes: { name: string; price: string }[] = [];
-    if (p.sizes && p.sizes.length > 0) {
-      initialSizes = p.sizes.map(s => ({ name: s.name, price: s.price.toString() }));
-    } else if (p.hasSize && (p.priceSmall || p.priceLarge)) {
-      initialSizes = [
-        { name: 'کوچک', price: (p.priceSmall || p.price).toString() },
-        { name: 'بزرگ', price: (p.priceLarge || p.price).toString() }
-      ];
+  const openEditModal = (product: Product) => {
+    setEditingProduct(product);
+    setFormError('');
+    setActiveModalTab('general');
+    setTitle(product.title);
+    setSlug(product.slug);
+    setPrice(product.price.toString());
+    setHasSize(product.hasSize);
+    if (product.sizes && product.sizes.length > 0) {
+      setSizes([...product.sizes]);
+    } else if (product.hasSize) {
+      setSizes([
+        { name: 'سایز کوچک (۵۰۰ گرم)', price: product.priceSmall || product.price },
+        { name: 'سایز بزرگ (۱ کیلوگرم)', price: product.priceLarge || product.price },
+      ]);
     } else {
-      initialSizes = [
-        { name: '۵۰۰ گرم', price: p.price.toString() },
-        { name: '۱ کیلوگرم', price: Math.round(p.price * 1.8).toString() }
-      ];
+      setSizes([
+        { name: 'نیم کیلوگرم (۵۰۰ گرم)', price: 200000 },
+        { name: 'یک کیلوگرم (۱۰۰۰ گرم)', price: 380000 },
+      ]);
     }
-
-    setFormData({
-      title: p.title,
-      price: p.price.toString(),
-      hasSize: Boolean(p.hasSize || (p.sizes && p.sizes.length > 0)),
-      sizes: initialSizes,
-      discount: (p.discount || 0).toString(),
-      categoryId: p.categoryId,
-      imageName: p.imageName,
-      description: p.description,
-      content: p.content
-    });
+    setShortDescription(product.shortDescription || product.description || '');
+    setDescription(product.content || product.description || '');
+    setProductCategoryId(product.categoryId ?? product.productCategoryId ?? (categories[0]?.id || 1));
+    setImageName(product.imageName || PRESET_PRODUCT_IMAGES[0].url);
+    setImageAlt(product.imageAlt || `${product.title} - فروشگاه اونیوال`);
+    setDiscountPercent(product.discount ?? product.discountPercent ?? 0);
+    setIsAmazingOffer(Boolean(product.isAmazingOffer || (product.discount ?? 0) > 0));
+    setStatus(product.status || 'published');
+    setAvailability(product.availability || 'InStock');
+    setSku(product.sku || `ONV-${product.id}`);
+    setBrand(product.brand || 'اونیوال | ONIVAL');
+    setSeoTitle(product.seoTitle || '');
+    setSeoDescription(product.seoDescription || '');
+    setCanonicalUrl(product.canonicalUrl || '');
+    setOgTitle(product.ogTitle || '');
+    setOgDescription(product.ogDescription || '');
+    setOgImage(product.ogImage || '');
+    setRobotsNoIndex(Boolean(product.robotsNoIndex));
+    setRobotsNoFollow(Boolean(product.robotsNoFollow));
     setIsModalOpen(true);
   };
 
-  const addSizeRow = () => {
-    setFormData(prev => ({
-      ...prev,
-      sizes: [...prev.sizes, { name: '', price: '' }]
-    }));
+  const handleImageFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setImageName(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
-  const removeSizeRow = (idx: number) => {
-    setFormData(prev => ({
-      ...prev,
-      sizes: prev.sizes.filter((_, i) => i !== idx)
-    }));
+  const handleAddSizeRow = () => {
+    setSizes([...sizes, { name: '', price: 0 }]);
   };
 
-  const updateSizeRow = (idx: number, field: 'name' | 'price', val: string) => {
-    setFormData(prev => ({
-      ...prev,
-      sizes: prev.sizes.map((s, i) => i === idx ? { ...s, [field]: val } : s)
-    }));
+  const handleRemoveSizeRow = (index: number) => {
+    if (sizes.length <= 1) return;
+    setSizes(sizes.filter((_, idx) => idx !== index));
+  };
+
+  const handleSizeChange = (index: number, field: 'name' | 'price', val: string) => {
+    const updated = [...sizes];
+    if (field === 'name') {
+      updated[index].name = val;
+    } else {
+      updated[index].price = Number(val) || 0;
+    }
+    setSizes(updated);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.title) return;
+    setFormError('');
 
-    setIsSubmitting(true);
+    if (!title.trim()) {
+      setFormError('عنوان محصول الزامی است.');
+      return;
+    }
+
+    const candidateSlug = sanitizeSlug(slug || title, 'product', editingProduct?.id);
+    if (isSlugDuplicate(products, candidateSlug, editingProduct?.id)) {
+      setFormError(`اسلاگ «${candidateSlug}» تکراری است و قبلاً برای محصول دیگری ثبت شده است.`);
+      setActiveModalTab('seo');
+      return;
+    }
+
+    const validSizes = hasSize ? sizes.filter((s) => s.name.trim() !== '') : [];
+    const basePrice =
+      hasSize && validSizes.length > 0 ? validSizes[0].price : Number(price) || 0;
+
+    const resolvedDiscount = Math.min(90, Math.max(0, Number(discountPercent) || 0));
+    const resolvedShortDesc = shortDescription.trim() || `${title.trim()} با تضمین اصالت و کیفیت آزمایشگاهی`;
+    const resolvedFullContent = description.trim() || resolvedShortDesc || title.trim();
+
+    const payload: Partial<Product> = {
+      title: title.trim(),
+      slug: candidateSlug,
+      price: basePrice,
+      hasSize,
+      sizes: hasSize ? validSizes : [],
+      priceSmall: hasSize && validSizes[0] ? validSizes[0].price : undefined,
+      priceLarge: hasSize && validSizes[1] ? validSizes[1].price : undefined,
+      shortDescription: resolvedShortDesc,
+      description: resolvedShortDesc,
+      content: resolvedFullContent,
+      categoryId: Number(productCategoryId),
+      productCategoryId: Number(productCategoryId),
+      imageName: imageName.trim() || PRESET_PRODUCT_IMAGES[0].url,
+      imageAlt: imageAlt.trim() || `${title.trim()} - فروشگاه تخصصی اونیوال`,
+      discount: resolvedDiscount,
+      discountPercent: resolvedDiscount,
+      isAmazingOffer,
+      status,
+      availability,
+      sku: sku.trim() || `ONV-${editingProduct?.id || Date.now()}`,
+      brand: brand.trim() || 'اونیوال | ONIVAL',
+      seoTitle: seoTitle.trim() || `${title.trim()} | خرید با ضمانت آزمایشگاهی از اونیوال`,
+      seoDescription:
+        seoDescription.trim() ||
+        resolvedShortDesc ||
+        resolvedFullContent.slice(0, 155),
+      canonicalUrl: canonicalUrl.trim() || undefined,
+      ogTitle: ogTitle.trim() || undefined,
+      ogDescription: ogDescription.trim() || undefined,
+      ogImage: ogImage.trim() || undefined,
+      robotsNoIndex,
+      robotsNoFollow,
+    };
+
     try {
-      const validSizes = formData.hasSize 
-        ? formData.sizes
-            .filter(s => s.name.trim() !== '')
-            .map(s => ({ name: s.name.trim(), price: Number(s.price) || 0 }))
-        : undefined;
-
-      const basePrice = validSizes && validSizes.length > 0 
-        ? validSizes[0].price 
-        : (Number(formData.price) || 0);
-
-      const discountNum = Math.min(99, Math.max(0, Number(formData.discount) || 0));
-
-      const payload: Partial<Product> = {
-        title: formData.title,
-        price: basePrice,
-        hasSize: formData.hasSize && (validSizes?.length || 0) > 0,
-        sizes: validSizes,
-        priceSmall: validSizes && validSizes.length > 0 ? validSizes[0].price : undefined,
-        priceLarge: validSizes && validSizes.length > 1 ? validSizes[validSizes.length - 1].price : undefined,
-        discount: discountNum,
-        categoryId: Number(formData.categoryId),
-        imageName: formData.imageName,
-        description: formData.description,
-        content: formData.content
-      };
-
       if (editingProduct) {
         await onEditProduct(editingProduct.id, payload);
       } else {
         await onAddProduct(payload);
       }
       setIsModalOpen(false);
-    } finally {
-      setIsSubmitting(false);
+    } catch (err: any) {
+      setFormError(err?.message || 'خطا در ذخیره محصول');
     }
   };
 
-  const handleDeleteConfirm = async () => {
-    if (!deleteTarget) return;
-    setIsSubmitting(true);
-    try {
-      await onDeleteProduct(deleteTarget.id);
-      setDeleteTarget(null);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const filteredProducts = products.filter(p => {
-    const matchSearch = p.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.description.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchCat = selectedCategory === 'all' 
-      ? true 
-      : selectedCategory === 'discounted'
-      ? (p.discount || 0) > 0
-      : p.categoryId === selectedCategory;
-    return matchSearch && matchCat;
+  const filteredProducts = products.filter((p) => {
+    const q = searchTerm.toLowerCase();
+    const matchesSearch =
+      String(p.title || '').toLowerCase().includes(q) ||
+      String(p.description || p.shortDescription || '').toLowerCase().includes(q) ||
+      String(p.slug || '').toLowerCase().includes(q);
+    const catId = p.categoryId ?? p.productCategoryId;
+    const matchesCategory =
+      selectedCategory === 'all' || catId === Number(selectedCategory);
+    const pStatus = p.status || 'published';
+    const matchesStatus = statusFilter === 'all' || pStatus === statusFilter;
+    return matchesSearch && matchesCategory && matchesStatus && !p.isDelete;
   });
 
-  const formatPrice = (val: number) => {
-    return new Intl.NumberFormat('fa-IR').format(val) + ' تومان';
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('fa-IR').format(amount) + ' تومان';
   };
+
+  const previewSlug = sanitizeSlug(slug || title, 'product', editingProduct?.id);
+  const previewTitle =
+    seoTitle.trim() || `${title || 'عنوان محصول'} | خرید آنلاین از فروشگاه اونیوال`;
+  const previewDesc =
+    seoDescription.trim() ||
+    shortDescription.trim() ||
+    'توضیحات متا محصول در نتایج جستجوی گوگل در این بخش نمایش داده می‌شود...';
 
   return (
     <div className="space-y-6">
-      {/* Header & Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
-        <div>
-          <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-            <Package className="w-5 h-5 text-amber-600" />
-            <span>مدیریت محصولات اونیوال (ONIVAL)</span>
-          </h2>
-          <p className="text-xs text-slate-500 mt-1">
-            تنظیم کاتالوگ، سایزبندی پویا (۲، ۳ یا چند اندازه دلخواه)، تخفیف و پیشنهاد شگفت‌انگیز
-          </p>
+      {/* Top Action Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-2xl border border-slate-200/60 shadow-sm">
+        <div className="flex flex-wrap items-center gap-3 flex-1">
+          <div className="relative flex-1 max-w-md min-w-[200px]">
+            <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="جستجو در نام، اسلاگ یا توضیحات محصول..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pr-10 pl-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+            />
+          </div>
+
+          <select
+            value={selectedCategory}
+            onChange={(e) =>
+              setSelectedCategory(e.target.value === 'all' ? 'all' : Number(e.target.value))
+            }
+            className="px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+          >
+            <option value="all">همه دسته‌بندی‌ها</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.title}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as any)}
+            className="px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+          >
+            <option value="all">همه وضعیت‌های انتشار</option>
+            <option value="published">منتشرشده (عمومی و در Sitemap)</option>
+            <option value="draft">پیش‌نویس (مخفی از فروشگاه و گوگل)</option>
+          </select>
         </div>
 
         <button
-          id="btn-open-add-product"
           onClick={openAddModal}
-          className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-sm font-semibold flex items-center justify-center gap-2 shadow-sm transition shrink-0"
+          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-xl transition-colors shadow-sm"
         >
           <Plus className="w-4 h-4" />
-          <span>افزودن محصول جدید</span>
+          افزودن محصول جدید
         </button>
       </div>
 
-      {/* Filter and Search Bar */}
-      <div className="flex flex-col sm:flex-row items-center gap-3">
-        <div className="relative flex-1 w-full">
-          <Search className="w-4 h-4 absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            id="input-search-products"
-            type="text"
-            placeholder="جستجو در عنوان یا مشخصات محصول..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pr-10 pl-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 text-slate-800"
-          />
-        </div>
-
-        <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
-          <button
-            onClick={() => setSelectedCategory('all')}
-            className={`px-3 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition ${
-              selectedCategory === 'all'
-                ? 'bg-amber-600 text-white shadow-xs'
-                : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-            }`}
-          >
-            همه دسته‌ها ({products.length})
-          </button>
-          <button
-            onClick={() => setSelectedCategory('discounted')}
-            className={`px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition flex items-center gap-1.5 ${
-              selectedCategory === 'discounted'
-                ? 'bg-rose-600 text-white shadow-xs'
-                : 'bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200'
-            }`}
-          >
-            <Percent className="w-3.5 h-3.5" />
-            <span>شگفت‌انگیز / تخفیف‌دار ({products.filter(p => (p.discount || 0) > 0).length})</span>
-          </button>
-          {categories.map((cat) => (
-            <button
-              key={cat.id}
-              onClick={() => setSelectedCategory(cat.id)}
-              className={`px-3 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition ${
-                selectedCategory === cat.id
-                  ? 'bg-amber-600 text-white shadow-xs'
-                  : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+      {/* Products Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        {filteredProducts.map((product) => {
+          const isDraft = product.status === 'draft';
+          return (
+            <div
+              key={product.id}
+              className={`bg-white rounded-2xl border overflow-hidden shadow-sm hover:shadow-md transition-all flex flex-col justify-between group ${
+                isDraft ? 'border-amber-300 bg-amber-50/10' : 'border-slate-200/70'
               }`}
             >
-              {cat.title}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Products Grid / Table */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-right text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-600">
-              <tr>
-                <th className="py-3.5 px-4">تصویر</th>
-                <th className="py-3.5 px-4">عنوان محصول</th>
-                <th className="py-3.5 px-4">دسته‌بندی</th>
-                <th className="py-3.5 px-4">سایزبندی و قیمت‌ها</th>
-                <th className="py-3.5 px-4">تخفیف</th>
-                <th className="py-3.5 px-4">تاریخ درج</th>
-                <th className="py-3.5 px-4 text-center">عملیات</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredProducts.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-400">
-                    هیچ محصولی با این مشخصات یافت نشد.
-                  </td>
-                </tr>
-              ) : (
-                filteredProducts.map((p) => {
-                  const hasCustomSizes = p.sizes && p.sizes.length > 0;
-                  const discountVal = p.discount || 0;
-
-                  return (
-                    <tr key={p.id} className="hover:bg-slate-50/80 transition">
-                      <td className="py-3 px-4">
-                        <img
-                          src={p.imageName}
-                          alt={p.title}
-                          className="w-14 h-14 rounded-xl object-cover border border-slate-200"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1587049359535-b64d3dd0d716?w=800&auto=format&fit=crop&q=80';
-                          }}
-                        />
-                      </td>
-                      <td className="py-3 px-4">
-                        <div className="font-bold text-slate-800">{p.title}</div>
-                        <div className="text-xs text-slate-500 line-clamp-1 mt-0.5">{p.description}</div>
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-700">
-                          <Tag className="w-3 h-3 text-slate-400" />
-                          {p.categoryTitle || 'عمومی'}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4">
-                        {hasCustomSizes ? (
-                          <div className="space-y-1">
-                            <div className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md mb-1">
-                              <Layers className="w-3 h-3" />
-                              <span>{p.sizes!.length} اندازه / وزن</span>
-                            </div>
-                            <div className="space-y-0.5 text-xs">
-                              {p.sizes!.map((s, sIdx) => {
-                                const finalP = discountVal > 0 
-                                  ? Math.round(s.price * (1 - discountVal / 100)) 
-                                  : s.price;
-                                return (
-                                  <div key={sIdx} className="text-slate-600 flex items-center gap-1.5">
-                                    <span className="text-slate-400 font-mono">▪</span>
-                                    <span className="font-medium text-slate-700">{s.name}:</span>
-                                    {discountVal > 0 ? (
-                                      <div className="flex items-center gap-1">
-                                        <span className="line-through text-slate-400 text-[11px]">{formatPrice(s.price)}</span>
-                                        <span className="font-bold text-emerald-600">{formatPrice(finalP)}</span>
-                                      </div>
-                                    ) : (
-                                      <span className="font-bold text-slate-800">{formatPrice(s.price)}</span>
-                                    )}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        ) : p.hasSize ? (
-                          <div className="space-y-0.5 text-xs">
-                            <div className="text-slate-600">
-                              کوچک: <span className="font-bold text-slate-800">{formatPrice(p.priceSmall || p.price)}</span>
-                            </div>
-                            <div className="text-slate-600">
-                              بزرگ: <span className="font-bold text-slate-800">{formatPrice(p.priceLarge || p.price)}</span>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="text-xs">
-                            {discountVal > 0 ? (
-                              <div className="space-y-0.5">
-                                <div className="line-through text-slate-400">{formatPrice(p.price)}</div>
-                                <div className="font-bold text-emerald-600 text-sm">
-                                  {formatPrice(Math.round(p.price * (1 - discountVal / 100)))}
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="font-bold text-slate-800 text-sm">{formatPrice(p.price)}</div>
-                            )}
-                          </div>
-                        )}
-                      </td>
-                      <td className="py-3 px-4">
-                        {discountVal > 0 ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-600 border border-rose-200">
-                            <Percent className="w-3 h-3" />
-                            <span>{discountVal}٪ تخفیف</span>
-                          </span>
-                        ) : (
-                          <span className="text-xs text-slate-400">بدون تخفیف</span>
-                        )}
-                      </td>
-                      <td className="py-3 px-4 text-xs text-slate-500 font-mono">
-                        {p.creationTime}
-                      </td>
-                      <td className="py-3 px-4 text-center">
-                        <div className="flex items-center justify-center gap-1.5">
-                          <button
-                            onClick={() => openEditModal(p)}
-                            className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-lg transition"
-                            title="ویرایش محصول"
-                          >
-                            <Edit3 className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => setDeleteTarget(p)}
-                            className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition"
-                            title="حذف محصول"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Add / Edit Product Modal */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-5">
-              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                <Package className="w-5 h-5 text-amber-600" />
-                <span>{editingProduct ? 'ویرایش محصول' : 'افزودن محصول جدید به کاتالوگ اونیوال'}</span>
-              </h3>
-              <button 
-                onClick={() => setIsModalOpen(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {/* Title */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  عنوان محصول <span className="text-rose-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="مانند: عسل گون خالص کوهستان اونیوال"
-                  value={formData.title}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
-                />
-              </div>
-
-              {/* Category */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  دسته‌بندی محصول
-                </label>
-                <select
-                  value={formData.categoryId}
-                  onChange={(e) => setFormData({ ...formData, categoryId: Number(e.target.value) })}
-                  className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 bg-white"
-                >
-                  {categories.map((cat) => (
-                    <option key={cat.id} value={cat.id}>
-                      {cat.title}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* HasSize & Multi-Size Management */}
-              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
-                <label className="flex items-center gap-2.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.hasSize}
-                    onChange={(e) => setFormData({ ...formData, hasSize: e.target.checked })}
-                    className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500"
+                <div className="h-48 bg-slate-100 relative overflow-hidden">
+                  <img
+                    src={product.imageName || PRESET_PRODUCT_IMAGES[0].url}
+                    alt={product.imageAlt || product.title}
+                    loading="lazy"
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   />
-                  <span className="text-xs font-bold text-slate-800">
-                    محصول دارای اندازه، وزن یا بسته‌بندی‌های مختلف است (مثلاً ۲ سایز، ۳ سایز یا بیشتر)
-                  </span>
-                </label>
+                  <div className="absolute inset-0 bg-gradient-to-t from-slate-900/60 via-transparent to-transparent" />
 
-                {formData.hasSize ? (
-                  <div className="pt-3 border-t border-slate-200 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-slate-700">
-                        فهرست اندازه‌ها / وزن‌ها و قیمت هر کدام:
-                      </span>
-                      <button
-                        type="button"
-                        onClick={addSizeRow}
-                        className="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-800 text-xs font-bold rounded-lg flex items-center gap-1 transition"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>افزودن سایز جدید</span>
-                      </button>
-                    </div>
-
-                    <div className="space-y-2">
-                      {formData.sizes.map((sz, idx) => (
-                        <div key={idx} className="flex items-center gap-2 bg-white p-2 rounded-xl border border-slate-200">
-                          <div className="flex-1">
-                            <input
-                              type="text"
-                              required
-                              placeholder="نام سایز (مانند: ۲۵۰ گرم، ۵۰۰ گرم، ۱ کیلو)"
-                              value={sz.name}
-                              onChange={(e) => updateSizeRow(idx, 'name', e.target.value)}
-                              className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-slate-50 focus:bg-white"
-                            />
-                          </div>
-                          <div className="w-36">
-                            <input
-                              type="number"
-                              required
-                              placeholder="قیمت (تومان)"
-                              value={sz.price}
-                              onChange={(e) => updateSizeRow(idx, 'price', e.target.value)}
-                              className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-slate-50 focus:bg-white text-left font-mono"
-                            />
-                          </div>
-                          {formData.sizes.length > 1 && (
-                            <button
-                              type="button"
-                              onClick={() => removeSizeRow(idx)}
-                              className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition"
-                              title="حذف این اندازه"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                    <p className="text-[11px] text-slate-500">
-                      مشتری در صفحه فروشگاه می‌تواند بین این اندازه‌ها انتخاب کند و قیمت بر اساس سایز انتخابی به‌روزرسانی می‌شود.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="pt-3 border-t border-slate-200">
-                    <label className="block text-xs font-medium text-slate-600 mb-1">
-                      قیمت تک و استاندارد محصول (تومان)
-                    </label>
-                    <input
-                      type="number"
-                      placeholder="مانند: ۳۵۰,۰۰۰"
-                      value={formData.price}
-                      onChange={(e) => setFormData({ ...formData, price: e.target.value })}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* Discount Setting */}
-              <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-xl space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
-                    <Percent className="w-4 h-4 text-amber-600" />
-                    <span>تنظیم درصد تخفیف و پیشنهاد شگفت‌انگیز</span>
-                  </label>
-                  {Number(formData.discount) > 0 && (
-                    <span className="px-2 py-0.5 bg-rose-500 text-white rounded-md text-[11px] font-bold">
-                      نمایش در پیشنهاد شگفت‌انگیز صفحه اصلی
+                  <div className="absolute top-3 right-3 flex flex-wrap gap-1.5">
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-white/90 text-slate-800 backdrop-blur-sm shadow-sm">
+                      <Tag className="w-3 h-3 text-blue-600" />
+                      {product.categoryTitle || product.productCategoryTitle || 'عمومی'}
                     </span>
-                  )}
-                </div>
 
-                <div className="flex items-center gap-3">
-                  <div className="w-28">
-                    <input
-                      type="number"
-                      min="0"
-                      max="99"
-                      placeholder="0"
-                      value={formData.discount}
-                      onChange={(e) => setFormData({ ...formData, discount: e.target.value })}
-                      className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm bg-white font-mono text-center font-bold"
-                    />
-                  </div>
-                  <span className="text-xs font-bold text-amber-900">درصد تخفیف (٪)</span>
-                  <div className="text-xs text-amber-800 flex-1">
-                    {Number(formData.discount) > 0 ? (
-                      <span>
-                        این محصول با برچسب <strong>{formData.discount}٪ تخفیف</strong> در بخش پیشنهاد شگفت‌انگیز و کاتالوگ نمایش می‌یابد.
+                    {isDraft ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500 text-white shadow-sm">
+                        <EyeOff className="w-3 h-3" />
+                        پیش‌نویس
                       </span>
                     ) : (
-                      <span className="text-slate-500">عدد ۰ به معنی قیمت بدون تخفیف است.</span>
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-600 text-white shadow-sm">
+                        <Eye className="w-3 h-3" />
+                        منتشرشده
+                      </span>
+                    )}
+
+                    {(product.discount ?? product.discountPercent ?? 0) > 0 ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black bg-rose-600 text-white shadow-sm">
+                        {product.discount ?? product.discountPercent}٪ تخفیف
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <div className="absolute bottom-3 right-3 left-3 flex items-center justify-between text-white">
+                    <span className="font-bold text-base truncate">{product.title}</span>
+                  </div>
+                </div>
+
+                <div className="p-4 space-y-2">
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono" dir="ltr">
+                    <span className="truncate">/products/{product.slug}</span>
+                    <span className={product.robotsNoIndex ? 'text-rose-500 font-bold' : 'text-emerald-600 font-bold'}>
+                      {product.robotsNoIndex ? 'noindex' : 'index'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 line-clamp-2 min-h-[2rem]">
+                    {product.description || product.shortDescription}
+                  </p>
+
+                  <div className="pt-2 border-t border-slate-100">
+                    {product.hasSize && product.sizes && product.sizes.length > 0 ? (
+                      <div className="space-y-1.5">
+                        <div className="text-[11px] font-semibold text-slate-400">
+                          سایزها و قیمت‌ها:
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {product.sizes.map((s, idx) => (
+                            <span
+                              key={idx}
+                              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-50 border border-slate-200/80 text-xs"
+                            >
+                              <span className="text-slate-600 font-medium">{s.name}:</span>
+                              <span className="font-bold text-blue-600">
+                                {formatCurrency(s.price)}
+                              </span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-slate-500">قیمت محصول:</span>
+                        <span className="font-bold text-slate-800">
+                          {formatCurrency(product.price)}
+                        </span>
+                      </div>
                     )}
                   </div>
                 </div>
               </div>
 
-              {/* Image URL */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  آدرس تصویر محصول
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="url"
-                    placeholder="https://images.unsplash.com/..."
-                    value={formData.imageName}
-                    onChange={(e) => setFormData({ ...formData, imageName: e.target.value })}
-                    className="flex-1 px-3.5 py-2 border border-slate-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-mono text-xs"
-                  />
-                  {formData.imageName && (
-                    <img 
-                      src={formData.imageName} 
-                      alt="Preview" 
-                      className="w-10 h-10 rounded-lg object-cover border border-slate-200" 
-                    />
-                  )}
+              <div className="px-4 py-3 bg-slate-50/70 border-t border-slate-100 flex items-center justify-between gap-2">
+                <a
+                  href={`/products/${encodeURIComponent(product.slug)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs font-bold text-emerald-700 hover:text-emerald-800 inline-flex items-center gap-1"
+                >
+                  <Globe className="w-3.5 h-3.5" />
+                  مشاهده صفحه سئو
+                </a>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => openEditModal(product)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
+                    ویرایش و سئو
+                  </button>
+                  <button
+                    onClick={() => onDeleteProduct(product.id)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    حذف
+                  </button>
                 </div>
               </div>
+            </div>
+          );
+        })}
 
-              {/* Description */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  توضیحات کوتاه محصول
-                </label>
-                <textarea
-                  rows={2}
-                  placeholder="خلاصه ویژگی‌ها و خواص محصول برای کارت کاتالوگ..."
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
-                />
+        {filteredProducts.length === 0 && (
+          <div className="col-span-full bg-white rounded-2xl p-12 text-center border border-slate-200/60">
+            <Package className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+            <h3 className="text-base font-bold text-slate-700">محصولی یافت نشد</h3>
+            <p className="text-xs text-slate-400 mt-1">
+              هیچ محصولی با فیلترهای انتخاب شده مطابقت ندارد.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Add / Edit Modal with SEO & Structured Data Tab */}
+      {isModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-3xl w-full p-6 shadow-xl animate-in fade-in zoom-in-95 duration-200 max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+              <h3 className="text-lg font-bold text-slate-900">
+                {editingProduct ? 'ویرایش محصول و تنظیمات سئو' : 'افزودن محصول جدید به فروشگاه'}
+              </h3>
+              <button
+                onClick={() => setIsModalOpen(false)}
+                className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Tabs */}
+            <div className="flex items-center gap-2 mt-4 bg-slate-100 p-1 rounded-xl">
+              <button
+                type="button"
+                onClick={() => setActiveModalTab('general')}
+                className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition ${
+                  activeModalTab === 'general'
+                    ? 'bg-white text-slate-900 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                ۱. مشخصات، قیمت و تصویر محصول
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveModalTab('seo')}
+                className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                  activeModalTab === 'seo'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Globe className="w-3.5 h-3.5" />
+                ۲. تنظیمات سئو، اسلاگ، وضعیت انتشار و اسکیما
+              </button>
+            </div>
+
+            {formError && (
+              <div className="mt-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                {formError}
               </div>
+            )}
 
-              {/* Content */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  محتوای کامل و مشخصات فنی (مشابه ادیتور پیشرفته اونیوال)
-                </label>
-                <textarea
-                  rows={3}
-                  placeholder="توضیحات مفصل، منطقه برداشت، نحوه مصرف، گواهی آزمایشگاهی و جدول مشخصات..."
-                  value={formData.content}
-                  onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-                  className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
-                />
-              </div>
+            <form onSubmit={handleSubmit} className="space-y-4 mt-4">
+              {activeModalTab === 'general' ? (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                        عنوان محصول *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={title}
+                        onChange={(e) => {
+                          setTitle(e.target.value);
+                          if (!editingProduct && !slug) {
+                            setSlug(sanitizeSlug(e.target.value, 'product'));
+                          }
+                        }}
+                        className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                        placeholder="مثلاً: عسل کوهستان اردبیل"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                        وضعیت انتشار و نمایش
+                      </label>
+                      <select
+                        value={status}
+                        onChange={(e) => setStatus(e.target.value as PublicationStatus)}
+                        className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      >
+                        <option value="published">منتشرشده (نمایش در فروشگاه و نقشه سایت گوگل)</option>
+                        <option value="draft">پیش‌نویس (مخفی از مشتریان و موتورهای جستجو)</option>
+                      </select>
+                    </div>
+                  </div>
 
-              {/* Actions */}
+                  {/* Image Selection & Upload */}
+                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-3">
+                    <label className="block text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                      <ImageIcon className="w-4 h-4 text-blue-600" />
+                      تصویر اصلی و متن جایگزین (Image Alt برای سئو تصاویر گوگل)
+                    </label>
+
+                    <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+                      <div className="w-20 h-20 rounded-xl overflow-hidden bg-slate-200 border border-slate-300 shrink-0">
+                        {imageName ? (
+                          <img
+                            src={imageName}
+                            alt={imageAlt || title || 'Preview'}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-slate-400 text-xs">
+                            بدون عکس
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex-1 w-full space-y-2">
+                        <input
+                          type="text"
+                          value={imageName}
+                          onChange={(e) => setImageName(e.target.value)}
+                          dir="ltr"
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                          placeholder="لینک مستقیم تصویر (https://...)"
+                        />
+                        <input
+                          type="text"
+                          value={imageAlt}
+                          onChange={(e) => setImageAlt(e.target.value)}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                          placeholder="متن جایگزین تصویر (Alt Text) - مثلاً: شیشه عسل طبیعی کوهستان سبلان اونیوال"
+                        />
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-medium cursor-pointer transition-colors">
+                            <Upload className="w-3.5 h-3.5" />
+                            آپلود عکس از سیستم
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={handleImageFileUpload}
+                              className="hidden"
+                            />
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-1">
+                      <span className="block text-[11px] text-slate-500 mb-1.5">
+                        یا انتخاب سریع از تصاویر آماده:
+                      </span>
+                      <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                        {PRESET_PRODUCT_IMAGES.map((preset, idx) => {
+                          const isSelected = imageName === preset.url;
+                          return (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => setImageName(preset.url)}
+                              className={`relative w-14 h-14 rounded-lg overflow-hidden border-2 transition-all shrink-0 ${
+                                isSelected
+                                  ? 'border-blue-600 scale-105 shadow-sm'
+                                  : 'border-transparent opacity-75 hover:opacity-100'
+                              }`}
+                              title={preset.label}
+                            >
+                              <img
+                                src={preset.url}
+                                alt={preset.label}
+                                className="w-full h-full object-cover"
+                              />
+                              {isSelected && (
+                                <div className="absolute inset-0 bg-blue-600/30 flex items-center justify-center">
+                                  <Check className="w-4 h-4 text-white" />
+                                </div>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Category & Stock Availability */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                        دسته‌بندی محصول
+                      </label>
+                      <select
+                        value={productCategoryId}
+                        onChange={(e) => setProductCategoryId(Number(e.target.value))}
+                        className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      >
+                        {categories.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.title}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                        وضعیت موجودی (Schema Offer)
+                      </label>
+                      <select
+                        value={availability}
+                        onChange={(e) => setAvailability(e.target.value as StockAvailability)}
+                        className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      >
+                        <option value="InStock">موجود در انبار (InStock)</option>
+                        <option value="OutOfStock">ناموجود (OutOfStock)</option>
+                        <option value="PreOrder">پیش‌فروش (PreOrder)</option>
+                      </select>
+                    </div>
+
+                    {!hasSize && (
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                          قیمت تک‌سایز (تومان) *
+                        </label>
+                        <input
+                          type="number"
+                          required={!hasSize}
+                          value={price}
+                          onChange={(e) => setPrice(e.target.value)}
+                          className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                          placeholder="مثلاً: 250000"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Discount & Amazing Offer */}
+                  <div className="p-4 bg-rose-50/60 rounded-2xl border border-rose-200/70 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <Percent className="w-4 h-4 text-rose-600" />
+                        <span className="text-xs font-bold text-slate-800">
+                          تنظیمات تخفیف و پیشنهاد شگفت‌انگیز
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {[0, 10, 15, 20, 30, 50].map((preset) => (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => setDiscountPercent(preset)}
+                            className={`px-2 py-1 rounded-lg text-[11px] font-bold transition ${
+                              discountPercent === preset
+                                ? 'bg-rose-600 text-white shadow-sm'
+                                : 'bg-white text-slate-600 border border-slate-200 hover:border-rose-300'
+                            }`}
+                          >
+                            {preset === 0 ? 'بدون تخفیف' : `${preset}٪`}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                          درصد تخفیف (۰ تا ۹۰ درصد)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={90}
+                          value={discountPercent}
+                          onChange={(e) => setDiscountPercent(Number(e.target.value) || 0)}
+                          className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-sm font-bold text-rose-600 focus:outline-none focus:ring-2 focus:ring-rose-500/20"
+                        />
+                      </div>
+
+                      <div className="flex items-end">
+                        <label className="flex items-center gap-2.5 w-full px-3 py-2 bg-white border border-slate-200 rounded-xl cursor-pointer hover:border-rose-300 transition">
+                          <input
+                            type="checkbox"
+                            checked={isAmazingOffer}
+                            onChange={(e) => setIsAmazingOffer(e.target.checked)}
+                            className="w-4 h-4 text-rose-600 rounded focus:ring-rose-500"
+                          />
+                          <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
+                          <span className="text-xs font-bold text-slate-700">
+                            نمایش در اسلایدر «پیشنهاد شگفت‌انگیز»
+                          </span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Multi-size toggle */}
+                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <input
+                          type="checkbox"
+                          id="hasSizeToggle"
+                          checked={hasSize}
+                          onChange={(e) => setHasSize(e.target.checked)}
+                          className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                        />
+                        <label
+                          htmlFor="hasSizeToggle"
+                          className="text-xs font-bold text-slate-700 cursor-pointer"
+                        >
+                          این محصول دارای وزن‌ها / سایزهای متنوع با قیمت‌های متفاوت است
+                        </label>
+                      </div>
+
+                      {hasSize && (
+                        <button
+                          type="button"
+                          onClick={handleAddSizeRow}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 transition-colors"
+                        >
+                          <ListPlus className="w-3.5 h-3.5" />
+                          افزودن سایز جدید
+                        </button>
+                      )}
+                    </div>
+
+                    {hasSize && (
+                      <div className="space-y-2 pt-2 border-t border-slate-200/60">
+                        {sizes.map((s, idx) => (
+                          <div key={idx} className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              required
+                              value={s.name}
+                              onChange={(e) => handleSizeChange(idx, 'name', e.target.value)}
+                              placeholder="عنوان سایز (مثلاً: نیم کیلوگرم)"
+                              className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                            />
+                            <input
+                              type="number"
+                              required
+                              value={s.price}
+                              onChange={(e) => handleSizeChange(idx, 'price', e.target.value)}
+                              placeholder="قیمت (تومان)"
+                              className="w-36 px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                            />
+                            {sizes.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveSizeRow(idx)}
+                                className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                      توضیحات کوتاه (نمایش در کارت محصول و خلاصه بالای صفحه) *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={shortDescription}
+                      onChange={(e) => setShortDescription(e.target.value)}
+                      className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      placeholder="خلاصه یک خطی از ویژگی‌های محصول..."
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                      توضیحات کامل و تخصصی محصول (محتوای اصلی صفحه محصول برای کاربران و گوگل)
+                    </label>
+                    <textarea
+                      rows={4}
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      placeholder="توضیحات کامل درباره خواص، نحوه مصرف، ساکارز و تضمین آزمایشگاهی..."
+                    />
+                  </div>
+                </>
+              ) : (
+                /* SEO & Structured Data Tab */
+                <div className="space-y-4">
+                  {/* Live Google SERP Preview */}
+                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-1.5">
+                    <div className="text-[11px] font-bold text-slate-400">
+                      پیش‌نمایش زنده نتیجه در جستجوی گوگل (Google SERP Preview):
+                    </div>
+                    <div className="text-xs text-emerald-700 font-mono truncate" dir="ltr">
+                      {typeof window !== 'undefined' ? window.location.origin : 'https://onival.ir'}/products/{previewSlug}
+                    </div>
+                    <div className="text-base font-bold text-blue-700 hover:underline truncate">
+                      {previewTitle}
+                    </div>
+                    <div className="text-xs text-slate-600 line-clamp-2 leading-relaxed">
+                      {previewDesc}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                        آدرس یکتای محصول (URL Slug) *
+                      </label>
+                      <input
+                        type="text"
+                        dir="ltr"
+                        value={slug}
+                        onChange={(e) => setSlug(e.target.value)}
+                        placeholder="sabalan-natural-honey"
+                        className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                      />
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        در صورت تغییر اسلاگ محصول قبلی، ریدایرکت ۳۰۱ خودکار ثبت می‌شود.
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                        کد شناسه کالا (SKU در اسکیمای Product)
+                      </label>
+                      <input
+                        type="text"
+                        dir="ltr"
+                        value={sku}
+                        onChange={(e) => setSku(e.target.value)}
+                        placeholder="ONV-101"
+                        className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                      عنوان سئو اختصاصی (SEO Meta Title)
+                    </label>
+                    <input
+                      type="text"
+                      value={seoTitle}
+                      onChange={(e) => setSeoTitle(e.target.value)}
+                      placeholder={`${title || 'نام محصول'} | خرید با برگه آزمایشگاهی از اونیوال`}
+                      className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                    />
+                    <div className="flex justify-between text-[11px] text-slate-400 mt-1">
+                      <span>در صورت خالی بودن، از عنوان محصول به صورت هوشمند ساخته می‌شود.</span>
+                      <span>{seoTitle.length} / 60</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                      توضیحات متا سئو (SEO Meta Description)
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={seoDescription}
+                      onChange={(e) => setSeoDescription(e.target.value)}
+                      placeholder="توضیحات جذاب شامل مزایا، خلوص و ارسال سریع برای جذب کلیک در نتایج گوگل..."
+                      className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                    />
+                    <div className="flex justify-between text-[11px] text-slate-400 mt-1">
+                      <span>پیشنهاد استاندارد: ۱۲۰ تا ۱۵۵ کاراکتر</span>
+                      <span>{seoDescription.length} / 160</span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                        برند محصول (Brand Schema)
+                      </label>
+                      <input
+                        type="text"
+                        value={brand}
+                        onChange={(e) => setBrand(e.target.value)}
+                        className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                        آدرس Canonical سفارشی (اختیاری)
+                      </label>
+                      <input
+                        type="url"
+                        dir="ltr"
+                        value={canonicalUrl}
+                        onChange={(e) => setCanonicalUrl(e.target.value)}
+                        placeholder="https://..."
+                        className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Advanced Indexing Controls */}
+                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap items-center gap-6">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={robotsNoIndex}
+                        onChange={(e) => setRobotsNoIndex(e.target.checked)}
+                        className="w-4 h-4 text-rose-600 rounded"
+                      />
+                      <span className="text-xs font-bold text-slate-700">
+                        عدم ایندکس در گوگل (<code dir="ltr">noindex</code>)
+                      </span>
+                    </label>
+
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={robotsNoFollow}
+                        onChange={(e) => setRobotsNoFollow(e.target.checked)}
+                        className="w-4 h-4 text-rose-600 rounded"
+                      />
+                      <span className="text-xs font-bold text-slate-700">
+                        عدم دنبال کردن لینک‌ها (<code dir="ltr">nofollow</code>)
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 border border-slate-200 text-slate-600 rounded-xl text-xs font-semibold hover:bg-slate-50 transition"
+                  className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
                 >
                   انصراف
                 </button>
                 <button
                   type="submit"
-                  disabled={isSubmitting}
-                  className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-xs transition"
+                  className="px-5 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors shadow-sm"
                 >
-                  {isSubmitting ? 'در حال ثبت...' : editingProduct ? 'ذخیره تغییرات' : 'افزودن محصول'}
+                  {editingProduct ? 'ذخیره تغییرات و بروزرسانی سئو' : 'ثبت و انتشار محصول'}
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* Delete Confirmation Modal */}
-      {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100">
-            <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mb-4">
-              <AlertTriangle className="w-6 h-6" />
-            </div>
-            <h3 className="text-base font-bold text-slate-900 mb-2">
-              حذف محصول «{deleteTarget.title}»
-            </h3>
-            <p className="text-xs text-slate-600 leading-relaxed mb-6">
-              آیا از حذف این محصول اطمینان دارید؟ این عملیات محصول را از لیست کاتالوگ فروشگاه حذف خواهد کرد.
-            </p>
-            <div className="flex items-center justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setDeleteTarget(null)}
-                className="px-4 py-2 border border-slate-200 text-slate-600 rounded-xl text-xs font-semibold hover:bg-slate-50 transition"
-              >
-                انصراف
-              </button>
-              <button
-                type="button"
-                onClick={handleDeleteConfirm}
-                disabled={isSubmitting}
-                className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition shadow-xs"
-              >
-                {isSubmitting ? 'در حال حذف...' : 'تأیید و حذف'}
-              </button>
-            </div>
           </div>
         </div>
       )}

@@ -15,10 +15,14 @@ import { StorefrontView } from './components/StorefrontView';
 import { PageEditorView } from './components/PageEditorView';
 import { PaymentSettingsView } from './components/PaymentSettingsView';
 import { ConsultationsAdminView } from './components/ConsultationsAdminView';
+import { SeoManagementView } from './components/SeoManagementView';
 import {
   apiFetch,
   ensureFirebaseSeededOnBoot,
-  saveCloudStateToFirebase
+  saveCloudStateToFirebase,
+  hasAdminSession,
+  setAdminSessionToken,
+  clearAdminSessionToken
 } from './services/firebaseSync';
 import { 
   Product, 
@@ -34,7 +38,18 @@ import {
 } from './types';
 
 export default function App() {
-  const [viewMode, setViewMode] = useState<'admin' | 'storefront'>('storefront');
+  const [viewMode, setViewMode] = useState<'admin' | 'storefront'>(() => {
+    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')) {
+      return 'admin';
+    }
+    return 'storefront';
+  });
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(() => hasAdminSession());
+  const [adminLoginUser, setAdminLoginUser] = useState('');
+  const [adminLoginPass, setAdminLoginPass] = useState('');
+  const [adminLoginError, setAdminLoginError] = useState('');
+  const [isLoggingInAdmin, setIsLoggingInAdmin] = useState(false);
+
   const [activeTab, setActiveTab] = useState<NavItem>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -66,41 +81,39 @@ export default function App() {
     active: true,
   });
 
-  // Load all initial data
-  const fetchData = async () => {
+  // Load public storefront data + protected admin data (only when authenticated as admin)
+  const fetchData = async (forceAdminFetch = false) => {
     try {
-      const [
-        statsRes,
-        prodRes,
-        prodCatRes,
-        postRes,
-        postCatRes,
-        msgRes,
-        ordersRes,
-        botRes,
-        contentRes,
-      ] = await Promise.all([
-        apiFetch('/api/stats').then((r) => r.json()),
-        apiFetch('/api/products').then((r) => r.json()),
-        apiFetch('/api/product-categories').then((r) => r.json()),
-        apiFetch('/api/posts').then((r) => r.json()),
-        apiFetch('/api/post-categories').then((r) => r.json()),
-        apiFetch('/api/contact').then((r) => r.json()),
-        apiFetch('/api/orders').then((r) => r.json()),
-        apiFetch('/api/bot/config').then((r) => r.json()),
-        apiFetch('/api/site-content').then((r) => r.json()).catch(() => null),
+      const [prodRes, prodCatRes, postRes, postCatRes, contentRes] = await Promise.all([
+        apiFetch('/api/products').then((r) => (r.ok ? r.json() : [])),
+        apiFetch('/api/product-categories').then((r) => (r.ok ? r.json() : [])),
+        apiFetch('/api/posts').then((r) => (r.ok ? r.json() : [])),
+        apiFetch('/api/post-categories').then((r) => (r.ok ? r.json() : [])),
+        apiFetch('/api/site-content')
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null),
       ]);
 
-      if (statsRes) setStats(statsRes);
       if (Array.isArray(prodRes)) setProducts(prodRes);
       if (Array.isArray(prodCatRes)) setProductCategories(prodCatRes);
       if (Array.isArray(postRes)) setPosts(postRes);
       if (Array.isArray(postCatRes)) setPostCategories(postCatRes);
-      if (Array.isArray(msgRes)) setMessages(msgRes);
-      if (Array.isArray(ordersRes)) setOrders(ordersRes);
-      if (botRes?.config) setBotConfig(botRes.config);
-      if (Array.isArray(botRes?.logs)) setBotLogs(botRes.logs);
       if (contentRes) setSiteContent(contentRes);
+
+      if (forceAdminFetch || hasAdminSession()) {
+        const [statsRes, msgRes, ordersRes, botRes] = await Promise.all([
+          apiFetch('/api/stats').then((r) => (r.ok ? r.json() : null)),
+          apiFetch('/api/contact').then((r) => (r.ok ? r.json() : null)),
+          apiFetch('/api/orders').then((r) => (r.ok ? r.json() : null)),
+          apiFetch('/api/bot/config').then((r) => (r.ok ? r.json() : null)),
+        ]);
+
+        if (statsRes && !statsRes.error) setStats(statsRes);
+        if (Array.isArray(msgRes)) setMessages(msgRes);
+        if (Array.isArray(ordersRes)) setOrders(ordersRes);
+        if (botRes?.config) setBotConfig(botRes.config);
+        if (Array.isArray(botRes?.logs)) setBotLogs(botRes.logs);
+      }
     } catch (err) {
       console.error('Failed to load Onival data:', err);
     } finally {
@@ -113,10 +126,9 @@ export default function App() {
       try {
         // ۱. اجرای خودکار راه‌اندازی اولیه (Auto-Seed) روی دیتابیس فایربیس به محض لود شدن سایت
         const cloudInit = await ensureFirebaseSeededOnBoot();
-        if (cloudInit.state) {
-          // اگر دیتابیس فایربیس اطلاعاتی دارد، سرور محلی را هم با آن همگام کن
+        if (cloudInit.state && hasAdminSession()) {
           try {
-            await window.fetch('/api/firebase/import-state', {
+            await apiFetch('/api/firebase/import-state', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(cloudInit.state),
@@ -141,9 +153,11 @@ export default function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(prod),
     });
-    if (res.ok) {
-      await fetchData();
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'خطا در ثبت محصول');
     }
+    await fetchData();
   };
 
   const handleEditProduct = async (id: number, prod: Partial<Product>) => {
@@ -152,9 +166,11 @@ export default function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(prod),
     });
-    if (res.ok) {
-      await fetchData();
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'خطا در ویرایش محصول');
     }
+    await fetchData();
   };
 
   const handleDeleteProduct = async (id: number) => {
@@ -165,15 +181,30 @@ export default function App() {
   };
 
   // Handlers for Product Categories
-  const handleAddProductCategory = async (cat: { title: string; parentId?: number | null }) => {
+  const handleAddProductCategory = async (cat: Partial<ProductCategory>) => {
     const res = await apiFetch('/api/product-categories', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(cat),
     });
-    if (res.ok) {
-      await fetchData();
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'خطا در ثبت دسته‌بندی');
     }
+    await fetchData();
+  };
+
+  const handleEditProductCategory = async (id: number, cat: Partial<ProductCategory>) => {
+    const res = await apiFetch(`/api/product-categories/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cat),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'خطا در ویرایش دسته‌بندی');
+    }
+    await fetchData();
   };
 
   const handleDeleteProductCategory = async (id: number) => {
@@ -190,9 +221,11 @@ export default function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(post),
     });
-    if (res.ok) {
-      await fetchData();
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'خطا در ثبت مقاله');
     }
+    await fetchData();
   };
 
   const handleEditPost = async (id: number, post: Partial<Post>) => {
@@ -201,9 +234,11 @@ export default function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(post),
     });
-    if (res.ok) {
-      await fetchData();
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'خطا در ویرایش مقاله');
     }
+    await fetchData();
   };
 
   const handleDeletePost = async (id: number) => {
@@ -398,10 +433,54 @@ export default function App() {
         return 'تنظیمات صفحه پرداخت، شماره کارت و درگاه بانکی';
       case 'page-editor':
         return 'اصلاح صفحات، عناوین و چیدمان محتوا';
+      case 'seo':
+        return 'سئو تکنیکال، نقشه سایت، ریدایرکت ۳۰۱ و داده ساختاریافته (JSON-LD)';
       case 'bot':
         return 'مرکز فرماندهی ربات‌های بله و تلگرام و درگاه‌های ارتباطی پشتیبانی';
       case 'account':
         return 'امنیت و تنظیمات مدیر';
+    }
+  };
+
+  const switchToStorefront = () => {
+    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')) {
+      window.history.pushState({}, '', '/');
+    }
+    setViewMode('storefront');
+  };
+
+  const handleDirectAdminLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminLoginError('');
+    const u = adminLoginUser.trim();
+    const p = adminLoginPass.trim();
+    if (!u || !p) {
+      setAdminLoginError('لطفاً نام کاربری و رمز عبور مدیریت را وارد نمایید.');
+      return;
+    }
+    setIsLoggingInAdmin(true);
+    try {
+      const res = await apiFetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: u, password: p }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) {
+        if (data.token) {
+          setAdminSessionToken(data.token);
+        }
+        setIsAdminAuthenticated(true);
+        setAdminLoginUser('');
+        setAdminLoginPass('');
+        await fetchData(true);
+      } else {
+        setAdminLoginError(data.error || 'نام کاربری یا رمز عبور مدیریت اشتباه است.');
+      }
+    } catch {
+      setAdminLoginError('خطا در برقراری ارتباط با سرور احراز هویت.');
+    } finally {
+      setIsLoggingInAdmin(false);
     }
   };
 
@@ -414,13 +493,90 @@ export default function App() {
         messages={messages}
         siteContent={siteContent || undefined}
         onBackToAdmin={() => {
-          fetchData();
+          if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/admin')) {
+            window.history.pushState({}, '', '/admin');
+          }
+          setIsAdminAuthenticated(hasAdminSession());
+          fetchData(true);
           setViewMode('admin');
         }}
         onPlaceOrder={handlePlaceOrder}
         onSubmitContact={handleSubmitContact}
-        onOrderUpdated={fetchData}
+        onOrderUpdated={() => fetchData()}
       />
+    );
+  }
+
+  if (!isAdminAuthenticated) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4" dir="rtl">
+        <div className="bg-white rounded-3xl max-w-md w-full p-7 shadow-2xl border border-slate-100 text-center">
+          <div className="w-14 h-14 rounded-2xl bg-amber-500 text-white flex items-center justify-center mx-auto mb-4 font-black text-xl shadow-lg shadow-amber-500/25">
+            ONV
+          </div>
+          <h1 className="text-lg font-black text-slate-900">
+            احراز هویت پنل مدیریت ({siteContent?.brandName || 'اونیوال'})
+          </h1>
+          <p className="text-xs text-slate-500 mt-1 mb-5">
+            دسترسی به مسیر <code dir="ltr">/admin</code> نیازمند ورود با حساب رسمی مدیریت است.
+          </p>
+
+          <form onSubmit={handleDirectAdminLogin} className="space-y-4 text-right">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                نام کاربری یا ایمیل مدیریت
+              </label>
+              <input
+                type="text"
+                required
+                dir="ltr"
+                value={adminLoginUser}
+                onChange={(e) => setAdminLoginUser(e.target.value)}
+                placeholder="admin / admin@onival.com"
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-mono text-center focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                رمز عبور مدیریت
+              </label>
+              <input
+                type="password"
+                required
+                dir="ltr"
+                value={adminLoginPass}
+                onChange={(e) => setAdminLoginPass(e.target.value)}
+                placeholder="••••••••"
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-mono text-center focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+              />
+            </div>
+
+            {adminLoginError && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold text-center">
+                {adminLoginError}
+              </div>
+            )}
+
+            <div className="flex gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={switchToStorefront}
+                className="flex-1 py-2.5 border border-slate-200 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-50 cursor-pointer"
+              >
+                بازگشت به فروشگاه
+              </button>
+              <button
+                type="submit"
+                disabled={isLoggingInAdmin}
+                className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold shadow-md cursor-pointer disabled:opacity-50"
+              >
+                {isLoggingInAdmin ? 'در حال بررسی...' : 'ورود به پنل مدیریت'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
     );
   }
 
@@ -434,7 +590,7 @@ export default function App() {
         pendingOrdersCount={stats.pendingOrders}
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
-        onViewStorefront={() => setViewMode('storefront')}
+        onViewStorefront={switchToStorefront}
         brandName={siteContent?.brandName}
         brandEnglishName={siteContent?.brandEnglishName}
         siteLogo={siteContent?.siteLogo}
@@ -452,7 +608,7 @@ export default function App() {
           pendingOrdersCount={stats.pendingOrders}
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
-          onViewStorefront={() => setViewMode('storefront')}
+          onViewStorefront={switchToStorefront}
           onNavigate={(tab) => setActiveTab(tab)}
           orders={orders}
           messages={messages}
@@ -481,7 +637,7 @@ export default function App() {
                     onOpenAddProduct={() => setActiveTab('products')}
                     onOpenAddPost={() => setActiveTab('posts')}
                     onTestBot={() => handleSimulateBotEvent('test_notification')}
-                    onViewStorefront={() => setViewMode('storefront')}
+                    onViewStorefront={switchToStorefront}
                   />
                 )}
 
@@ -500,7 +656,7 @@ export default function App() {
                     products={products}
                     categories={productCategories}
                     onEditProduct={handleEditProduct}
-                    onViewStorefront={() => setViewMode('storefront')}
+                    onViewStorefront={switchToStorefront}
                   />
                 )}
 
@@ -508,6 +664,7 @@ export default function App() {
                   <ProductCategoriesView
                     categories={productCategories}
                     onAddCategory={handleAddProductCategory}
+                    onEditCategory={handleEditProductCategory}
                     onDeleteCategory={handleDeleteProductCategory}
                   />
                 )}
@@ -540,7 +697,7 @@ export default function App() {
                     onUpdateOrderStatus={handleUpdateOrderStatus}
                     onVerifyReceipt={handleVerifyReceipt}
                     onOpenPaymentSettings={() => setActiveTab('payment-settings')}
-                    onViewStorefront={() => setViewMode('storefront')}
+                    onViewStorefront={switchToStorefront}
                   />
                 )}
 
@@ -565,7 +722,7 @@ export default function App() {
                   <PaymentSettingsView
                     siteContent={siteContent}
                     onSave={handleSaveSiteContent}
-                    onPreviewStorefront={() => setViewMode('storefront')}
+                    onPreviewStorefront={switchToStorefront}
                     onNavigateOrders={() => setActiveTab('orders')}
                     pendingReceiptsCount={
                       orders.filter(
@@ -582,7 +739,18 @@ export default function App() {
                     siteContent={siteContent}
                     onSave={handleSaveSiteContent}
                     onReset={handleResetSiteContent}
-                    onPreviewStorefront={() => setViewMode('storefront')}
+                    onPreviewStorefront={switchToStorefront}
+                  />
+                )}
+
+                {activeTab === 'seo' && siteContent && (
+                  <SeoManagementView
+                    products={products}
+                    categories={productCategories}
+                    posts={posts}
+                    siteContent={siteContent}
+                    onSaveSiteContent={handleSaveSiteContent}
+                    onNavigateTab={setActiveTab}
                   />
                 )}
 

@@ -1,8 +1,18 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import cors from 'cors';
 import { createServer as createViteServer } from 'vite';
+import {
+  sanitizeSlug,
+  isSlugDuplicate,
+  resolveSiteOrigin,
+  resolveSeoForPath,
+  generateSitemapXml,
+  generateRobotsTxt
+} from './src/utils/seo';
+import { SlugRedirect } from './src/types';
 
 const app = express();
 const PORT = 3000;
@@ -761,6 +771,7 @@ const defaultSiteContent = {
 };
 
 let siteContent = JSON.parse(JSON.stringify(defaultSiteContent));
+let slugRedirects: SlugRedirect[] = [];
 
 // ================= PERSISTENT DISK STORAGE HELPERS =================
 function loadPersistedState() {
@@ -768,6 +779,21 @@ function loadPersistedState() {
     if (fs.existsSync(PERSIST_FILE_PATH)) {
       const raw = fs.readFileSync(PERSIST_FILE_PATH, 'utf-8');
       const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed.products) && parsed.products.length > 0) {
+        products = parsed.products;
+      }
+      if (Array.isArray(parsed.productCategories) && parsed.productCategories.length > 0) {
+        productCategories = parsed.productCategories;
+      }
+      if (Array.isArray(parsed.posts) && parsed.posts.length > 0) {
+        posts = parsed.posts;
+      }
+      if (Array.isArray(parsed.postCategories) && parsed.postCategories.length > 0) {
+        postCategories = parsed.postCategories;
+      }
+      if (Array.isArray(parsed.slugRedirects)) {
+        slugRedirects = parsed.slugRedirects;
+      }
       if (parsed.telegramConfig && typeof parsed.telegramConfig === 'object') {
         telegramConfig = { ...telegramConfig, ...parsed.telegramConfig };
       }
@@ -815,6 +841,11 @@ function loadPersistedState() {
 function savePersistedState() {
   try {
     const dataToSave = {
+      products,
+      productCategories,
+      posts,
+      postCategories,
+      slugRedirects,
       telegramConfig,
       siteContent,
       adminCredentials,
@@ -830,6 +861,74 @@ function savePersistedState() {
 }
 
 loadPersistedState();
+
+// ================= ADMIN AUTHENTICATION & AUTHORIZATION MIDDLEWARE =================
+const ADMIN_TOKEN_SECRET = process.env.ADMIN_TOKEN_SECRET || 'onival_admin_hmac_secret_2025_v1';
+
+function generateAdminSessionToken(username: string, password: string): string {
+  const payload = `${username.trim().toLowerCase()}:${password.trim()}`;
+  return crypto.createHmac('sha256', ADMIN_TOKEN_SECRET).update(payload).digest('hex');
+}
+
+function isRequestAdminAuthorized(req: Request): boolean {
+  const authHeader = req.headers.authorization || '';
+  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+  const headerToken = (req.headers['x-admin-token'] as string || '').trim();
+  const token = bearerToken || headerToken;
+  if (!token) return false;
+
+  const validUser = (adminCredentials.username || 'admin').trim().toLowerCase();
+  const validEmail = (adminCredentials.email || 'admin@onival.com').trim().toLowerCase();
+  const validPass = (adminCredentials.password || 'admin').trim();
+
+  const expectedPrimary = generateAdminSessionToken(validUser, validPass);
+  const expectedEmail = generateAdminSessionToken(validEmail, validPass);
+
+  return token === expectedPrimary || token === expectedEmail;
+}
+
+function requireAdminAuth(req: Request, res: Response, next: NextFunction) {
+  if (!isRequestAdminAuthorized(req)) {
+    return res.status(401).json({
+      ok: false,
+      error: 'دسترسی غیرمجاز (401 Unauthorized): برای انجام عملیات مدیریتی ابتدا باید وارد حساب ادمین شوید.'
+    });
+  }
+  next();
+}
+
+// Protect all administrative write/CRUD and private data routes
+app.use('/api', (req: Request, res: Response, next: NextFunction) => {
+  const p = req.path;
+  const m = req.method.toUpperCase();
+
+  // Public read endpoints needed by the storefront
+  if (m === 'GET' && (
+    p === '/products' ||
+    p.startsWith('/products/') ||
+    p === '/product-categories' ||
+    p === '/posts' ||
+    p === '/post-categories' ||
+    p === '/site-content' ||
+    p.startsWith('/orders/track/')
+  )) {
+    return next();
+  }
+
+  // Public customer actions (placing an order, uploading receipt, booking consultation, sending contact message, admin login)
+  if (m === 'POST' && (
+    p === '/admin/login' ||
+    p === '/orders' ||
+    p === '/contact' ||
+    p === '/consultations/book' ||
+    /^\/orders\/[^/]+\/(upload-receipt|confirm-bale-payment|confirm-gateway-payment)$/.test(p)
+  )) {
+    return next();
+  }
+
+  // Everything else under /api (admin CRUD for products, categories, posts, site-content PUT/reset, SEO redirects, orders list/status/verify, contact list/respond/delete, bot config, account profile/credentials, firebase state sync) requires valid admin authorization
+  return requireAdminAuth(req, res, next);
+});
 
 // ================= API ROUTES =================
 
@@ -850,19 +949,62 @@ app.get('/api/stats', (req: Request, res: Response) => {
 
 // Products
 app.get('/api/products', (req: Request, res: Response) => {
-  const activeProducts = products.filter(p => !p.isDelete);
+  const isAdmin = isRequestAdminAuthorized(req);
+  const activeProducts = products.filter(
+    (p: any) => !p.isDelete && (isAdmin || (p.status || 'published') === 'published')
+  );
   res.json(activeProducts);
 });
 
 app.get('/api/products/:id', (req: Request, res: Response) => {
-  const p = products.find(x => x.id === Number(req.params.id) && !x.isDelete);
+  const isAdmin = isRequestAdminAuthorized(req);
+  const p: any = products.find(
+    (x: any) =>
+      x.id === Number(req.params.id) &&
+      !x.isDelete &&
+      (isAdmin || (x.status || 'published') === 'published')
+  );
   if (!p) return res.status(404).json({ error: 'محصول مورد نظر یافت نشد' });
   res.json(p);
 });
 
 app.post('/api/products', (req: Request, res: Response) => {
-  const { title, price, hasSize, sizes, priceSmall, priceLarge, discount, type, features, categoryId, imageName, description, content } = req.body;
+  const {
+    title,
+    slug,
+    price,
+    hasSize,
+    sizes,
+    priceSmall,
+    priceLarge,
+    discount,
+    type,
+    features,
+    categoryId,
+    imageName,
+    imageAlt,
+    description,
+    content,
+    status,
+    availability,
+    sku,
+    seoTitle,
+    seoDescription,
+    ogTitle,
+    ogDescription,
+    ogImage,
+    canonicalUrl,
+    robotsNoIndex,
+    robotsNoFollow,
+    publishedAt
+  } = req.body;
   if (!title) return res.status(400).json({ error: 'عنوان محصول الزامی است' });
+
+  const nextId = products.length > 0 ? Math.max(...products.map(p => p.id)) + 1 : 1;
+  const candidateSlug = sanitizeSlug(slug || title, 'product', nextId);
+  if (isSlugDuplicate(products as any, candidateSlug)) {
+    return res.status(400).json({ error: `نامک (Slug) «${candidateSlug}» تکراری است و قبلاً برای محصول دیگری استفاده شده است.` });
+  }
 
   const cat = productCategories.find(c => c.id === Number(categoryId));
   const parsedSizes = Array.isArray(sizes) && sizes.length > 0
@@ -873,28 +1015,44 @@ app.post('/api/products', (req: Request, res: Response) => {
     ? parsedSizes[0].price
     : (Number(price) || 0);
 
-  const newProduct = {
-    id: products.length > 0 ? Math.max(...products.map(p => p.id)) + 1 : 1,
+  const nowIso = new Date().toISOString();
+  const newProduct: any = {
+    id: nextId,
     title,
-    slug: title.trim().toLowerCase().replace(/[\s\W-]+/g, '-'),
+    slug: candidateSlug,
     price: resolvedPrice,
     hasSize: Boolean(hasSize || (parsedSizes && parsedSizes.length > 0)),
     sizes: parsedSizes,
     priceSmall: parsedSizes && parsedSizes.length > 0 ? parsedSizes[0].price : (priceSmall ? Number(priceSmall) : undefined),
     priceLarge: parsedSizes && parsedSizes.length > 0 ? parsedSizes[parsedSizes.length - 1].price : (priceLarge ? Number(priceLarge) : undefined),
     discount: discount ? Number(discount) : 0,
-    type: type || 'honey',
+    type: cat?.slug || type || 'honey',
     features: Array.isArray(features) ? features : [],
     categoryId: Number(categoryId) || (productCategories[0]?.id ?? 1),
     categoryTitle: cat ? cat.title : 'عمومی',
     imageName: imageName || 'https://images.unsplash.com/photo-1587049359535-b64d3dd0d716?w=800&auto=format&fit=crop&q=80',
+    imageAlt: imageAlt || title,
     description: description || '',
     content: content || '',
     isDelete: false,
-    creationTime: new Date().toLocaleDateString('fa-IR')
+    creationTime: new Date().toLocaleDateString('fa-IR'),
+    publishedAt: publishedAt || nowIso,
+    updatedAt: nowIso,
+    status: status === 'draft' ? 'draft' : 'published',
+    availability: availability || 'InStock',
+    sku: sku || `ONV-PRD-${nextId}`,
+    seoTitle: seoTitle || '',
+    seoDescription: seoDescription || '',
+    ogTitle: ogTitle || '',
+    ogDescription: ogDescription || '',
+    ogImage: ogImage || '',
+    canonicalUrl: canonicalUrl || '',
+    robotsNoIndex: Boolean(robotsNoIndex),
+    robotsNoFollow: Boolean(robotsNoFollow)
   };
 
   products.push(newProduct);
+  savePersistedState();
   botActivityLogs.unshift({
     id: Date.now(),
     time: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
@@ -911,35 +1069,103 @@ app.put('/api/products/:id', (req: Request, res: Response) => {
   const index = products.findIndex(p => p.id === id);
   if (index === -1) return res.status(404).json({ error: 'محصول یافت نشد' });
 
-  const { title, price, hasSize, sizes, priceSmall, priceLarge, discount, type, features, categoryId, imageName, description, content } = req.body;
-  const cat = productCategories.find(c => c.id === Number(categoryId));
+  const existing: any = products[index];
+  const {
+    title,
+    slug,
+    price,
+    hasSize,
+    sizes,
+    priceSmall,
+    priceLarge,
+    discount,
+    type,
+    features,
+    categoryId,
+    imageName,
+    imageAlt,
+    description,
+    content,
+    status,
+    availability,
+    sku,
+    seoTitle,
+    seoDescription,
+    ogTitle,
+    ogDescription,
+    ogImage,
+    canonicalUrl,
+    robotsNoIndex,
+    robotsNoFollow
+  } = req.body;
+
+  const nextSlug = slug !== undefined && String(slug).trim() !== ''
+    ? sanitizeSlug(slug, 'product', id)
+    : existing.slug;
+
+  if (isSlugDuplicate(products as any, nextSlug, id)) {
+    return res.status(400).json({ error: `نامک (Slug) «${nextSlug}» تکراری است و قبلاً برای محصول دیگری استفاده شده است.` });
+  }
+
+  // Record 301 redirect if a published product slug changed
+  if (existing.slug && existing.slug !== nextSlug && (existing.status || 'published') === 'published') {
+    const fromPath = `/products/${existing.slug}`;
+    const toPath = `/products/${nextSlug}`;
+    slugRedirects = slugRedirects
+      .filter(r => r.fromPath !== fromPath && r.fromPath !== toPath)
+      .map(r => (r.toPath === fromPath ? { ...r, toPath } : r));
+    slugRedirects.push({
+      fromPath,
+      toPath,
+      entityType: 'product',
+      entityId: id,
+      createdAt: new Date().toISOString()
+    });
+  }
+
+  const cat = productCategories.find(c => c.id === Number(categoryId ?? existing.categoryId));
 
   const parsedSizes = Array.isArray(sizes)
     ? sizes.map((s: any) => ({ name: String(s.name || ''), price: Number(s.price) || 0 }))
-    : products[index].sizes;
+    : existing.sizes;
 
   const resolvedPrice = parsedSizes && parsedSizes.length > 0
     ? parsedSizes[0].price
-    : (price !== undefined ? Number(price) : products[index].price);
+    : (price !== undefined ? Number(price) : existing.price);
 
   products[index] = {
-    ...products[index],
-    title: title ?? products[index].title,
+    ...existing,
+    title: title ?? existing.title,
+    slug: nextSlug,
     price: resolvedPrice,
-    hasSize: hasSize !== undefined ? Boolean(hasSize) : products[index].hasSize,
+    hasSize: hasSize !== undefined ? Boolean(hasSize) : existing.hasSize,
     sizes: parsedSizes,
-    priceSmall: parsedSizes && parsedSizes.length > 0 ? parsedSizes[0].price : (priceSmall !== undefined ? Number(priceSmall) : products[index].priceSmall),
-    priceLarge: parsedSizes && parsedSizes.length > 0 ? parsedSizes[parsedSizes.length - 1].price : (priceLarge !== undefined ? Number(priceLarge) : products[index].priceLarge),
-    discount: discount !== undefined ? Number(discount) : products[index].discount,
-    type: type ?? products[index].type,
-    features: features !== undefined ? features : products[index].features,
-    categoryId: categoryId ? Number(categoryId) : products[index].categoryId,
-    categoryTitle: cat ? cat.title : products[index].categoryTitle,
-    imageName: imageName ?? products[index].imageName,
-    description: description ?? products[index].description,
-    content: content ?? products[index].content
-  };
+    priceSmall: parsedSizes && parsedSizes.length > 0 ? parsedSizes[0].price : (priceSmall !== undefined ? Number(priceSmall) : existing.priceSmall),
+    priceLarge: parsedSizes && parsedSizes.length > 0 ? parsedSizes[parsedSizes.length - 1].price : (priceLarge !== undefined ? Number(priceLarge) : existing.priceLarge),
+    discount: discount !== undefined ? Number(discount) : existing.discount,
+    type: cat?.slug ?? type ?? existing.type,
+    features: features !== undefined ? features : existing.features,
+    categoryId: categoryId ? Number(categoryId) : existing.categoryId,
+    categoryTitle: cat ? cat.title : existing.categoryTitle,
+    imageName: imageName ?? existing.imageName,
+    imageAlt: imageAlt ?? existing.imageAlt,
+    description: description ?? existing.description,
+    content: content ?? existing.content,
+    updatedAt: new Date().toISOString(),
+    status: status ?? existing.status ?? 'published',
+    availability: availability ?? existing.availability ?? 'InStock',
+    sku: sku ?? existing.sku,
+    seoTitle: seoTitle ?? existing.seoTitle,
+    seoDescription: seoDescription ?? existing.seoDescription,
+    ogTitle: ogTitle ?? existing.ogTitle,
+    ogDescription: ogDescription ?? existing.ogDescription,
+    ogImage: ogImage ?? existing.ogImage,
+    canonicalUrl: canonicalUrl ?? existing.canonicalUrl,
+    robotsNoIndex: robotsNoIndex !== undefined ? Boolean(robotsNoIndex) : existing.robotsNoIndex,
+    robotsNoFollow: robotsNoFollow !== undefined ? Boolean(robotsNoFollow) : existing.robotsNoFollow
+  } as any;
 
+  savePersistedState();
   res.json(products[index]);
 });
 
@@ -948,61 +1174,177 @@ app.delete('/api/products/:id', (req: Request, res: Response) => {
   const index = products.findIndex(p => p.id === id);
   if (index === -1) return res.status(404).json({ error: 'محصول یافت نشد' });
   products[index].isDelete = true;
+  savePersistedState();
   res.json({ message: 'محصول با موفقیت حذف شد' });
 });
 
 // Product Categories
 app.get('/api/product-categories', (req: Request, res: Response) => {
-  res.json(productCategories);
+  const isAdmin = isRequestAdminAuthorized(req);
+  const visibleCategories = productCategories.filter(
+    (c: any) => isAdmin || (c.status || 'published') === 'published'
+  );
+  res.json(visibleCategories);
 });
 
 app.post('/api/product-categories', (req: Request, res: Response) => {
-  const { title, parentId, sortOrder } = req.body;
+  const { title, slug, parentId, sortOrder, description, imageName, imageAlt, status, seoTitle, seoDescription, ogImage, robotsNoIndex } = req.body;
   if (!title) return res.status(400).json({ error: 'عنوان دسته‌بندی الزامی است' });
 
-  const newCat = {
-    id: productCategories.length > 0 ? Math.max(...productCategories.map(c => c.id)) + 1 : 1,
+  const nextId = productCategories.length > 0 ? Math.max(...productCategories.map(c => c.id)) + 1 : 1;
+  const candidateSlug = sanitizeSlug(slug || title, 'cat', nextId);
+  if (isSlugDuplicate(productCategories as any, candidateSlug)) {
+    return res.status(400).json({ error: `نامک (Slug) دسته‌بندی «${candidateSlug}» تکراری است.` });
+  }
+
+  const newCat: any = {
+    id: nextId,
     title,
-    slug: title.trim().toLowerCase().replace(/[\s\W-]+/g, '-'),
+    slug: candidateSlug,
     parentId: parentId ? Number(parentId) : null,
-    sortOrder: sortOrder ? Number(sortOrder) : productCategories.length + 1
+    sortOrder: sortOrder ? Number(sortOrder) : productCategories.length + 1,
+    description: description || '',
+    imageName: imageName || '',
+    imageAlt: imageAlt || title,
+    status: status === 'draft' ? 'draft' : 'published',
+    updatedAt: new Date().toISOString(),
+    seoTitle: seoTitle || '',
+    seoDescription: seoDescription || '',
+    ogImage: ogImage || '',
+    robotsNoIndex: Boolean(robotsNoIndex)
   };
 
   productCategories.push(newCat);
+  savePersistedState();
   res.status(201).json(newCat);
+});
+
+app.put('/api/product-categories/:id', (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  const index = productCategories.findIndex(c => c.id === id);
+  if (index === -1) return res.status(404).json({ error: 'دسته‌بندی یافت نشد' });
+
+  const existing: any = productCategories[index];
+  const { title, slug, parentId, sortOrder, description, imageName, imageAlt, status, seoTitle, seoDescription, ogImage, robotsNoIndex } = req.body;
+  const nextSlug = slug !== undefined && String(slug).trim() !== ''
+    ? sanitizeSlug(slug, 'cat', id)
+    : existing.slug;
+
+  if (isSlugDuplicate(productCategories as any, nextSlug, id)) {
+    return res.status(400).json({ error: `نامک (Slug) دسته‌بندی «${nextSlug}» تکراری است.` });
+  }
+
+  if (existing.slug && existing.slug !== nextSlug && (existing.status || 'published') === 'published') {
+    const fromPath = `/categories/${existing.slug}`;
+    const toPath = `/categories/${nextSlug}`;
+    slugRedirects = slugRedirects
+      .filter(r => r.fromPath !== fromPath && r.fromPath !== toPath)
+      .map(r => (r.toPath === fromPath ? { ...r, toPath } : r));
+    slugRedirects.push({
+      fromPath,
+      toPath,
+      entityType: 'category',
+      entityId: id,
+      createdAt: new Date().toISOString()
+    });
+  }
+
+  productCategories[index] = {
+    ...existing,
+    title: title ?? existing.title,
+    slug: nextSlug,
+    parentId: parentId !== undefined ? (parentId ? Number(parentId) : null) : existing.parentId,
+    sortOrder: sortOrder !== undefined ? Number(sortOrder) : existing.sortOrder,
+    description: description ?? existing.description,
+    imageName: imageName ?? existing.imageName,
+    imageAlt: imageAlt ?? existing.imageAlt,
+    status: status ?? existing.status ?? 'published',
+    updatedAt: new Date().toISOString(),
+    seoTitle: seoTitle ?? existing.seoTitle,
+    seoDescription: seoDescription ?? existing.seoDescription,
+    ogImage: ogImage ?? existing.ogImage,
+    robotsNoIndex: robotsNoIndex !== undefined ? Boolean(robotsNoIndex) : existing.robotsNoIndex
+  } as any;
+
+  savePersistedState();
+  res.json(productCategories[index]);
 });
 
 app.delete('/api/product-categories/:id', (req: Request, res: Response) => {
   const id = Number(req.params.id);
   productCategories = productCategories.filter(c => c.id !== id);
+  savePersistedState();
   res.json({ message: 'دسته‌بندی با موفقیت حذف شد' });
 });
 
 // Posts / Articles
 app.get('/api/posts', (req: Request, res: Response) => {
-  res.json(posts);
+  const isAdmin = isRequestAdminAuthorized(req);
+  const visiblePosts = posts.filter(
+    (p: any) => isAdmin || (p.status || 'published') === 'published'
+  );
+  res.json(visiblePosts);
 });
 
 app.post('/api/posts', (req: Request, res: Response) => {
-  const { title, categoryId, description, content, imageName } = req.body;
+  const {
+    title,
+    slug,
+    categoryId,
+    description,
+    content,
+    imageName,
+    imageAlt,
+    authorName,
+    status,
+    publishedAt,
+    seoTitle,
+    seoDescription,
+    ogTitle,
+    ogDescription,
+    ogImage,
+    canonicalUrl,
+    robotsNoIndex,
+    robotsNoFollow
+  } = req.body;
   if (!title) return res.status(400).json({ error: 'عنوان مقاله الزامی است' });
 
+  const nextId = posts.length > 0 ? Math.max(...posts.map(p => p.id)) + 1 : 1;
+  const candidateSlug = sanitizeSlug(slug || title, 'article', nextId);
+  if (isSlugDuplicate(posts as any, candidateSlug)) {
+    return res.status(400).json({ error: `نامک (Slug) مقاله «${candidateSlug}» تکراری است.` });
+  }
+
   const cat = postCategories.find(c => c.id === Number(categoryId));
-  const newPost = {
-    id: posts.length > 0 ? Math.max(...posts.map(p => p.id)) + 1 : 1,
+  const nowIso = new Date().toISOString();
+  const newPost: any = {
+    id: nextId,
     title,
-    slug: title.trim().toLowerCase().replace(/[\s\W-]+/g, '-'),
+    slug: candidateSlug,
     categoryId: Number(categoryId) || (postCategories[0]?.id ?? 1),
     categoryTitle: cat ? cat.title : 'عمومی',
     description: description || '',
     content: content || '',
     imageName: imageName || 'https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=800&auto=format&fit=crop&q=80',
+    imageAlt: imageAlt || title,
     viewCount: 0,
-    authorName: 'مدیریت انیوال',
-    creationTime: new Date().toLocaleDateString('fa-IR')
+    authorName: authorName || 'تحریریه اونیوال',
+    creationTime: new Date().toLocaleDateString('fa-IR'),
+    publishedAt: publishedAt || nowIso,
+    updatedAt: nowIso,
+    status: status === 'draft' ? 'draft' : 'published',
+    seoTitle: seoTitle || '',
+    seoDescription: seoDescription || '',
+    ogTitle: ogTitle || '',
+    ogDescription: ogDescription || '',
+    ogImage: ogImage || '',
+    canonicalUrl: canonicalUrl || '',
+    robotsNoIndex: Boolean(robotsNoIndex),
+    robotsNoFollow: Boolean(robotsNoFollow)
   };
 
   posts.push(newPost);
+  savePersistedState();
   res.status(201).json(newPost);
 });
 
@@ -1011,25 +1353,83 @@ app.put('/api/posts/:id', (req: Request, res: Response) => {
   const index = posts.findIndex(p => p.id === id);
   if (index === -1) return res.status(404).json({ error: 'مقاله یافت نشد' });
 
-  const { title, categoryId, description, content, imageName } = req.body;
-  const cat = postCategories.find(c => c.id === Number(categoryId));
+  const existing: any = posts[index];
+  const {
+    title,
+    slug,
+    categoryId,
+    description,
+    content,
+    imageName,
+    imageAlt,
+    authorName,
+    status,
+    seoTitle,
+    seoDescription,
+    ogTitle,
+    ogDescription,
+    ogImage,
+    canonicalUrl,
+    robotsNoIndex,
+    robotsNoFollow
+  } = req.body;
+
+  const nextSlug = slug !== undefined && String(slug).trim() !== ''
+    ? sanitizeSlug(slug, 'article', id)
+    : existing.slug;
+
+  if (isSlugDuplicate(posts as any, nextSlug, id)) {
+    return res.status(400).json({ error: `نامک (Slug) مقاله «${nextSlug}» تکراری است.` });
+  }
+
+  if (existing.slug && existing.slug !== nextSlug && (existing.status || 'published') === 'published') {
+    const fromPath = `/articles/${existing.slug}`;
+    const toPath = `/articles/${nextSlug}`;
+    slugRedirects = slugRedirects
+      .filter(r => r.fromPath !== fromPath && r.fromPath !== toPath)
+      .map(r => (r.toPath === fromPath ? { ...r, toPath } : r));
+    slugRedirects.push({
+      fromPath,
+      toPath,
+      entityType: 'article',
+      entityId: id,
+      createdAt: new Date().toISOString()
+    });
+  }
+
+  const cat = postCategories.find(c => c.id === Number(categoryId ?? existing.categoryId));
 
   posts[index] = {
-    ...posts[index],
-    title: title ?? posts[index].title,
-    categoryId: categoryId ? Number(categoryId) : posts[index].categoryId,
-    categoryTitle: cat ? cat.title : posts[index].categoryTitle,
-    description: description ?? posts[index].description,
-    content: content ?? posts[index].content,
-    imageName: imageName ?? posts[index].imageName
-  };
+    ...existing,
+    title: title ?? existing.title,
+    slug: nextSlug,
+    categoryId: categoryId ? Number(categoryId) : existing.categoryId,
+    categoryTitle: cat ? cat.title : existing.categoryTitle,
+    description: description ?? existing.description,
+    content: content ?? existing.content,
+    imageName: imageName ?? existing.imageName,
+    imageAlt: imageAlt ?? existing.imageAlt,
+    authorName: authorName ?? existing.authorName,
+    updatedAt: new Date().toISOString(),
+    status: status ?? existing.status ?? 'published',
+    seoTitle: seoTitle ?? existing.seoTitle,
+    seoDescription: seoDescription ?? existing.seoDescription,
+    ogTitle: ogTitle ?? existing.ogTitle,
+    ogDescription: ogDescription ?? existing.ogDescription,
+    ogImage: ogImage ?? existing.ogImage,
+    canonicalUrl: canonicalUrl ?? existing.canonicalUrl,
+    robotsNoIndex: robotsNoIndex !== undefined ? Boolean(robotsNoIndex) : existing.robotsNoIndex,
+    robotsNoFollow: robotsNoFollow !== undefined ? Boolean(robotsNoFollow) : existing.robotsNoFollow
+  } as any;
 
+  savePersistedState();
   res.json(posts[index]);
 });
 
 app.delete('/api/posts/:id', (req: Request, res: Response) => {
   const id = Number(req.params.id);
   posts = posts.filter(p => p.id !== id);
+  savePersistedState();
   res.json({ message: 'مقاله با موفقیت حذف شد' });
 });
 
@@ -1039,23 +1439,62 @@ app.get('/api/post-categories', (req: Request, res: Response) => {
 });
 
 app.post('/api/post-categories', (req: Request, res: Response) => {
-  const { title, parentId } = req.body;
+  const { title, slug, parentId, description, status, seoTitle, seoDescription, robotsNoIndex } = req.body;
   if (!title) return res.status(400).json({ error: 'عنوان دسته‌بندی مقاله الزامی است' });
 
-  const newCat = {
-    id: postCategories.length > 0 ? Math.max(...postCategories.map(c => c.id)) + 1 : 1,
+  const nextId = postCategories.length > 0 ? Math.max(...postCategories.map(c => c.id)) + 1 : 1;
+  const candidateSlug = sanitizeSlug(slug || title, 'post-cat', nextId);
+
+  const newCat: any = {
+    id: nextId,
     title,
-    slug: title.trim().toLowerCase().replace(/[\s\W-]+/g, '-'),
-    parentId: parentId ? Number(parentId) : null
+    slug: candidateSlug,
+    parentId: parentId ? Number(parentId) : null,
+    description: description || '',
+    status: status === 'draft' ? 'draft' : 'published',
+    updatedAt: new Date().toISOString(),
+    seoTitle: seoTitle || '',
+    seoDescription: seoDescription || '',
+    robotsNoIndex: Boolean(robotsNoIndex)
   };
 
   postCategories.push(newCat);
+  savePersistedState();
   res.status(201).json(newCat);
+});
+
+app.put('/api/post-categories/:id', (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  const index = postCategories.findIndex(c => c.id === id);
+  if (index === -1) return res.status(404).json({ error: 'دسته‌بندی مقاله یافت نشد' });
+
+  const existing: any = postCategories[index];
+  const { title, slug, parentId, description, status, seoTitle, seoDescription, robotsNoIndex } = req.body;
+  const nextSlug = slug !== undefined && String(slug).trim() !== ''
+    ? sanitizeSlug(slug, 'post-cat', id)
+    : existing.slug;
+
+  postCategories[index] = {
+    ...existing,
+    title: title ?? existing.title,
+    slug: nextSlug,
+    parentId: parentId !== undefined ? (parentId ? Number(parentId) : null) : existing.parentId,
+    description: description ?? existing.description,
+    status: status ?? existing.status ?? 'published',
+    updatedAt: new Date().toISOString(),
+    seoTitle: seoTitle ?? existing.seoTitle,
+    seoDescription: seoDescription ?? existing.seoDescription,
+    robotsNoIndex: robotsNoIndex !== undefined ? Boolean(robotsNoIndex) : existing.robotsNoIndex
+  } as any;
+
+  savePersistedState();
+  res.json(postCategories[index]);
 });
 
 app.delete('/api/post-categories/:id', (req: Request, res: Response) => {
   const id = Number(req.params.id);
   postCategories = postCategories.filter(c => c.id !== id);
+  savePersistedState();
   res.json({ message: 'دسته‌بندی مقاله حذف شد' });
 });
 
@@ -2233,9 +2672,11 @@ app.post('/api/admin/login', (req: Request, res: Response) => {
   }
 
   if (isUserMatch && isPassMatch) {
+    const token = generateAdminSessionToken(validUser, validPass);
     return res.json({
       ok: true,
       success: true,
+      token,
       profile: {
         username: adminCredentials.username,
         email: adminCredentials.email,
@@ -2293,9 +2734,15 @@ app.post('/api/account/change-credentials', (req: Request, res: Response) => {
 
   savePersistedState();
 
+  const updatedToken = generateAdminSessionToken(
+    (adminCredentials.username || 'admin').trim().toLowerCase(),
+    (adminCredentials.password || 'admin').trim()
+  );
+
   res.json({
     ok: true,
     success: true,
+    token: updatedToken,
     profile: {
       username: adminCredentials.username,
       email: adminCredentials.email,
@@ -2338,6 +2785,10 @@ app.put('/api/site-content', (req: Request, res: Response) => {
     paymentConfig: {
       ...siteContent.paymentConfig,
       ...(incoming.paymentConfig || {})
+    },
+    seoConfig: {
+      ...(siteContent.seoConfig || {}),
+      ...(incoming.seoConfig || {})
     },
     consultationConfig: {
       ...siteContent.consultationConfig,
@@ -2387,6 +2838,22 @@ app.post('/api/site-content/reset', (req: Request, res: Response) => {
   res.json({ success: true, siteContent, message: 'محتوا و چیدمان صفحات به حالت پیش‌فرض بازگردانی شد.' });
 });
 
+// ================= SEO REDIRECTS & DIAGNOSTICS API =================
+app.get('/api/seo/redirects', (req: Request, res: Response) => {
+  res.json(slugRedirects);
+});
+
+app.delete('/api/seo/redirects', (req: Request, res: Response) => {
+  const { fromPath } = req.body || {};
+  if (fromPath) {
+    slugRedirects = slugRedirects.filter((r) => r.fromPath !== fromPath);
+  } else {
+    slugRedirects = [];
+  }
+  savePersistedState();
+  res.json({ ok: true, slugRedirects });
+});
+
 // ================= FIREBASE CLOUD SYNC & SEED ENDPOINTS =================
 app.get('/api/firebase/export-state', (req: Request, res: Response) => {
   res.json({
@@ -2399,7 +2866,8 @@ app.get('/api/firebase/export-state', (req: Request, res: Response) => {
     telegramConfig,
     botActivityLogs,
     siteContent,
-    adminCredentials
+    adminCredentials,
+    slugRedirects
   });
 });
 
@@ -2438,24 +2906,190 @@ app.post('/api/firebase/import-state', (req: Request, res: Response) => {
   if (incoming.adminCredentials && typeof incoming.adminCredentials === 'object') {
     adminCredentials = { ...adminCredentials, ...incoming.adminCredentials };
   }
+  if (Array.isArray(incoming.slugRedirects)) {
+    slugRedirects = incoming.slugRedirects;
+  }
   savePersistedState();
   res.json({ ok: true, message: 'دیتابیس سرور با موفقیت از Firebase Firestore همگام‌سازی شد.' });
 });
 
-// ================= VITE / SPA SERVER SETUP =================
+// ================= TECHNICAL SEO: ROBOTS.TXT & SITEMAP.XML =================
+function getRequestOrigin(req: Request): string {
+  const envOrigin = process.env.APP_URL?.trim();
+  const proto = (req.headers['x-forwarded-proto'] as string)?.split(',')[0]?.trim() || req.protocol || 'http';
+  const host = (req.headers['x-forwarded-host'] as string)?.split(',')[0]?.trim() || req.get('host') || `localhost:${PORT}`;
+  const reqOrigin = `${proto}://${host}`;
+  return resolveSiteOrigin(siteContent, envOrigin || reqOrigin);
+}
+
+app.get('/robots.txt', (req: Request, res: Response) => {
+  const origin = getRequestOrigin(req);
+  res
+    .status(200)
+    .set('Content-Type', 'text/plain; charset=utf-8')
+    .set('Cache-Control', 'public, max-age=3600')
+    .send(generateRobotsTxt(origin));
+});
+
+app.get('/sitemap.xml', (req: Request, res: Response) => {
+  const origin = getRequestOrigin(req);
+  const xml = generateSitemapXml(origin, {
+    products,
+    productCategories,
+    posts,
+    siteContent,
+  });
+  res
+    .status(200)
+    .set('Content-Type', 'application/xml; charset=utf-8')
+    .set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300')
+    .send(xml);
+});
+
+// Return genuine 404 JSON for unknown /api/* routes
+app.all('/api/*', (req: Request, res: Response) => {
+  res.status(404).json({ error: `مسیر API یافت نشد: ${req.path}` });
+});
+
+function escapeHtmlAttr(str: string): string {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function injectSsrSeoIntoHtml(rawHtml: string, seo: ReturnType<typeof resolveSeoForPath>): string {
+  const headHtml = `
+    <title>${escapeHtmlAttr(seo.title)}</title>
+    <meta name="description" content="${escapeHtmlAttr(seo.description)}" />
+    <meta name="robots" content="${escapeHtmlAttr(seo.robots)}" />
+    <link rel="canonical" href="${escapeHtmlAttr(seo.canonicalUrl)}" />
+    <meta property="og:type" content="${escapeHtmlAttr(seo.ogType)}" />
+    <meta property="og:locale" content="fa_IR" />
+    <meta property="og:site_name" content="${escapeHtmlAttr(siteContent?.brandName || 'اونیوال | ONIVAL')}" />
+    <meta property="og:title" content="${escapeHtmlAttr(seo.ogTitle)}" />
+    <meta property="og:description" content="${escapeHtmlAttr(seo.ogDescription)}" />
+    <meta property="og:url" content="${escapeHtmlAttr(seo.canonicalUrl)}" />
+    ${seo.ogImage ? `<meta property="og:image" content="${escapeHtmlAttr(seo.ogImage)}" />` : ''}
+    ${seo.ogImageAlt ? `<meta property="og:image:alt" content="${escapeHtmlAttr(seo.ogImageAlt)}" />` : ''}
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="${escapeHtmlAttr(seo.ogTitle)}" />
+    <meta name="twitter:description" content="${escapeHtmlAttr(seo.ogDescription)}" />
+    ${seo.ogImage ? `<meta name="twitter:image" content="${escapeHtmlAttr(seo.ogImage)}" />` : ''}
+    <script id="onival-jsonld" type="application/ld+json">${JSON.stringify(seo.jsonLd)}</script>
+  `;
+
+  let html = rawHtml.replace(
+    /<!--SEO_HEAD_START-->[\s\S]*?<!--SEO_HEAD_END-->/,
+    `<!--SEO_HEAD_START-->${headHtml}<!--SEO_HEAD_END-->`
+  );
+
+  html = html.replace(
+    /<!--SEO_BODY_START-->[\s\S]*?<!--SEO_BODY_END-->/,
+    `<!--SEO_BODY_START-->${seo.semanticHtml || ''}<!--SEO_BODY_END-->`
+  );
+
+  return html;
+}
+
+// ================= VITE / SPA + DYNAMIC SSR SEO SERVER SETUP =================
 
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
-      appType: 'spa',
+      appType: 'custom',
     });
+
+    // Serve Vite static assets & HMR / module requests first
     app.use(vite.middlewares);
+
+    // Catch-all HTML route with SSR SEO & HTTP status codes (200 / 301 / 404)
+    app.use('*', async (req: Request, res: Response, next) => {
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        return next();
+      }
+      const pathname = (req.originalUrl || req.url || '/').split('?')[0] || '/';
+      // Skip asset requests that slipped through
+      if (/\.(js|ts|tsx|css|png|jpg|jpeg|gif|svg|ico|webp|woff|woff2|ttf|map|json)$/i.test(pathname)) {
+        return res.status(404).end();
+      }
+
+      try {
+        const origin = getRequestOrigin(req);
+        const seo = resolveSeoForPath(pathname, origin, {
+          products,
+          productCategories,
+          posts,
+          postCategories,
+          siteContent,
+          slugRedirects,
+        });
+
+        if (seo.status === 301 && seo.redirectTo) {
+          return res.redirect(301, seo.redirectTo);
+        }
+
+        const templatePath = path.join(process.cwd(), 'index.html');
+        const rawTemplate = fs.readFileSync(templatePath, 'utf-8');
+        const transformed = await vite.transformIndexHtml(req.originalUrl, rawTemplate);
+        const finalHtml = injectSsrSeoIntoHtml(transformed, seo);
+
+        return res
+          .status(seo.status)
+          .set('Content-Type', 'text/html; charset=utf-8')
+          .set('X-Robots-Tag', seo.robots)
+          .set(
+            'Cache-Control',
+            seo.routeType === 'admin' || seo.routeType === 'checkout' || seo.routeType === 'tracking'
+              ? 'private, no-store'
+              : 'public, max-age=0, must-revalidate'
+          )
+          .send(finalHtml);
+      } catch (err) {
+        next(err);
+      }
+    });
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+    app.use(express.static(distPath, { index: false, maxAge: '7d' }));
+
+    app.get('*', (req: Request, res: Response) => {
+      const pathname = (req.originalUrl || req.path || '/').split('?')[0] || '/';
+      if (/\.(js|css|png|jpg|jpeg|gif|svg|ico|webp|woff|woff2|ttf|map)$/i.test(pathname)) {
+        return res.status(404).end();
+      }
+
+      const origin = getRequestOrigin(req);
+      const seo = resolveSeoForPath(pathname, origin, {
+        products,
+        productCategories,
+        posts,
+        postCategories,
+        siteContent,
+        slugRedirects,
+      });
+
+      if (seo.status === 301 && seo.redirectTo) {
+        return res.redirect(301, seo.redirectTo);
+      }
+
+      const indexHtmlPath = path.join(distPath, 'index.html');
+      const rawHtml = fs.readFileSync(indexHtmlPath, 'utf-8');
+      const finalHtml = injectSsrSeoIntoHtml(rawHtml, seo);
+
+      return res
+        .status(seo.status)
+        .set('Content-Type', 'text/html; charset=utf-8')
+        .set('X-Robots-Tag', seo.robots)
+        .set(
+          'Cache-Control',
+          seo.routeType === 'admin' || seo.routeType === 'checkout' || seo.routeType === 'tracking'
+            ? 'private, no-store'
+            : 'public, max-age=0, must-revalidate'
+        )
+        .send(finalHtml);
     });
   }
 

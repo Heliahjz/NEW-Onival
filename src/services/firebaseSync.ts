@@ -1,5 +1,6 @@
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db, auth } from '../firebaseConfig';
+import { sanitizeSlug, isSlugDuplicate } from '../utils/seo';
 import {
   FullOnivalCloudState,
   createInitialSeedState,
@@ -71,11 +72,42 @@ export function handleFirestoreError(
 }
 
 const LOCAL_BACKUP_KEY = 'onival_full_cloud_state_v1';
+const ADMIN_SESSION_STORAGE_KEY = 'onival_admin_session_token_v1';
 const MAIN_DOC_PATH = 'onival_store/main_state';
 const ADMIN_DOC_PATH = 'admin_accounts/primary_admin';
 
 let memoryCache: FullOnivalCloudState | null = null;
 let isFetchSetupDone = false;
+
+export function getAdminSessionToken(): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    return window.sessionStorage.getItem(ADMIN_SESSION_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+export function setAdminSessionToken(token: string) {
+  if (typeof window === 'undefined') return;
+  try {
+    if (token) {
+      window.sessionStorage.setItem(ADMIN_SESSION_STORAGE_KEY, token);
+    } else {
+      window.sessionStorage.removeItem(ADMIN_SESSION_STORAGE_KEY);
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function clearAdminSessionToken() {
+  setAdminSessionToken('');
+}
+
+export function hasAdminSession(): boolean {
+  return Boolean(getAdminSessionToken());
+}
 
 function normalizeState(partial?: Partial<FullOnivalCloudState> | null): FullOnivalCloudState {
   const seed = createInitialSeedState();
@@ -126,6 +158,7 @@ function normalizeState(partial?: Partial<FullOnivalCloudState> | null): FullOni
       ...DEFAULT_ADMIN_CREDENTIALS,
       ...(partial.adminCredentials || {}),
     },
+    slugRedirects: Array.isArray(partial.slugRedirects) ? partial.slugRedirects : [],
   };
 }
 
@@ -159,20 +192,13 @@ export async function saveCloudStateToFirebase(state: FullOnivalCloudState): Pro
   writeLocalBackup(normalized);
 
   try {
-    const payloadJson = JSON.stringify(normalized);
+    // Strip sensitive adminCredentials before writing to public Firestore document
+    const { adminCredentials: _omitCreds, ...publicCloudState } = normalized;
+    const payloadJson = JSON.stringify(publicCloudState);
     await setDoc(doc(db, 'onival_store', 'main_state'), {
       updatedAt: new Date().toISOString(),
       version: 1,
       payloadJson: payloadJson.slice(0, 940000),
-    });
-
-    // همگام‌سازی کالکشن حساب ادمین در فایربیس برای مشاهده مستقیم در کنسول فایربیس
-    await setDoc(doc(db, 'admin_accounts', 'primary_admin'), {
-      username: normalized.adminCredentials.username || 'admin',
-      email: normalized.adminCredentials.email || 'admin@onival.com',
-      password: normalized.adminCredentials.password || 'admin',
-      name: normalized.adminCredentials.name || 'مدیریت اونیوال (ONIVAL Admin)',
-      updatedAt: new Date().toISOString(),
     });
 
     // همگام‌سازی کالکشن محصولات در فایربیس برای مشاهده مستقیم در کنسول فایربیس
@@ -218,8 +244,8 @@ export async function ensureFirebaseSeededOnBoot(): Promise<{
           ? parsed.products.filter((p) => !p.isDelete)
           : [];
 
-        // اگر دیتابیس در فایربیس وجود دارد اما خالی از محصول یا فاقد اکانت ادمین است، آن را Seed کن
-        if (activeProds.length === 0 || !parsed.adminCredentials?.password) {
+        // اگر دیتابیس در فایربیس وجود دارد اما خالی از محصول است، آن را Seed کن
+        if (activeProds.length === 0) {
           const seeded = normalizeState(parsed);
           await saveCloudStateToFirebase(seeded);
           return { state: seeded, wasSeededNow: true, source: 'seeded' };
@@ -351,9 +377,46 @@ let originalFetch: typeof window.fetch;
 async function handleFirebaseServerlessApi(
   urlPath: string,
   method: string,
-  bodyObj: any
+  bodyObj: any,
+  authToken?: string
 ): Promise<Response> {
   const state = getCachedCloudState();
+
+  const isPublicGet =
+    method === 'GET' &&
+    (urlPath === '/api/products' ||
+      urlPath.startsWith('/api/products/') ||
+      urlPath === '/api/product-categories' ||
+      urlPath === '/api/posts' ||
+      urlPath === '/api/post-categories' ||
+      urlPath === '/api/site-content' ||
+      urlPath.startsWith('/api/orders/track/'));
+
+  const isPublicPost =
+    method === 'POST' &&
+    (urlPath === '/api/admin/login' ||
+      urlPath === '/api/orders' ||
+      urlPath === '/api/contact' ||
+      urlPath === '/api/consultations/book' ||
+      /^\/api\/orders\/[^/]+\/(upload-receipt|confirm-bale-payment|confirm-gateway-payment)$/.test(
+        urlPath
+      ));
+
+  if (!isPublicGet && !isPublicPost) {
+    const activeToken = authToken || getAdminSessionToken();
+    if (!activeToken) {
+      return jsonResponse(
+        {
+          ok: false,
+          error:
+            'دسترسی غیرمجاز (401 Unauthorized): برای انجام عملیات مدیریتی ابتدا وارد حساب ادمین شوید.',
+        },
+        401
+      );
+    }
+  }
+
+  const isAdminCaller = Boolean(authToken || getAdminSessionToken());
 
   // 1. GET /api/stats
   if (urlPath === '/api/stats' && method === 'GET') {
@@ -362,16 +425,25 @@ async function handleFirebaseServerlessApi(
 
   // 2. Products CRUD
   if (urlPath === '/api/products' && method === 'GET') {
-    return jsonResponse(state.products.filter((p) => !p.isDelete));
+    return jsonResponse(
+      state.products.filter(
+        (p) => !p.isDelete && (isAdminCaller || (p.status || 'published') === 'published')
+      )
+    );
   }
   if (urlPath === '/api/products' && method === 'POST') {
     const newId =
       state.products.reduce((max, p) => Math.max(max, Number(p.id) || 0), 0) + 1;
     const cat = state.productCategories.find((c) => c.id === Number(bodyObj.categoryId));
+    const candidateSlug = sanitizeSlug(bodyObj.slug || bodyObj.title, 'product', newId);
+    if (isSlugDuplicate(state.products, candidateSlug)) {
+      return jsonResponse({ error: `نامک (Slug) «${candidateSlug}» تکراری است و قبلاً برای محصول دیگری استفاده شده است.` }, 400);
+    }
+    const nowIso = new Date().toISOString();
     const created = {
       id: newId,
       title: bodyObj.title || 'محصول جدید',
-      slug: bodyObj.slug || `product-${newId}`,
+      slug: candidateSlug,
       price: Number(bodyObj.price) || 0,
       hasSize: Boolean(bodyObj.hasSize),
       sizes: Array.isArray(bodyObj.sizes) ? bodyObj.sizes : [],
@@ -384,11 +456,25 @@ async function handleFirebaseServerlessApi(
       imageName:
         bodyObj.imageName ||
         'https://images.unsplash.com/photo-1587049359535-b64d3dd0d716?w=800&auto=format&fit=crop&q=80',
+      imageAlt: bodyObj.imageAlt || bodyObj.title || '',
       description: bodyObj.description || '',
       content: bodyObj.content || '',
       features: Array.isArray(bodyObj.features) ? bodyObj.features : [],
       isDelete: false,
       creationTime: new Date().toLocaleDateString('fa-IR'),
+      publishedAt: bodyObj.publishedAt || nowIso,
+      updatedAt: nowIso,
+      status: bodyObj.status === 'draft' ? ('draft' as const) : ('published' as const),
+      availability: bodyObj.availability || ('InStock' as const),
+      sku: bodyObj.sku || `ONV-PRD-${newId}`,
+      seoTitle: bodyObj.seoTitle || '',
+      seoDescription: bodyObj.seoDescription || '',
+      ogTitle: bodyObj.ogTitle || '',
+      ogDescription: bodyObj.ogDescription || '',
+      ogImage: bodyObj.ogImage || '',
+      canonicalUrl: bodyObj.canonicalUrl || '',
+      robotsNoIndex: Boolean(bodyObj.robotsNoIndex),
+      robotsNoFollow: Boolean(bodyObj.robotsNoFollow),
     };
     state.products.unshift(created);
     await saveCloudStateToFirebase(state);
@@ -400,15 +486,39 @@ async function handleFirebaseServerlessApi(
     if (method === 'PUT') {
       const idx = state.products.findIndex((p) => Number(p.id) === id);
       if (idx !== -1) {
+        const existing = state.products[idx];
+        const nextSlug = bodyObj.slug
+          ? sanitizeSlug(bodyObj.slug, 'product', id)
+          : existing.slug;
+        if (isSlugDuplicate(state.products, nextSlug, id)) {
+          return jsonResponse({ error: `نامک (Slug) «${nextSlug}» تکراری است و قبلاً برای محصول دیگری استفاده شده است.` }, 400);
+        }
+        if (existing.slug && existing.slug !== nextSlug && (existing.status || 'published') === 'published') {
+          state.slugRedirects = state.slugRedirects || [];
+          const fromPath = `/products/${existing.slug}`;
+          const toPath = `/products/${nextSlug}`;
+          state.slugRedirects = state.slugRedirects
+            .filter((r) => r.fromPath !== fromPath && r.fromPath !== toPath)
+            .map((r) => (r.toPath === fromPath ? { ...r, toPath } : r));
+          state.slugRedirects.push({
+            fromPath,
+            toPath,
+            entityType: 'product',
+            entityId: id,
+            createdAt: new Date().toISOString(),
+          });
+        }
         const cat = state.productCategories.find(
-          (c) => c.id === Number(bodyObj.categoryId ?? state.products[idx].categoryId)
+          (c) => c.id === Number(bodyObj.categoryId ?? existing.categoryId)
         );
         state.products[idx] = {
-          ...state.products[idx],
+          ...existing,
           ...bodyObj,
           id,
-          categoryTitle: cat?.title || state.products[idx].categoryTitle,
-          type: cat?.slug || state.products[idx].type,
+          slug: nextSlug,
+          updatedAt: new Date().toISOString(),
+          categoryTitle: cat?.title || existing.categoryTitle,
+          type: cat?.slug || existing.type,
         };
         await saveCloudStateToFirebase(state);
         return jsonResponse(state.products[idx]);
@@ -424,41 +534,100 @@ async function handleFirebaseServerlessApi(
 
   // 3. Product Categories
   if (urlPath === '/api/product-categories' && method === 'GET') {
-    return jsonResponse(state.productCategories);
+    return jsonResponse(
+      state.productCategories.filter(
+        (c) => isAdminCaller || (c.status || 'published') === 'published'
+      )
+    );
   }
   if (urlPath === '/api/product-categories' && method === 'POST') {
     const newId =
       state.productCategories.reduce((max, c) => Math.max(max, Number(c.id) || 0), 0) + 1;
+    const candidateSlug = sanitizeSlug(bodyObj.slug || bodyObj.title, 'cat', newId);
+    if (isSlugDuplicate(state.productCategories, candidateSlug)) {
+      return jsonResponse({ error: `نامک (Slug) دسته‌بندی «${candidateSlug}» تکراری است.` }, 400);
+    }
     const newCat = {
       id: newId,
       title: bodyObj.title || 'دسته‌بندی جدید',
-      slug: bodyObj.slug || `cat-${newId}`,
+      slug: candidateSlug,
       parentId: bodyObj.parentId ?? null,
-      sortOrder: newId,
+      sortOrder: bodyObj.sortOrder ?? newId,
+      description: bodyObj.description || '',
+      imageName: bodyObj.imageName || '',
+      imageAlt: bodyObj.imageAlt || bodyObj.title || '',
+      status: bodyObj.status === 'draft' ? ('draft' as const) : ('published' as const),
+      updatedAt: new Date().toISOString(),
+      seoTitle: bodyObj.seoTitle || '',
+      seoDescription: bodyObj.seoDescription || '',
+      ogImage: bodyObj.ogImage || '',
+      robotsNoIndex: Boolean(bodyObj.robotsNoIndex),
     };
     state.productCategories.push(newCat);
     await saveCloudStateToFirebase(state);
     return jsonResponse(newCat, 201);
   }
   const prodCatMatch = urlPath.match(/^\/api\/product-categories\/(\d+)$/);
-  if (prodCatMatch && method === 'DELETE') {
+  if (prodCatMatch) {
     const id = Number(prodCatMatch[1]);
-    state.productCategories = state.productCategories.filter((c) => Number(c.id) !== id);
-    await saveCloudStateToFirebase(state);
-    return jsonResponse({ ok: true });
+    if (method === 'PUT') {
+      const idx = state.productCategories.findIndex((c) => Number(c.id) === id);
+      if (idx === -1) return jsonResponse({ error: 'دسته‌بندی یافت نشد' }, 404);
+      const existing = state.productCategories[idx];
+      const nextSlug = bodyObj.slug ? sanitizeSlug(bodyObj.slug, 'cat', id) : existing.slug;
+      if (isSlugDuplicate(state.productCategories, nextSlug, id)) {
+        return jsonResponse({ error: `نامک (Slug) «${nextSlug}» تکراری است.` }, 400);
+      }
+      if (existing.slug && existing.slug !== nextSlug && (existing.status || 'published') === 'published') {
+        state.slugRedirects = state.slugRedirects || [];
+        const fromPath = `/categories/${existing.slug}`;
+        const toPath = `/categories/${nextSlug}`;
+        state.slugRedirects = state.slugRedirects
+          .filter((r) => r.fromPath !== fromPath && r.fromPath !== toPath)
+          .map((r) => (r.toPath === fromPath ? { ...r, toPath } : r));
+        state.slugRedirects.push({
+          fromPath,
+          toPath,
+          entityType: 'category',
+          entityId: id,
+          createdAt: new Date().toISOString(),
+        });
+      }
+      state.productCategories[idx] = {
+        ...existing,
+        ...bodyObj,
+        id,
+        slug: nextSlug,
+        updatedAt: new Date().toISOString(),
+      };
+      await saveCloudStateToFirebase(state);
+      return jsonResponse(state.productCategories[idx]);
+    }
+    if (method === 'DELETE') {
+      state.productCategories = state.productCategories.filter((c) => Number(c.id) !== id);
+      await saveCloudStateToFirebase(state);
+      return jsonResponse({ ok: true });
+    }
   }
 
   // 4. Posts & Post Categories
   if (urlPath === '/api/posts' && method === 'GET') {
-    return jsonResponse(state.posts);
+    return jsonResponse(
+      state.posts.filter((p) => isAdminCaller || (p.status || 'published') === 'published')
+    );
   }
   if (urlPath === '/api/posts' && method === 'POST') {
     const newId = state.posts.reduce((max, p) => Math.max(max, Number(p.id) || 0), 0) + 1;
     const cat = state.postCategories.find((c) => c.id === Number(bodyObj.categoryId));
+    const candidateSlug = sanitizeSlug(bodyObj.slug || bodyObj.title, 'article', newId);
+    if (isSlugDuplicate(state.posts, candidateSlug)) {
+      return jsonResponse({ error: `نامک (Slug) مقاله «${candidateSlug}» تکراری است.` }, 400);
+    }
+    const nowIso = new Date().toISOString();
     const createdPost = {
       id: newId,
       title: bodyObj.title || 'مقاله جدید',
-      slug: bodyObj.slug || `post-${newId}`,
+      slug: candidateSlug,
       categoryId: Number(bodyObj.categoryId) || 1,
       categoryTitle: cat?.title || bodyObj.categoryTitle || 'عمومی',
       description: bodyObj.description || '',
@@ -466,9 +635,21 @@ async function handleFirebaseServerlessApi(
       imageName:
         bodyObj.imageName ||
         'https://images.unsplash.com/photo-1587049352846-4a222e784d38?w=800&auto=format&fit=crop&q=80',
+      imageAlt: bodyObj.imageAlt || bodyObj.title || '',
       viewCount: 1,
       authorName: bodyObj.authorName || 'تحریریه اونیوال',
       creationTime: new Date().toLocaleDateString('fa-IR'),
+      publishedAt: bodyObj.publishedAt || nowIso,
+      updatedAt: nowIso,
+      status: bodyObj.status === 'draft' ? ('draft' as const) : ('published' as const),
+      seoTitle: bodyObj.seoTitle || '',
+      seoDescription: bodyObj.seoDescription || '',
+      ogTitle: bodyObj.ogTitle || '',
+      ogDescription: bodyObj.ogDescription || '',
+      ogImage: bodyObj.ogImage || '',
+      canonicalUrl: bodyObj.canonicalUrl || '',
+      robotsNoIndex: Boolean(bodyObj.robotsNoIndex),
+      robotsNoFollow: Boolean(bodyObj.robotsNoFollow),
     };
     state.posts.unshift(createdPost);
     await saveCloudStateToFirebase(state);
@@ -480,14 +661,36 @@ async function handleFirebaseServerlessApi(
     if (method === 'PUT') {
       const idx = state.posts.findIndex((p) => Number(p.id) === id);
       if (idx !== -1) {
+        const existing = state.posts[idx];
+        const nextSlug = bodyObj.slug ? sanitizeSlug(bodyObj.slug, 'article', id) : existing.slug;
+        if (isSlugDuplicate(state.posts, nextSlug, id)) {
+          return jsonResponse({ error: `نامک (Slug) مقاله «${nextSlug}» تکراری است.` }, 400);
+        }
+        if (existing.slug && existing.slug !== nextSlug && (existing.status || 'published') === 'published') {
+          state.slugRedirects = state.slugRedirects || [];
+          const fromPath = `/articles/${existing.slug}`;
+          const toPath = `/articles/${nextSlug}`;
+          state.slugRedirects = state.slugRedirects
+            .filter((r) => r.fromPath !== fromPath && r.fromPath !== toPath)
+            .map((r) => (r.toPath === fromPath ? { ...r, toPath } : r));
+          state.slugRedirects.push({
+            fromPath,
+            toPath,
+            entityType: 'article',
+            entityId: id,
+            createdAt: new Date().toISOString(),
+          });
+        }
         const cat = state.postCategories.find(
-          (c) => c.id === Number(bodyObj.categoryId ?? state.posts[idx].categoryId)
+          (c) => c.id === Number(bodyObj.categoryId ?? existing.categoryId)
         );
         state.posts[idx] = {
-          ...state.posts[idx],
+          ...existing,
           ...bodyObj,
           id,
-          categoryTitle: cat?.title || state.posts[idx].categoryTitle,
+          slug: nextSlug,
+          updatedAt: new Date().toISOString(),
+          categoryTitle: cat?.title || existing.categoryTitle,
         };
         await saveCloudStateToFirebase(state);
         return jsonResponse(state.posts[idx]);
@@ -506,22 +709,46 @@ async function handleFirebaseServerlessApi(
   if (urlPath === '/api/post-categories' && method === 'POST') {
     const newId =
       state.postCategories.reduce((max, c) => Math.max(max, Number(c.id) || 0), 0) + 1;
+    const candidateSlug = sanitizeSlug(bodyObj.slug || bodyObj.title, 'post-cat', newId);
     const newCat = {
       id: newId,
       title: bodyObj.title || 'دسته مقاله',
-      slug: `post-cat-${newId}`,
+      slug: candidateSlug,
       parentId: bodyObj.parentId ?? null,
+      description: bodyObj.description || '',
+      status: bodyObj.status === 'draft' ? ('draft' as const) : ('published' as const),
+      updatedAt: new Date().toISOString(),
+      seoTitle: bodyObj.seoTitle || '',
+      seoDescription: bodyObj.seoDescription || '',
+      robotsNoIndex: Boolean(bodyObj.robotsNoIndex),
     };
     state.postCategories.push(newCat);
     await saveCloudStateToFirebase(state);
     return jsonResponse(newCat, 201);
   }
   const postCatMatch = urlPath.match(/^\/api\/post-categories\/(\d+)$/);
-  if (postCatMatch && method === 'DELETE') {
+  if (postCatMatch) {
     const id = Number(postCatMatch[1]);
-    state.postCategories = state.postCategories.filter((c) => Number(c.id) !== id);
-    await saveCloudStateToFirebase(state);
-    return jsonResponse({ ok: true });
+    if (method === 'PUT') {
+      const idx = state.postCategories.findIndex((c) => Number(c.id) === id);
+      if (idx === -1) return jsonResponse({ error: 'دسته‌بندی مقاله یافت نشد' }, 404);
+      const existing = state.postCategories[idx];
+      const nextSlug = bodyObj.slug ? sanitizeSlug(bodyObj.slug, 'post-cat', id) : existing.slug;
+      state.postCategories[idx] = {
+        ...existing,
+        ...bodyObj,
+        id,
+        slug: nextSlug,
+        updatedAt: new Date().toISOString(),
+      };
+      await saveCloudStateToFirebase(state);
+      return jsonResponse(state.postCategories[idx]);
+    }
+    if (method === 'DELETE') {
+      state.postCategories = state.postCategories.filter((c) => Number(c.id) !== id);
+      await saveCloudStateToFirebase(state);
+      return jsonResponse({ ok: true });
+    }
   }
 
   // 5. Contact Messages & Consultations
@@ -742,7 +969,22 @@ async function handleFirebaseServerlessApi(
     return jsonResponse({ found: false }, 404);
   }
 
-  // 7. Site Content
+  // 7. Site Content & SEO Redirects
+  if (urlPath === '/api/seo/redirects' && method === 'GET') {
+    return jsonResponse(state.slugRedirects || []);
+  }
+  if (urlPath === '/api/seo/redirects' && method === 'DELETE') {
+    if (bodyObj?.fromPath) {
+      state.slugRedirects = (state.slugRedirects || []).filter(
+        (r) => r.fromPath !== bodyObj.fromPath
+      );
+    } else {
+      state.slugRedirects = [];
+    }
+    await saveCloudStateToFirebase(state);
+    return jsonResponse({ ok: true, slugRedirects: state.slugRedirects });
+  }
+
   if (urlPath === '/api/site-content' && method === 'GET') {
     return jsonResponse(state.siteContent);
   }
@@ -750,6 +992,10 @@ async function handleFirebaseServerlessApi(
     state.siteContent = {
       ...state.siteContent,
       ...bodyObj,
+      seoConfig: {
+        ...(state.siteContent.seoConfig || {}),
+        ...(bodyObj?.seoConfig || {}),
+      },
     };
     await saveCloudStateToFirebase(state);
     return jsonResponse({ ok: true, siteContent: state.siteContent });
@@ -873,8 +1119,12 @@ async function handleFirebaseServerlessApi(
         inputUser === 'admin@onival.com') &&
       (inputPass === validPass || (validPass === 'admin' && inputPass === 'admin123456'))
     ) {
+      const fallbackToken = `fb_admin_${btoa(`${validUsername}:${validPass}`).replace(/=/g, '')}`;
+      setAdminSessionToken(fallbackToken);
       return jsonResponse({
         ok: true,
+        success: true,
+        token: fallbackToken,
         admin: {
           username: creds.username,
           email: creds.email,
@@ -963,8 +1213,18 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
     }
   }
 
+  const token = getAdminSessionToken();
+  const headers = new Headers(init?.headers || {});
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+  const enrichedInit: RequestInit = {
+    ...init,
+    headers,
+  };
+
   try {
-    const response = await window.fetch(input, init);
+    const response = await window.fetch(input, enrichedInit);
     const contentType = response.headers.get('content-type') || '';
 
     // اگر روی Firebase Hosting استاتیک باشیم و سرور Express وجود نداشته باشد (404 یا برگرداندن index.html به جای JSON)
@@ -975,7 +1235,22 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
       response.status === 503 ||
       (response.ok && !contentType.includes('application/json'))
     ) {
-      return await handleFirebaseServerlessApi(urlStr.split('?')[0], method, bodyObj);
+      return await handleFirebaseServerlessApi(urlStr.split('?')[0], method, bodyObj, token);
+    }
+
+    // اگر لاگین یا تغییر رمز ادمین موفق بود، توکن جلسه را ذخیره کن
+    if (
+      response.ok &&
+      (urlStr.startsWith('/api/admin/login') || urlStr.startsWith('/api/account/change-credentials'))
+    ) {
+      try {
+        const cloned = await response.clone().json();
+        if (cloned?.token) {
+          setAdminSessionToken(cloned.token);
+        }
+      } catch {
+        // ignore
+      }
     }
 
     // اگر سرور Express پاسخ داد و عملیات نوشتن (POST/PUT/DELETE) بود، همزمان دیتابیس فایربیس را هم آپدیت کن
@@ -984,13 +1259,18 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
       (method === 'POST' || method === 'PUT' || method === 'DELETE') &&
       !urlStr.startsWith('/api/firebase/')
     ) {
-      await handleFirebaseServerlessApi(urlStr.split('?')[0], method, bodyObj).catch(() => {});
+      await handleFirebaseServerlessApi(
+        urlStr.split('?')[0],
+        method,
+        bodyObj,
+        getAdminSessionToken() || 'authorized'
+      ).catch(() => {});
     }
 
     return response;
   } catch {
     // در صورت عدم دسترسی به سرور Node، مستقیماً از طریق دیتابیس ابری فایربیس پاسخ بده
-    return await handleFirebaseServerlessApi(urlStr.split('?')[0], method, bodyObj);
+    return await handleFirebaseServerlessApi(urlStr.split('?')[0], method, bodyObj, token);
   }
 }
 

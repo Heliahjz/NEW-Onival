@@ -41,7 +41,13 @@ import {
   XCircle
 } from 'lucide-react';
 import { Product, ProductCategory, Post, ContactMessage, Order, OrderItem, ProductSize, SiteContent, PaymentConfig } from '../types';
-import { apiFetch } from '../services/firebaseSync';
+import { apiFetch, setAdminSessionToken } from '../services/firebaseSync';
+import {
+  resolveSeoForPath,
+  applyClientDocumentSeo,
+  resolveSiteOrigin,
+  sanitizeSlug
+} from '../utils/seo';
 
 interface StorefrontViewProps {
   products: Product[];
@@ -77,7 +83,8 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
   onOrderUpdated,
 }) => {
   // Navigation tabs
-  const [activePage, setActivePage] = useState<'home' | 'articles' | 'consultation' | 'tracking' | 'about' | 'contact' | 'checkout'>('home');
+  const [activePage, setActivePage] = useState<'home' | 'articles' | 'consultation' | 'tracking' | 'about' | 'contact' | 'checkout' | 'not_found'>('home');
+  const [notFoundPath, setNotFoundPath] = useState<string>('');
   
   // Category filter: 'all' | 'discounted' | 'honey' | 'supplement' | 'drink' | 'nuts' | or number
   const [activeCategory, setActiveCategory] = useState<string>('all');
@@ -93,6 +100,112 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
   
   // Article Reader View
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
+
+  // Filter out drafts and soft-deleted items for public storefront display
+  const publicProducts = React.useMemo(
+    () => products.filter(p => !p.isDelete && (p.status || 'published') === 'published'),
+    [products]
+  );
+  const publicCategories = React.useMemo(
+    () => categories.filter(c => (c.status || 'published') === 'published'),
+    [categories]
+  );
+  const publicPosts = React.useMemo(
+    () => posts.filter(p => (p.status || 'published') === 'published'),
+    [posts]
+  );
+
+  // Sync browser URL pathname -> Storefront state & document <head> SEO metadata
+  const syncRouteFromLocation = React.useCallback(
+    (pathname: string) => {
+      const origin = resolveSiteOrigin(siteContent, typeof window !== 'undefined' ? window.location.origin : '');
+      const resolved = resolveSeoForPath(pathname, origin, {
+        products: publicProducts,
+        productCategories: publicCategories,
+        posts: publicPosts,
+        siteContent
+      });
+
+      if (resolved.status === 301 && resolved.redirectTo) {
+        if (typeof window !== 'undefined') {
+          window.history.replaceState({}, '', resolved.redirectTo);
+        }
+        const redirected = resolveSeoForPath(resolved.redirectTo, origin, {
+          products: publicProducts,
+          productCategories: publicCategories,
+          posts: publicPosts,
+          siteContent
+        });
+        applyClientDocumentSeo(redirected);
+      } else {
+        applyClientDocumentSeo(resolved);
+      }
+
+      if (resolved.routeType === 'product' && resolved.matchedProduct) {
+        setSelectedPost(null);
+        setSelectedProduct(resolved.matchedProduct);
+        if (resolved.matchedProduct.sizes && resolved.matchedProduct.sizes.length > 0) {
+          setSelectedSize(resolved.matchedProduct.sizes[0].name);
+        } else {
+          setSelectedSize('کوچک');
+        }
+        setActivePage('home');
+        return;
+      }
+
+      if (resolved.routeType === 'article' && resolved.matchedPost) {
+        setSelectedProduct(null);
+        setSelectedPost(resolved.matchedPost);
+        setActivePage('articles');
+        return;
+      }
+
+      if (resolved.routeType === 'category' && resolved.matchedCategory) {
+        setSelectedProduct(null);
+        setSelectedPost(null);
+        setActivePage('home');
+        setActiveCategory(resolved.matchedCategory.slug || resolved.matchedCategory.title);
+        return;
+      }
+
+      if (resolved.routeType === 'not_found') {
+        setSelectedProduct(null);
+        setSelectedPost(null);
+        setNotFoundPath(pathname);
+        setActivePage('not_found');
+        return;
+      }
+
+      setSelectedProduct(null);
+      setSelectedPost(null);
+      if (
+        resolved.routeType === 'home' ||
+        resolved.routeType === 'articles' ||
+        resolved.routeType === 'consultation' ||
+        resolved.routeType === 'tracking' ||
+        resolved.routeType === 'about' ||
+        resolved.routeType === 'contact' ||
+        resolved.routeType === 'checkout'
+      ) {
+        setActivePage(resolved.routeType);
+        if (resolved.routeType === 'home') {
+          setActiveCategory('all');
+        }
+      }
+    },
+    [publicProducts, publicCategories, publicPosts, siteContent]
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    syncRouteFromLocation(window.location.pathname);
+
+    const handlePopState = () => {
+      syncRouteFromLocation(window.location.pathname);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [syncRouteFromLocation]);
 
   // Secret Admin Access Modal
   const [isAdminAuthModalOpen, setIsAdminAuthModalOpen] = useState(false);
@@ -354,7 +467,49 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
     setSelectedProduct(null);
     setSelectedPost(null);
     setActivePage(page);
+    if (page === 'home') {
+      setActiveCategory('all');
+    }
+    const targetPath = page === 'home' ? '/' : `/${page}`;
+    if (typeof window !== 'undefined' && window.location.pathname !== targetPath) {
+      window.history.pushState({}, '', targetPath);
+    }
+    const origin = resolveSiteOrigin(siteContent, typeof window !== 'undefined' ? window.location.origin : '');
+    const seo = resolveSeoForPath(targetPath, origin, {
+      products: publicProducts,
+      productCategories: publicCategories,
+      posts: publicPosts,
+      siteContent
+    });
+    applyClientDocumentSeo(seo);
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  };
+
+  // Select category and update URL to /categories/:slug if a real category is chosen
+  const handleSelectCategory = (catValue: string, catObj?: ProductCategory) => {
+    setActiveCategory(catValue);
+    let targetPath = '/';
+    if (catObj && catObj.slug) {
+      targetPath = `/categories/${encodeURIComponent(catObj.slug)}`;
+    } else {
+      const foundCat = publicCategories.find(
+        c => c.slug === catValue || c.title === catValue
+      );
+      if (foundCat && foundCat.slug) {
+        targetPath = `/categories/${encodeURIComponent(foundCat.slug)}`;
+      }
+    }
+    if (typeof window !== 'undefined' && window.location.pathname !== targetPath) {
+      window.history.pushState({}, '', targetPath);
+    }
+    const origin = resolveSiteOrigin(siteContent, typeof window !== 'undefined' ? window.location.origin : '');
+    const seo = resolveSeoForPath(targetPath, origin, {
+      products: publicProducts,
+      productCategories: publicCategories,
+      posts: publicPosts,
+      siteContent
+    });
+    applyClientDocumentSeo(seo);
   };
 
   // Keyboard shortcut for hidden admin: Ctrl + Shift + A
@@ -414,15 +569,21 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
 
   const hasExplicitHero = homeSections.some(s => s.enabled && normalizeSectionId(s.id) === 'hero');
 
-  // Special offers: products with discount > 0
-  const specialOffers = products.filter(p => (p.discount || 0) > 0);
+  // Special offers: published products with discount > 0
+  const specialOffers = publicProducts.filter(p => (p.discount || 0) > 0);
 
-  // Filter products by category
-  const filteredProducts = products.filter(p => {
+  // Filter published products by category
+  const filteredProducts = publicProducts.filter(p => {
     if (activeCategory === 'all') return true;
     if (activeCategory === 'discounted') return (p.discount || 0) > 0;
     if (p.type === activeCategory) return true;
     if (p.categoryTitle && p.categoryTitle.includes(activeCategory)) return true;
+    const matchedCat = publicCategories.find(c => c.slug === activeCategory || c.title === activeCategory);
+    if (matchedCat) {
+      if (p.categoryId === matchedCat.id || p.type === matchedCat.slug || p.categoryTitle === matchedCat.title) {
+        return true;
+      }
+    }
     return false;
   });
 
@@ -920,8 +1081,12 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
     }
   };
 
-  // Handle opening product detail view (native page scroll on mobile & desktop)
-  const handleOpenProduct = (product: Product) => {
+  // Handle opening product detail view (native page scroll on mobile & desktop) + clean URL
+  const handleOpenProduct = (product: Product, e?: React.MouseEvent) => {
+    if (e) {
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+      e.preventDefault();
+    }
     lastScrollYRef.current = window.scrollY || 0;
     setSelectedPost(null);
     setSelectedProduct(product);
@@ -930,6 +1095,18 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
     } else {
       setSelectedSize('کوچک');
     }
+    const targetPath = `/products/${encodeURIComponent(product.slug || sanitizeSlug(product.title, 'product', product.id))}`;
+    if (typeof window !== 'undefined' && window.location.pathname !== targetPath) {
+      window.history.pushState({}, '', targetPath);
+    }
+    const origin = resolveSiteOrigin(siteContent, typeof window !== 'undefined' ? window.location.origin : '');
+    const seo = resolveSeoForPath(targetPath, origin, {
+      products: publicProducts,
+      productCategories: publicCategories,
+      posts: publicPosts,
+      siteContent
+    });
+    applyClientDocumentSeo(seo);
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
   };
 
@@ -937,22 +1114,61 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
   const handleCloseProduct = () => {
     const prevScroll = lastScrollYRef.current;
     setSelectedProduct(null);
+    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/products/')) {
+      window.history.pushState({}, '', '/');
+    }
+    const origin = resolveSiteOrigin(siteContent, typeof window !== 'undefined' ? window.location.origin : '');
+    const seo = resolveSeoForPath('/', origin, {
+      products: publicProducts,
+      productCategories: publicCategories,
+      posts: publicPosts,
+      siteContent
+    });
+    applyClientDocumentSeo(seo);
     setTimeout(() => {
       window.scrollTo({ top: prevScroll, left: 0, behavior: 'instant' });
     }, 0);
   };
 
-  // Handle opening article detail view
-  const handleOpenPost = (post: Post) => {
+  // Handle opening article detail view + clean URL
+  const handleOpenPost = (post: Post, e?: React.MouseEvent) => {
+    if (e) {
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+      e.preventDefault();
+    }
     lastScrollYRef.current = window.scrollY || 0;
     setSelectedProduct(null);
     setSelectedPost(post);
+    const targetPath = `/articles/${encodeURIComponent(post.slug || sanitizeSlug(post.title, 'article', post.id))}`;
+    if (typeof window !== 'undefined' && window.location.pathname !== targetPath) {
+      window.history.pushState({}, '', targetPath);
+    }
+    const origin = resolveSiteOrigin(siteContent, typeof window !== 'undefined' ? window.location.origin : '');
+    const seo = resolveSeoForPath(targetPath, origin, {
+      products: publicProducts,
+      productCategories: publicCategories,
+      posts: publicPosts,
+      siteContent
+    });
+    applyClientDocumentSeo(seo);
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
   };
 
   const handleClosePost = () => {
     const prevScroll = lastScrollYRef.current;
     setSelectedPost(null);
+    const backPath = activePage === 'articles' ? '/articles' : '/';
+    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/articles/')) {
+      window.history.pushState({}, '', backPath);
+    }
+    const origin = resolveSiteOrigin(siteContent, typeof window !== 'undefined' ? window.location.origin : '');
+    const seo = resolveSeoForPath(backPath, origin, {
+      products: publicProducts,
+      productCategories: publicCategories,
+      posts: publicPosts,
+      siteContent
+    });
+    applyClientDocumentSeo(seo);
     setTimeout(() => {
       window.scrollTo({ top: prevScroll, left: 0, behavior: 'instant' });
     }, 0);
@@ -989,6 +1205,9 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
       const data = await res.json().catch(() => ({}));
 
       if (res.ok && data.ok) {
+        if (data.token) {
+          setAdminSessionToken(data.token);
+        }
         setIsAdminAuthModalOpen(false);
         setAdminUsernameInput('');
         setAdminPasswordInput('');
@@ -999,6 +1218,7 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
       }
     } catch {
       if ((u.toLowerCase() === 'admin' || u.toLowerCase() === 'admin@onival.com') && p === 'admin') {
+        setAdminSessionToken(`fb_admin_${btoa('admin:admin').replace(/=/g, '')}`);
         setIsAdminAuthModalOpen(false);
         setAdminUsernameInput('');
         setAdminPasswordInput('');
@@ -1074,53 +1294,77 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
           {/* Navigation Tabs (Desktop) */}
           <ul className="hidden md:flex items-center gap-5 text-[13px] font-bold text-stone-600">
             <li>
-              <button 
-                onClick={() => handleSelectPage('home')}
+              <a 
+                href="/"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleSelectPage('home');
+                }}
                 className={`transition pb-0.5 ${activePage === 'home' && !selectedProduct && !selectedPost ? 'text-stone-900 border-b-2 border-stone-900 font-extrabold' : 'hover:text-stone-900'}`}
               >
                 {navigation.home || 'خانه'}
-              </button>
+              </a>
             </li>
             <li>
-              <button 
-                onClick={() => handleSelectPage('articles')}
+              <a 
+                href="/articles"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleSelectPage('articles');
+                }}
                 className={`transition pb-0.5 ${activePage === 'articles' && !selectedProduct ? 'text-stone-900 border-b-2 border-stone-900 font-extrabold' : 'hover:text-stone-900'}`}
               >
                 {navigation.articles || 'مقالات'}
-              </button>
+              </a>
             </li>
             <li>
-              <button 
-                onClick={() => handleSelectPage('consultation')}
+              <a 
+                href="/consultation"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleSelectPage('consultation');
+                }}
                 className={`transition pb-0.5 flex items-center gap-1 ${activePage === 'consultation' && !selectedProduct && !selectedPost ? 'text-stone-900 border-b-2 border-stone-900 font-extrabold' : 'hover:text-stone-900'}`}
               >
                 <Sparkles className="w-3.5 h-3.5 text-amber-500" />
                 <span>{navigation.consultation || 'مشاوره تخصصی'}</span>
-              </button>
+              </a>
             </li>
             <li>
-              <button 
-                onClick={() => handleSelectPage('tracking')}
+              <a 
+                href="/tracking"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleSelectPage('tracking');
+                }}
                 className={`transition pb-0.5 ${activePage === 'tracking' && !selectedProduct && !selectedPost ? 'text-stone-900 border-b-2 border-stone-900 font-extrabold' : 'hover:text-stone-900'}`}
               >
                 {navigation.tracking || 'پیگیری سفارش'}
-              </button>
+              </a>
             </li>
             <li>
-              <button 
-                onClick={() => handleSelectPage('about')}
+              <a 
+                href="/about"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleSelectPage('about');
+                }}
                 className={`transition pb-0.5 ${activePage === 'about' && !selectedProduct && !selectedPost ? 'text-stone-900 border-b-2 border-stone-900 font-extrabold' : 'hover:text-stone-900'}`}
               >
                 {navigation.about || 'درباره ما'}
-              </button>
+              </a>
             </li>
             <li>
-              <button 
-                onClick={() => handleSelectPage('contact')}
+              <a 
+                href="/contact"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleSelectPage('contact');
+                }}
                 className={`transition pb-0.5 ${activePage === 'contact' && !selectedProduct && !selectedPost ? 'text-stone-900 border-b-2 border-stone-900 font-extrabold' : 'hover:text-stone-900'}`}
               >
                 {navigation.contact || 'تماس'}
-              </button>
+              </a>
             </li>
           </ul>
 
@@ -1203,6 +1447,45 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
         {/* ================= SINGLE PRODUCT PAGE VIEW (NATIVE SCROLL ON MOBILE & DESKTOP) ================= */}
         {selectedProduct ? (
           <div className="max-w-4xl mx-auto animate-fadeIn">
+            {/* Semantic Breadcrumb Navigation for SEO & Users */}
+            <nav aria-label="Breadcrumb" className="mb-3 flex flex-wrap items-center gap-1.5 text-[11px] font-bold text-stone-400">
+              <a
+                href="/"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleCloseProduct();
+                }}
+                className="hover:text-amber-600 transition"
+              >
+                خانه
+              </a>
+              <span>/</span>
+              {selectedProduct.categoryTitle && (
+                <>
+                  <a
+                    href={`/categories/${encodeURIComponent(
+                      publicCategories.find(c => c.id === selectedProduct.categoryId || c.title === selectedProduct.categoryTitle)?.slug ||
+                      selectedProduct.type ||
+                      'honey'
+                    )}`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      const cat = publicCategories.find(c => c.id === selectedProduct.categoryId || c.title === selectedProduct.categoryTitle);
+                      setSelectedProduct(null);
+                      handleSelectCategory(cat?.slug || selectedProduct.type || 'all', cat);
+                    }}
+                    className="hover:text-amber-600 transition"
+                  >
+                    {selectedProduct.categoryTitle}
+                  </a>
+                  <span>/</span>
+                </>
+              )}
+              <span className="text-stone-700 truncate max-w-[220px] sm:max-w-md" aria-current="page">
+                {selectedProduct.title}
+              </span>
+            </nav>
+
             <div className="flex items-center justify-between gap-3 mb-5">
               <button 
                 type="button"
@@ -1231,7 +1514,10 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                 <div className="md:col-span-5 rounded-2xl sm:rounded-[26px] overflow-hidden h-64 sm:h-80 md:h-[390px] bg-stone-50 shadow-xs border border-stone-100 relative">
                   <img 
                     src={selectedProduct.imageName} 
-                    alt={selectedProduct.title} 
+                    alt={selectedProduct.imageAlt || selectedProduct.title} 
+                    width={600}
+                    height={600}
+                    fetchPriority="high"
                     className="w-full h-full object-cover"
                   />
                   {(selectedProduct.discount || 0) > 0 && (
@@ -1365,6 +1651,35 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
         ) : selectedPost ? (
           /* ================= ARTICLE READER PAGE VIEW ================= */
           <div className="max-w-3xl mx-auto animate-fadeIn">
+            {/* Semantic Breadcrumb Navigation */}
+            <nav aria-label="Breadcrumb" className="mb-3 flex flex-wrap items-center gap-1.5 text-[11px] font-bold text-stone-400">
+              <a
+                href="/"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleSelectPage('home');
+                }}
+                className="hover:text-amber-600 transition"
+              >
+                خانه
+              </a>
+              <span>/</span>
+              <a
+                href="/articles"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleSelectPage('articles');
+                }}
+                className="hover:text-amber-600 transition"
+              >
+                مقالات علمی
+              </a>
+              <span>/</span>
+              <span className="text-stone-700 truncate max-w-[220px] sm:max-w-md" aria-current="page">
+                {selectedPost.title}
+              </span>
+            </nav>
+
             <button 
               type="button"
               onClick={handleClosePost}
@@ -1387,7 +1702,10 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
 
               <img 
                 src={selectedPost.imageName} 
-                alt={selectedPost.title} 
+                alt={selectedPost.imageAlt || selectedPost.title} 
+                width={800}
+                height={450}
+                fetchPriority="high"
                 className="w-full h-56 sm:h-72 object-cover rounded-2xl mb-5"
               />
 
@@ -1541,8 +1859,12 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                         <div className="text-xs font-bold text-stone-700">{sec.title}</div>
                       )}
                       <div className="flex gap-2.5 overflow-x-auto pb-2 scrollbar-none">
-                        <button
-                          onClick={() => setActiveCategory('all')}
+                        <a
+                          href="/"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleSelectCategory('all');
+                          }}
                           className={`whitespace-nowrap px-5 py-2.5 rounded-full font-bold text-xs flex items-center gap-2 transition ${
                             activeCategory === 'all'
                               ? 'bg-stone-900 text-white shadow-md'
@@ -1551,11 +1873,11 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                         >
                           <LayoutGrid className="w-4 h-4" />
                           <span>همه محصولات</span>
-                        </button>
+                        </a>
 
                         <button
                           id="cat-discounted"
-                          onClick={() => setActiveCategory('discounted')}
+                          onClick={() => handleSelectCategory('discounted')}
                           className={`whitespace-nowrap px-5 py-2.5 rounded-full font-bold text-xs flex items-center gap-2 transition ${
                             activeCategory === 'discounted'
                               ? 'bg-[#ef394e] text-white shadow-md'
@@ -1571,8 +1893,12 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                           )}
                         </button>
 
-                        <button
-                          onClick={() => setActiveCategory('honey')}
+                        <a
+                          href="/categories/honey"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleSelectCategory('honey');
+                          }}
                           className={`whitespace-nowrap px-5 py-2.5 rounded-full font-bold text-xs flex items-center gap-2 transition ${
                             activeCategory === 'honey'
                               ? 'bg-stone-900 text-white shadow-md'
@@ -1581,10 +1907,14 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                         >
                           <Hexagon className="w-4 h-4" />
                           <span>عسل‌های طبیعی و کوهستان</span>
-                        </button>
+                        </a>
 
-                        <button
-                          onClick={() => setActiveCategory('supplement')}
+                        <a
+                          href="/categories/supplement"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleSelectCategory('supplement');
+                          }}
                           className={`whitespace-nowrap px-5 py-2.5 rounded-full font-bold text-xs flex items-center gap-2 transition ${
                             activeCategory === 'supplement'
                               ? 'bg-stone-900 text-white shadow-md'
@@ -1593,10 +1923,14 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                         >
                           <Pill className="w-4 h-4" />
                           <span>مکمل‌ها (ژل رویال و گرده)</span>
-                        </button>
+                        </a>
 
-                        <button
-                          onClick={() => setActiveCategory('drink')}
+                        <a
+                          href="/categories/drink"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleSelectCategory('drink');
+                          }}
                           className={`whitespace-nowrap px-5 py-2.5 rounded-full font-bold text-xs flex items-center gap-2 transition ${
                             activeCategory === 'drink'
                               ? 'bg-stone-900 text-white shadow-md'
@@ -1605,10 +1939,14 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                         >
                           <Coffee className="w-4 h-4" />
                           <span>نوشیدنی و دمنوش</span>
-                        </button>
+                        </a>
 
-                        <button
-                          onClick={() => setActiveCategory('nuts')}
+                        <a
+                          href="/categories/nuts"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleSelectCategory('nuts');
+                          }}
                           className={`whitespace-nowrap px-5 py-2.5 rounded-full font-bold text-xs flex items-center gap-2 transition ${
                             activeCategory === 'nuts'
                               ? 'bg-stone-900 text-white shadow-md'
@@ -1617,21 +1955,27 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                         >
                           <Nut className="w-4 h-4" />
                           <span>خشکبار و گردو</span>
-                        </button>
+                        </a>
 
                         {/* Dynamic categories from backend */}
-                        {categories.map(cat => (
-                          <button
+                        {publicCategories
+                          .filter(cat => !['honey', 'supplement', 'drink', 'nuts'].includes(cat.slug))
+                          .map(cat => (
+                          <a
                             key={cat.id}
-                            onClick={() => setActiveCategory(cat.title)}
+                            href={`/categories/${encodeURIComponent(cat.slug)}`}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              handleSelectCategory(cat.slug || cat.title, cat);
+                            }}
                             className={`whitespace-nowrap px-5 py-2.5 rounded-full font-bold text-xs flex items-center gap-2 transition ${
-                              activeCategory === cat.title
+                              activeCategory === cat.title || activeCategory === cat.slug
                                 ? 'bg-stone-900 text-white shadow-md'
                                 : 'bg-white border border-stone-200 text-stone-600 hover:border-amber-400'
                             }`}
                           >
                             <span>{cat.title}</span>
-                          </button>
+                          </a>
                         ))}
                       </div>
                     </div>
@@ -1665,18 +2009,24 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                             const defaultSizeName = product.sizes?.[0]?.name || 'کوچک';
                             const basePrice = getBasePrice(product, defaultSizeName);
                             const finalPrice = calculateFinalPrice(product, defaultSizeName);
+                            const prodUrl = `/products/${encodeURIComponent(product.slug || sanitizeSlug(product.title, 'product', product.id))}`;
 
                             return (
-                              <div
+                              <a
                                 key={product.id}
-                                onClick={() => handleOpenProduct(product)}
-                                className="bg-white rounded-[25px] overflow-hidden shadow-xs hover:-translate-y-1.5 hover:shadow-xl transition-all duration-300 border border-stone-100 cursor-pointer group flex flex-col justify-between"
+                                href={prodUrl}
+                                onClick={(e) => handleOpenProduct(product, e)}
+                                className="bg-white rounded-[25px] overflow-hidden shadow-xs hover:-translate-y-1.5 hover:shadow-xl transition-all duration-300 border border-stone-100 cursor-pointer group flex flex-col justify-between block text-right"
                               >
                                 <div>
                                   <div className="h-48 overflow-hidden bg-stone-50 relative">
                                     <img 
                                       src={product.imageName} 
-                                      alt={product.title} 
+                                      alt={product.imageAlt || product.title} 
+                                      width={400}
+                                      height={300}
+                                      loading="lazy"
+                                      decoding="async"
                                       className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
                                     />
                                     {hasDiscount && (
@@ -1719,14 +2069,14 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                                     </span>
                                   </div>
 
-                                  <button 
+                                  <span 
                                     className="w-9 h-9 rounded-xl bg-stone-900 group-hover:bg-amber-500 text-white flex items-center justify-center transition shadow-xs"
                                     title="مشاهده اندازه‌ها و خرید"
                                   >
                                     <ArrowLeft className="w-4 h-4" />
-                                  </button>
+                                  </span>
                                 </div>
-                              </div>
+                              </a>
                             );
                           })}
                         </div>
@@ -1749,16 +2099,17 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                           {sec.subtitle || 'برای انتخاب بهترین فرآورده کندو متناسب با شرایط بدنی خود، با کارشناسان تخصصی ما در ارتباط باشید.'}
                         </p>
                       </div>
-                      <button
-                        onClick={() => {
-                          setActivePage('consultation');
-                          window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+                      <a
+                        href="/consultation"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          handleSelectPage('consultation');
                         }}
                         className="px-6 py-3.5 bg-stone-900 hover:bg-stone-800 text-white rounded-2xl text-xs font-extrabold shadow-lg transition flex items-center gap-2 shrink-0 cursor-pointer"
                       >
                         <span>درخواست مشاوره فوری</span>
                         <ArrowLeft className="w-4 h-4" />
-                      </button>
+                      </a>
                     </section>
                   );
 
@@ -1769,50 +2120,55 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                         <h2 className="text-xl font-black text-stone-900">
                           {sec.title || ('مقالات و مطالب علمی ' + brandName)}
                         </h2>
-                        <button 
-                          onClick={() => {
-                            setActivePage('articles');
-                            window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+                        <a 
+                          href="/articles"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleSelectPage('articles');
                           }}
                           className="text-xs text-amber-600 font-bold hover:underline flex items-center gap-1 cursor-pointer"
                         >
                           <span>همه مقالات</span>
                           <ChevronRight className="w-3.5 h-3.5 rotate-180" />
-                        </button>
+                        </a>
                       </div>
                       <p className="text-xs text-stone-500 mb-6">
                         {sec.subtitle || 'آخرین نوشته‌ها برای آشنایی با خواص عسل طبیعی، دمنوش‌های گیاهی و سبک زندگی سالم.'}
                       </p>
 
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                        {posts.map(post => (
-                          <article 
-                            key={post.id}
-                            onClick={() => handleOpenPost(post)}
-                            className="bg-white rounded-2xl p-5 shadow-xs border border-stone-100 hover:shadow-md transition cursor-pointer flex flex-col justify-between"
-                          >
-                            <div>
-                              <div className="text-[11px] font-extrabold text-[#4CAF50] mb-2">
-                                {post.categoryTitle || 'سبک زندگی ارگانیک'}
+                        {publicPosts.map(post => {
+                          const postUrl = `/articles/${encodeURIComponent(post.slug || sanitizeSlug(post.title, 'article', post.id))}`;
+                          return (
+                            <a 
+                              key={post.id}
+                              href={postUrl}
+                              onClick={(e) => handleOpenPost(post, e)}
+                              className="bg-white rounded-2xl p-5 shadow-xs border border-stone-100 hover:shadow-md transition cursor-pointer flex flex-col justify-between block text-right"
+                            >
+                              <div>
+                                <div className="text-[11px] font-extrabold text-[#4CAF50] mb-2">
+                                  {post.categoryTitle || 'سبک زندگی ارگانیک'}
+                                </div>
+                                <h3 className="text-sm font-black text-stone-900 leading-snug mb-2 line-clamp-2">
+                                  {post.title}
+                                </h3>
+                                <div className="text-[10px] text-stone-400 mb-3 flex items-center gap-2">
+                                  <Clock className="w-3 h-3" />
+                                  <span>زمان مطالعه: ۵ دقیقه</span>
+                                </div>
+                                <p className="text-xs text-stone-500 leading-relaxed line-clamp-3 mb-4">
+                                  {post.description}
+                                </p>
                               </div>
-                              <h3 className="text-sm font-black text-stone-900 leading-snug mb-2 line-clamp-2">
-                                {post.title}
-                              </h3>
-                              <div className="text-[10px] text-stone-400 mb-3 flex items-center gap-2">
-                                <Clock className="w-3 h-3" />
-                                <span>زمان مطالعه: ۵ دقیقه</span>
-                              </div>
-                              <p className="text-xs text-stone-500 leading-relaxed line-clamp-3 mb-4">
-                                {post.description}
-                              </p>
-                            </div>
 
-                            <span className="text-xs font-bold text-amber-600 hover:text-amber-700 flex items-center gap-1 mt-auto">
-                              ادامه مطلب
-                              <ArrowLeft className="w-3.5 h-3.5" />
-                            </span>
-                          </article>
-                        ))}
+                              <span className="text-xs font-bold text-amber-600 hover:text-amber-700 flex items-center gap-1 mt-auto">
+                                ادامه مطلب
+                                <ArrowLeft className="w-3.5 h-3.5" />
+                              </span>
+                            </a>
+                          );
+                        })}
                       </div>
                     </section>
                   );
@@ -1886,40 +2242,86 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {posts.map(post => (
-                <article 
-                  key={post.id}
-                  onClick={() => handleOpenPost(post)}
-                  className="bg-white rounded-2xl overflow-hidden shadow-xs border border-stone-100 hover:shadow-lg transition cursor-pointer flex flex-col"
-                >
-                  <img 
-                    src={post.imageName} 
-                    alt={post.title} 
-                    className="h-44 w-full object-cover"
-                  />
-                  <div className="p-5 flex-1 flex flex-col justify-between">
-                    <div>
-                      <div className="text-[11px] font-bold text-[#4CAF50] mb-1">
-                        {post.categoryTitle || 'مقالات اونیوال'}
+              {publicPosts.map(post => {
+                const postUrl = `/articles/${encodeURIComponent(post.slug || sanitizeSlug(post.title, 'article', post.id))}`;
+                return (
+                  <a 
+                    key={post.id}
+                    href={postUrl}
+                    onClick={(e) => handleOpenPost(post, e)}
+                    className="bg-white rounded-2xl overflow-hidden shadow-xs border border-stone-100 hover:shadow-lg transition cursor-pointer flex flex-col block text-right"
+                  >
+                    <img 
+                      src={post.imageName} 
+                      alt={post.imageAlt || post.title} 
+                      width={400}
+                      height={240}
+                      loading="lazy"
+                      decoding="async"
+                      className="h-44 w-full object-cover"
+                    />
+                    <div className="p-5 flex-1 flex flex-col justify-between">
+                      <div>
+                        <div className="text-[11px] font-bold text-[#4CAF50] mb-1">
+                          {post.categoryTitle || 'مقالات اونیوال'}
+                        </div>
+                        <h3 className="text-sm font-black text-stone-900 mb-2 leading-snug">
+                          {post.title}
+                        </h3>
+                        <p className="text-xs text-stone-500 line-clamp-3 leading-relaxed mb-4">
+                          {post.description}
+                        </p>
                       </div>
-                      <h3 className="text-sm font-black text-stone-900 mb-2 leading-snug">
-                        {post.title}
-                      </h3>
-                      <p className="text-xs text-stone-500 line-clamp-3 leading-relaxed mb-4">
-                        {post.description}
-                      </p>
-                    </div>
 
-                    <div className="flex items-center justify-between text-[11px] text-stone-400 pt-3 border-t border-stone-50">
-                      <span>نویسنده: {post.authorName}</span>
-                      <span className="text-amber-600 font-bold flex items-center gap-1">
-                        مطالعه
-                        <ArrowLeft className="w-3 h-3" />
-                      </span>
+                      <div className="flex items-center justify-between text-[11px] text-stone-400 pt-3 border-t border-stone-50">
+                        <span>نویسنده: {post.authorName}</span>
+                        <span className="text-amber-600 font-bold flex items-center gap-1">
+                          مطالعه
+                          <ArrowLeft className="w-3 h-3" />
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                </article>
-              ))}
+                  </a>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ================= 404 NOT FOUND PAGE ================= */}
+        {activePage === 'not_found' && (
+          <div className="max-w-xl mx-auto bg-white rounded-3xl p-8 sm:p-12 shadow-xs border border-stone-200 text-center space-y-4 animate-fadeIn my-8">
+            <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center mx-auto font-black text-2xl">
+              ۴۰۴
+            </div>
+            <h1 className="text-xl sm:text-2xl font-black text-stone-900">
+              صفحه مورد نظر یافت نشد (۴۰۴)
+            </h1>
+            <p className="text-xs sm:text-sm text-stone-500 leading-relaxed">
+              آدرس درخواستی شما (<code className="font-mono text-rose-600 bg-rose-50 px-2 py-0.5 rounded" dir="ltr">{notFoundPath}</code>) در فروشگاه {brandName} وجود ندارد، حذف شده یا به آدرس جدیدی منتقل شده است.
+            </p>
+            <div className="pt-2 flex flex-wrap justify-center gap-3">
+              <a
+                href="/"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleSelectPage('home');
+                }}
+                className="px-6 py-3 bg-stone-900 hover:bg-stone-800 text-white rounded-2xl text-xs font-black transition inline-flex items-center gap-2 cursor-pointer"
+              >
+                <span>بازگشت به صفحه اصلی فروشگاه</span>
+                <ArrowLeft className="w-4 h-4" />
+              </a>
+              <a
+                href="/articles"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleSelectPage('articles');
+                }}
+                className="px-5 py-3 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-2xl text-xs font-bold transition cursor-pointer"
+              >
+                مشاهده مقالات علمی
+              </a>
             </div>
           </div>
         )}
@@ -3508,12 +3910,12 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
           <div>
             <h4 className="text-sm font-bold text-amber-400 mb-3">دسترسی سریع</h4>
             <ul className="space-y-2 text-xs text-stone-300">
-              <li><button onClick={() => handleSelectPage('home')} className="hover:text-white cursor-pointer">{navigation.home || 'خانه'}</button></li>
-              <li><button onClick={() => handleSelectPage('articles')} className="hover:text-white cursor-pointer">{navigation.articles || 'مقالات علمی'}</button></li>
-              <li><button onClick={() => handleSelectPage('consultation')} className="hover:text-white cursor-pointer">{navigation.consultation || 'مشاوره تخصصی'}</button></li>
-              <li><button onClick={() => handleSelectPage('tracking')} className="hover:text-white cursor-pointer">{navigation.tracking || 'پیگیری سفارش'}</button></li>
-              <li><button onClick={() => handleSelectPage('about')} className="hover:text-white cursor-pointer">{navigation.about || 'درباره ما'}</button></li>
-              <li><button onClick={() => handleSelectPage('contact')} className="hover:text-white cursor-pointer">{navigation.contact || 'تماس با ما'}</button></li>
+              <li><a href="/" onClick={(e) => { e.preventDefault(); handleSelectPage('home'); }} className="hover:text-white cursor-pointer">{navigation.home || 'خانه'}</a></li>
+              <li><a href="/articles" onClick={(e) => { e.preventDefault(); handleSelectPage('articles'); }} className="hover:text-white cursor-pointer">{navigation.articles || 'مقالات علمی'}</a></li>
+              <li><a href="/consultation" onClick={(e) => { e.preventDefault(); handleSelectPage('consultation'); }} className="hover:text-white cursor-pointer">{navigation.consultation || 'مشاوره تخصصی'}</a></li>
+              <li><a href="/tracking" onClick={(e) => { e.preventDefault(); handleSelectPage('tracking'); }} className="hover:text-white cursor-pointer">{navigation.tracking || 'پیگیری سفارش'}</a></li>
+              <li><a href="/about" onClick={(e) => { e.preventDefault(); handleSelectPage('about'); }} className="hover:text-white cursor-pointer">{navigation.about || 'درباره ما'}</a></li>
+              <li><a href="/contact" onClick={(e) => { e.preventDefault(); handleSelectPage('contact'); }} className="hover:text-white cursor-pointer">{navigation.contact || 'تماس با ما'}</a></li>
             </ul>
           </div>
         </div>
