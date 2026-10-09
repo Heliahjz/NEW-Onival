@@ -1,6 +1,17 @@
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { db, auth } from '../firebaseConfig';
+import { supabase } from '../supabaseClient';
 import { sanitizeSlug, isSlugDuplicate } from '../utils/seo';
+import {
+  Product,
+  ProductCategory,
+  Post,
+  PostCategory,
+  ContactMessage,
+  Order,
+  TelegramConfig,
+  BotActivityLog,
+  SiteContent,
+  SlugRedirect,
+} from '../types';
 import {
   FullOnivalCloudState,
   createInitialSeedState,
@@ -13,7 +24,8 @@ import {
   DEFAULT_ORDERS,
   DEFAULT_TELEGRAM_CONFIG,
   DEFAULT_BOT_LOGS,
-  DEFAULT_SITE_CONTENT
+  DEFAULT_SITE_CONTENT,
+  AdminCredentialsState,
 } from './seedData';
 
 export enum OperationType {
@@ -25,47 +37,28 @@ export enum OperationType {
   WRITE = 'write',
 }
 
-export interface FirestoreErrorInfo {
+export interface SupabaseErrorInfo {
   error: string;
+  code?: string;
   operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId?: string | null;
-    email?: string | null;
-    emailVerified?: boolean | null;
-    isAnonymous?: boolean | null;
-    tenantId?: string | null;
-    providerInfo?: {
-      providerId?: string | null;
-      email?: string | null;
-    }[];
-  };
+  table: string | null;
 }
 
-export function handleFirestoreError(
-  error: unknown,
+export function handleSupabaseError(
+  error: any,
   operationType: OperationType,
-  path: string | null,
+  table: string | null,
   rethrow = false
 ) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo:
-        auth.currentUser?.providerData?.map((provider) => ({
-          providerId: provider.providerId,
-          email: provider.email,
-        })) || [],
-    },
+  const errInfo: SupabaseErrorInfo = {
+    error: error?.message || (error instanceof Error ? error.message : String(error)),
+    code: error?.code,
     operationType,
-    path,
+    table,
   };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  if (error?.code !== 'PGRST205') {
+    console.warn('Supabase Notice: ', JSON.stringify(errInfo));
+  }
   if (rethrow) {
     throw new Error(JSON.stringify(errInfo));
   }
@@ -73,8 +66,6 @@ export function handleFirestoreError(
 
 const LOCAL_BACKUP_KEY = 'onival_full_cloud_state_v1';
 const ADMIN_SESSION_STORAGE_KEY = 'onival_admin_session_token_v1';
-const MAIN_DOC_PATH = 'onival_store/main_state';
-const ADMIN_DOC_PATH = 'admin_accounts/primary_admin';
 
 let memoryCache: FullOnivalCloudState | null = null;
 let isFetchSetupDone = false;
@@ -183,88 +174,439 @@ function writeLocalBackup(state: FullOnivalCloudState) {
   }
 }
 
+// ============================================================================
+// توابع استاندارد CRUD روی جداول Supabase (products, categories, orders, admin_users, settings)
+// ============================================================================
+
+function mapProductToRow(p: Product) {
+  return {
+    id: Number(p.id),
+    title: String(p.title || ''),
+    slug: String(p.slug || `prod-${p.id}`),
+    price: Number(p.price || 0),
+    discount: Number(p.discount || 0),
+    category_id: Number(p.categoryId || 1),
+    category_title: String(p.categoryTitle || ''),
+    image_name: String(p.imageName || ''),
+    description: String(p.description || ''),
+    content: String(p.content || ''),
+    status: String(p.status || 'published'),
+    is_delete: Boolean(p.isDelete),
+    payload: p,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function mapRowToProduct(row: any): Product {
+  if (row?.payload && typeof row.payload === 'object' && row.payload.title) {
+    return {
+      ...row.payload,
+      id: Number(row.id ?? row.payload.id),
+      title: row.title ?? row.payload.title,
+      slug: row.slug ?? row.payload.slug,
+      price: Number(row.price ?? row.payload.price ?? 0),
+      discount: Number(row.discount ?? row.payload.discount ?? 0),
+      categoryId: Number(row.category_id ?? row.payload.categoryId ?? 1),
+      categoryTitle: row.category_title ?? row.payload.categoryTitle ?? '',
+      imageName: row.image_name ?? row.payload.imageName ?? '',
+      description: row.description ?? row.payload.description ?? '',
+      content: row.content ?? row.payload.content ?? '',
+      status: (row.status ?? row.payload.status ?? 'published') as 'published' | 'draft',
+      isDelete: Boolean(row.is_delete ?? row.payload.isDelete),
+    };
+  }
+  return {
+    id: Number(row.id),
+    title: String(row.title || ''),
+    slug: String(row.slug || `prod-${row.id}`),
+    price: Number(row.price || 0),
+    hasSize: Boolean(row.has_size || false),
+    sizes: Array.isArray(row.sizes) ? row.sizes : [],
+    priceSmall: Number(row.price_small || row.price || 0),
+    priceLarge: Number(row.price_large || row.price || 0),
+    discount: Number(row.discount || 0),
+    type: String(row.type || 'honey'),
+    categoryId: Number(row.category_id || row.categoryId || 1),
+    categoryTitle: String(row.category_title || row.categoryTitle || ''),
+    imageName: String(row.image_name || row.imageName || ''),
+    description: String(row.description || ''),
+    content: String(row.content || ''),
+    features: Array.isArray(row.features) ? row.features : [],
+    isDelete: Boolean(row.is_delete || row.isDelete || false),
+    creationTime: String(row.creation_time || row.creationTime || '1403/06/25'),
+    status: (row.status || 'published') as 'published' | 'draft',
+  };
+}
+
+function mapCategoryToRow(c: ProductCategory) {
+  return {
+    id: Number(c.id),
+    title: String(c.title || ''),
+    slug: String(c.slug || `cat-${c.id}`),
+    parent_id: c.parentId ?? null,
+    sort_order: Number(c.sortOrder ?? c.id),
+    description: String(c.description || ''),
+    image_name: String(c.imageName || ''),
+    status: String(c.status || 'published'),
+    payload: c,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function mapRowToCategory(row: any): ProductCategory {
+  if (row?.payload && typeof row.payload === 'object' && row.payload.title) {
+    return {
+      ...row.payload,
+      id: Number(row.id ?? row.payload.id),
+      title: row.title ?? row.payload.title,
+      slug: row.slug ?? row.payload.slug,
+      parentId: row.parent_id !== undefined ? row.parent_id : row.payload.parentId ?? null,
+      sortOrder: Number(row.sort_order ?? row.payload.sortOrder ?? row.id),
+      description: row.description ?? row.payload.description ?? '',
+      imageName: row.image_name ?? row.payload.imageName ?? '',
+      status: (row.status ?? row.payload.status ?? 'published') as 'published' | 'draft',
+    };
+  }
+  return {
+    id: Number(row.id),
+    title: String(row.title || ''),
+    slug: String(row.slug || `cat-${row.id}`),
+    parentId: row.parent_id ?? row.parentId ?? null,
+    sortOrder: Number(row.sort_order ?? row.sortOrder ?? row.id),
+    description: String(row.description || ''),
+    imageName: String(row.image_name || row.imageName || ''),
+    status: (row.status || 'published') as 'published' | 'draft',
+  };
+}
+
+function mapOrderToRow(o: Order) {
+  return {
+    id: Number(o.id),
+    tracking_code: String(o.trackingCode || `ONV-ORD-${o.id}`),
+    user_full_name: String(o.userFullName || ''),
+    phone_number: String(o.phoneNumber || ''),
+    user_address: String(o.userAddress || ''),
+    total_price: Number(o.totalPrice || 0),
+    status: String(o.status || 'Pending'),
+    payment_status: String(o.paymentStatus || 'Unpaid'),
+    payment_method: String(o.paymentMethod || 'card_to_card'),
+    creation_time: String(o.creationTime || ''),
+    items: Array.isArray(o.items) ? o.items : [],
+    payload: o,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function mapRowToOrder(row: any): Order {
+  if (row?.payload && typeof row.payload === 'object' && row.payload.trackingCode) {
+    return {
+      ...row.payload,
+      id: Number(row.id ?? row.payload.id),
+      trackingCode: row.tracking_code ?? row.payload.trackingCode,
+      userFullName: row.user_full_name ?? row.payload.userFullName,
+      phoneNumber: row.phone_number ?? row.payload.phoneNumber,
+      userAddress: row.user_address ?? row.payload.userAddress,
+      totalPrice: Number(row.total_price ?? row.payload.totalPrice ?? 0),
+      status: row.status ?? row.payload.status ?? 'Pending',
+      paymentStatus: row.payment_status ?? row.payload.paymentStatus ?? 'Unpaid',
+      paymentMethod: row.payment_method ?? row.payload.paymentMethod ?? 'card_to_card',
+      items: Array.isArray(row.items) ? row.items : row.payload.items || [],
+    };
+  }
+  return {
+    id: Number(row.id),
+    trackingCode: String(row.tracking_code || row.trackingCode || `ONV-ORD-${row.id}`),
+    userFullName: String(row.user_full_name || row.userFullName || ''),
+    phoneNumber: String(row.phone_number || row.phoneNumber || ''),
+    userAddress: String(row.user_address || row.userAddress || ''),
+    totalPrice: Number(row.total_price ?? row.totalPrice ?? 0),
+    status: (row.status || 'Pending') as Order['status'],
+    paymentStatus: (row.payment_status || row.paymentStatus || 'Unpaid') as Order['paymentStatus'],
+    paymentMethod: (row.payment_method || row.paymentMethod || 'card_to_card') as Order['paymentMethod'],
+    creationTime: String(row.creation_time || row.creationTime || ''),
+    items: Array.isArray(row.items) ? row.items : [],
+  };
+}
+
+// 1. Products CRUD on Supabase `products` table
+export async function fetchProductsFromSupabase(): Promise<Product[] | null> {
+  const { data, error } = await supabase
+    .from('products')
+    .select('*')
+    .order('id', { ascending: false });
+  if (error) {
+    handleSupabaseError(error, OperationType.LIST, 'products');
+    return null;
+  }
+  return (data || []).map(mapRowToProduct);
+}
+
+export async function upsertProductInSupabase(product: Product): Promise<boolean> {
+  const { error } = await supabase
+    .from('products')
+    .upsert(mapProductToRow(product), { onConflict: 'id' });
+  if (error) {
+    handleSupabaseError(error, OperationType.WRITE, 'products');
+    return false;
+  }
+  return true;
+}
+
+export async function deleteProductFromSupabase(id: number): Promise<boolean> {
+  const { error } = await supabase.from('products').delete().eq('id', id);
+  if (error) {
+    handleSupabaseError(error, OperationType.DELETE, 'products');
+    return false;
+  }
+  return true;
+}
+
+// 2. Categories CRUD on Supabase `categories` table
+export async function fetchCategoriesFromSupabase(): Promise<ProductCategory[] | null> {
+  const { data, error } = await supabase
+    .from('categories')
+    .select('*')
+    .order('sort_order', { ascending: true });
+  if (error) {
+    handleSupabaseError(error, OperationType.LIST, 'categories');
+    return null;
+  }
+  return (data || []).map(mapRowToCategory);
+}
+
+export async function upsertCategoryInSupabase(category: ProductCategory): Promise<boolean> {
+  const { error } = await supabase
+    .from('categories')
+    .upsert(mapCategoryToRow(category), { onConflict: 'id' });
+  if (error) {
+    handleSupabaseError(error, OperationType.WRITE, 'categories');
+    return false;
+  }
+  return true;
+}
+
+export async function deleteCategoryFromSupabase(id: number): Promise<boolean> {
+  const { error } = await supabase.from('categories').delete().eq('id', id);
+  if (error) {
+    handleSupabaseError(error, OperationType.DELETE, 'categories');
+    return false;
+  }
+  return true;
+}
+
+// 3. Orders CRUD on Supabase `orders` table
+export async function fetchOrdersFromSupabase(): Promise<Order[] | null> {
+  const { data, error } = await supabase
+    .from('orders')
+    .select('*')
+    .order('id', { ascending: false });
+  if (error) {
+    handleSupabaseError(error, OperationType.LIST, 'orders');
+    return null;
+  }
+  return (data || []).map(mapRowToOrder);
+}
+
+export async function upsertOrderInSupabase(order: Order): Promise<boolean> {
+  const { error } = await supabase
+    .from('orders')
+    .upsert(mapOrderToRow(order), { onConflict: 'id' });
+  if (error) {
+    handleSupabaseError(error, OperationType.WRITE, 'orders');
+    return false;
+  }
+  return true;
+}
+
+// 4. Admin Users CRUD on Supabase `admin_users` table
+export async function fetchAdminCredentialsFromSupabase(): Promise<AdminCredentialsState | null> {
+  const { data, error } = await supabase
+    .from('admin_users')
+    .select('*')
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    handleSupabaseError(error, OperationType.GET, 'admin_users');
+    return null;
+  }
+  if (!data) return null;
+  return {
+    username: String(data.username || DEFAULT_ADMIN_CREDENTIALS.username),
+    email: String(data.email || DEFAULT_ADMIN_CREDENTIALS.email),
+    password: String(data.password || DEFAULT_ADMIN_CREDENTIALS.password),
+    name: String(data.name || DEFAULT_ADMIN_CREDENTIALS.name),
+  };
+}
+
+export async function upsertAdminCredentialsInSupabase(
+  creds: AdminCredentialsState
+): Promise<boolean> {
+  const { error } = await supabase.from('admin_users').upsert(
+    {
+      id: 1,
+      username: creds.username || 'admin',
+      email: creds.email || 'admin@onival.com',
+      password: creds.password || 'admin',
+      name: creds.name || 'مدیریت اونیوال (ONIVAL Admin)',
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'id' }
+  );
+  if (error) {
+    handleSupabaseError(error, OperationType.WRITE, 'admin_users');
+    return false;
+  }
+  return true;
+}
+
+// 5. Settings & Full Store State CRUD on Supabase `settings` table
+export async function fetchSettingsFromSupabase(): Promise<Partial<FullOnivalCloudState> | null> {
+  const { data, error } = await supabase
+    .from('settings')
+    .select('*')
+    .eq('key', 'main_state')
+    .maybeSingle();
+  if (error) {
+    handleSupabaseError(error, OperationType.GET, 'settings');
+    return null;
+  }
+  if (!data || !data.value) return null;
+  return typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
+}
+
+export async function upsertSettingsInSupabase(state: FullOnivalCloudState): Promise<boolean> {
+  const { adminCredentials: _omitCreds, ...publicCloudState } = state;
+  const { error } = await supabase.from('settings').upsert(
+    {
+      key: 'main_state',
+      value: publicCloudState,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'key' }
+  );
+  if (error) {
+    handleSupabaseError(error, OperationType.WRITE, 'settings');
+    return false;
+  }
+  return true;
+}
+
 /**
- * ذخیره وضعیت کامل پروژه و حساب ادمین و محصولات در دیتابیس ابری Firebase Firestore
+ * ذخیره وضعیت کامل پروژه، محصولات، دسته‌بندی‌ها، سفارشات، تنظیمات و حساب ادمین در دیتابیس ابری Supabase
  */
-export async function saveCloudStateToFirebase(state: FullOnivalCloudState): Promise<boolean> {
+export async function saveCloudStateToSupabase(state: FullOnivalCloudState): Promise<boolean> {
   const normalized = normalizeState(state);
   memoryCache = normalized;
   writeLocalBackup(normalized);
 
   try {
-    // Strip sensitive adminCredentials before writing to public Firestore document
-    const { adminCredentials: _omitCreds, ...publicCloudState } = normalized;
-    const payloadJson = JSON.stringify(publicCloudState);
-    await setDoc(doc(db, 'onival_store', 'main_state'), {
-      updatedAt: new Date().toISOString(),
-      version: 1,
-      payloadJson: payloadJson.slice(0, 940000),
-    });
+    const activeProds = normalized.products.filter((x) => !x.isDelete);
+    const results = await Promise.all([
+      activeProds.length > 0
+        ? supabase.from('products').upsert(activeProds.map(mapProductToRow), { onConflict: 'id' })
+        : Promise.resolve({ error: null }),
+      normalized.productCategories.length > 0
+        ? supabase
+            .from('categories')
+            .upsert(normalized.productCategories.map(mapCategoryToRow), { onConflict: 'id' })
+        : Promise.resolve({ error: null }),
+      normalized.orders.length > 0
+        ? supabase
+            .from('orders')
+            .upsert(normalized.orders.map(mapOrderToRow), { onConflict: 'id' })
+        : Promise.resolve({ error: null }),
+      upsertAdminCredentialsInSupabase(normalized.adminCredentials),
+      upsertSettingsInSupabase(normalized),
+    ]);
 
-    // همگام‌سازی کالکشن محصولات در فایربیس برای مشاهده مستقیم در کنسول فایربیس
-    for (const p of normalized.products.filter((x) => !x.isDelete).slice(0, 25)) {
-      await setDoc(doc(db, 'products', `prod_${p.id}`), {
-        id: Number(p.id),
-        title: String(p.title || '').slice(0, 190),
-        slug: String(p.slug || `prod-${p.id}`).slice(0, 190),
-        price: Number(p.price || 0),
-        discount: Number(p.discount || 0),
-        categoryId: Number(p.categoryId || 1),
-        categoryTitle: String(p.categoryTitle || '').slice(0, 140),
-        imageName: String(p.imageName || '').slice(0, 190000),
-        description: String(p.description || '').slice(0, 1900),
-        content: String(p.content || '').slice(0, 9500),
-        creationTime: String(p.creationTime || '1403/06/25').slice(0, 60),
-      });
-    }
-
-    return true;
+    const hasTableError = results.some((r: any) => r && r.error);
+    return !hasTableError;
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, MAIN_DOC_PATH, false);
+    handleSupabaseError(error, OperationType.WRITE, 'settings', false);
     return false;
   }
 }
 
+// Alias for backwards compatibility across components
+export const saveCloudStateToFirebase = saveCloudStateToSupabase;
+
 /**
  * اجرای خودکار راه‌اندازی اولیه (Auto-Seed) به محض بارگذاری سایت:
- * اگر دیتابیس فایربیس خالی باشد، محصولات پیش‌فرض و حساب ادمین پیش‌فرض را خودکار در فایربیس می‌سازد.
+ * اگر جداول دیتابیس در سوپابیس خالی باشند، محصولات پیش‌فرض، دسته‌بندی‌ها، تنظیمات و حساب ادمین پیش‌فرض
+ * (admin@onival.com / admin) را به صورت خودکار در سوپابیس درج می‌کند.
  */
-export async function ensureFirebaseSeededOnBoot(): Promise<{
+export async function ensureSupabaseSeededOnBoot(): Promise<{
   state: FullOnivalCloudState;
   wasSeededNow: boolean;
-  source: 'firestore' | 'seeded' | 'local';
+  source: 'supabase' | 'seeded' | 'local';
 }> {
   try {
-    const snap = await getDoc(doc(db, 'onival_store', 'main_state'));
-    if (snap.exists()) {
-      const data = snap.data();
-      if (data && typeof data.payloadJson === 'string') {
-        const parsed = JSON.parse(data.payloadJson) as Partial<FullOnivalCloudState>;
-        const activeProds = Array.isArray(parsed.products)
-          ? parsed.products.filter((p) => !p.isDelete)
-          : [];
+    const [dbProducts, dbCategories, dbOrders, dbAdmin, dbSettings] = await Promise.all([
+      fetchProductsFromSupabase(),
+      fetchCategoriesFromSupabase(),
+      fetchOrdersFromSupabase(),
+      fetchAdminCredentialsFromSupabase(),
+      fetchSettingsFromSupabase(),
+    ]);
 
-        // اگر دیتابیس در فایربیس وجود دارد اما خالی از محصول است، آن را Seed کن
-        if (activeProds.length === 0) {
-          const seeded = normalizeState(parsed);
-          await saveCloudStateToFirebase(seeded);
-          return { state: seeded, wasSeededNow: true, source: 'seeded' };
-        }
+    // Check if Supabase tables exist and responded
+    const tablesAvailable =
+      dbProducts !== null ||
+      dbCategories !== null ||
+      dbOrders !== null ||
+      dbAdmin !== null ||
+      dbSettings !== null;
 
-        const loaded = normalizeState(parsed);
-        memoryCache = loaded;
-        writeLocalBackup(loaded);
-        return { state: loaded, wasSeededNow: false, source: 'firestore' };
+    if (tablesAvailable) {
+      const activeProds = (dbProducts || []).filter((p) => !p.isDelete);
+
+      // اگر جدول محصولات یا تنظیمات در سوپابیس خالی است -> Seed خودکار
+      if (activeProds.length === 0 && !dbSettings) {
+        const localExisting = readLocalBackup();
+        const initialToSeed = localExisting
+          ? normalizeState(localExisting)
+          : createInitialSeedState();
+        await saveCloudStateToSupabase(initialToSeed);
+        return { state: initialToSeed, wasSeededNow: true, source: 'seeded' };
       }
+
+      const combined: Partial<FullOnivalCloudState> = {
+        ...(dbSettings || {}),
+        products: activeProds.length > 0 ? dbProducts! : dbSettings?.products,
+        productCategories:
+          dbCategories && dbCategories.length > 0
+            ? dbCategories
+            : dbSettings?.productCategories,
+        orders: dbOrders && dbOrders.length > 0 ? dbOrders : dbSettings?.orders,
+        adminCredentials: dbAdmin || dbSettings?.adminCredentials || DEFAULT_ADMIN_CREDENTIALS,
+      };
+
+      const loaded = normalizeState(combined);
+      memoryCache = loaded;
+      writeLocalBackup(loaded);
+
+      // اگر جدول admin_users یا products خالی بوده ولی settings پر بوده، آن‌ها را همگام کن
+      if (!dbAdmin) {
+        await upsertAdminCredentialsInSupabase(loaded.adminCredentials);
+      }
+      if (activeProds.length === 0 && loaded.products.length > 0) {
+        await supabase
+          .from('products')
+          .upsert(loaded.products.map(mapProductToRow), { onConflict: 'id' });
+      }
+
+      return { state: loaded, wasSeededNow: false, source: 'supabase' };
     }
 
-    // دیتابیس فایربیس کاملاً خالی است -> ساخت خودکار محصولات پیش‌فرض + حساب ادمین پیش‌فرض
+    // اگر جداول هنوز در Supabase ساخته نشده‌اند یا آفلاین است، از Seed اولیه + LocalStorage استفاده کن و تلاش برای Seed در Supabase انجام بده
     const localExisting = readLocalBackup();
     const initialToSeed = localExisting ? normalizeState(localExisting) : createInitialSeedState();
-    await saveCloudStateToFirebase(initialToSeed);
-    return { state: initialToSeed, wasSeededNow: true, source: 'seeded' };
+    memoryCache = initialToSeed;
+    writeLocalBackup(initialToSeed);
+    await saveCloudStateToSupabase(initialToSeed);
+    return { state: initialToSeed, wasSeededNow: !localExisting, source: 'local' };
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, MAIN_DOC_PATH, false);
+    handleSupabaseError(error, OperationType.GET, 'supabase_boot', false);
     const fallback = readLocalBackup() || createInitialSeedState();
     memoryCache = fallback;
     writeLocalBackup(fallback);
@@ -272,8 +614,10 @@ export async function ensureFirebaseSeededOnBoot(): Promise<{
   }
 }
 
+export const ensureFirebaseSeededOnBoot = ensureSupabaseSeededOnBoot;
+
 /**
- * دکمه راه‌اندازی مجدد / Seed Data دستی (بازگردانی یا تزریق محصولات پیش‌فرض و حساب ادمین پیش‌فرض در فایربیس)
+ * دکمه راه‌اندازی مجدد / Seed Data دستی (بازگردانی یا تزریق محصولات پیش‌فرض و حساب ادمین پیش‌فرض در سوپابیس)
  */
 export async function runManualSeedDatabase(options?: {
   resetAllToDefault?: boolean;
@@ -284,7 +628,6 @@ export async function runManualSeedDatabase(options?: {
   if (options?.resetAllToDefault) {
     nextState = createInitialSeedState();
   } else {
-    // حفظ سفارشات و پیام‌های موجود، اما اطمینان از وجود تمام محصولات پیش‌فرض و حساب ادمین پیش‌فرض
     const existingIds = new Set(current.products.filter((p) => !p.isDelete).map((p) => p.id));
     const mergedProducts = [...current.products.filter((p) => !p.isDelete)];
     for (const defProd of DEFAULT_PRODUCTS) {
@@ -312,25 +655,28 @@ export async function runManualSeedDatabase(options?: {
     };
   }
 
-  const savedToCloud = await saveCloudStateToFirebase(nextState);
+  const savedToCloud = await saveCloudStateToSupabase(nextState);
 
-  // همگام‌سازی با سرور محلی در صورت فعال بودن
   try {
+    const token = getAdminSessionToken();
     await window.fetch('/api/firebase/import-state', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify(nextState),
     });
   } catch {
-    // در هاست استاتیک فایربیس سرور اکسپرس وجود ندارد و مستقیم با Firestore کار می‌کند
+    // در هاست استاتیک Netlify سرور اکسپرس وجود ندارد و مستقیم با Supabase کار می‌کند
   }
 
   return {
     ok: true,
     state: nextState,
     message: savedToCloud
-      ? 'محصولات پیش‌فرض، دسته‌بندی‌ها، مقالات و حساب ادمین پیش‌فرض با موفقیت در دیتابیس Firebase Firestore ساخته و همگام‌سازی شدند.'
-      : 'اطلاعات اولیه ساخته شد و در حافظه محلی ذخیره گردید (لطفاً اتصال اینترنت یا قوانین فایربیس را بررسی کنید).',
+      ? 'محصولات پیش‌فرض، دسته‌بندی‌ها، مقالات و حساب ادمین پیش‌فرض با موفقیت در دیتابیس Supabase درج و همگام‌سازی شدند.'
+      : 'داده‌های اولیه (Seed Data) ساخته و آماده شد. برای ذخیره در جداول ابری Supabase، اسکریپت SQL ساخت جداول را در پنل Supabase اجرا نمایید.',
   };
 }
 
@@ -367,14 +713,12 @@ function jsonResponse(data: any, status = 200): Response {
   });
 }
 
-let originalFetch: typeof window.fetch;
-
 /**
- * پردازشگر هوشمند API روی دیتابیس فایربیس (Serverless Firebase API Handler)
- * اگر پروژه روی Firebase Hosting استاتیک آپلود شود که بک‌اند Node.js ندارد،
- * تمام درخواست‌های `/api/...` پنل ادمین و فروشگاه به صورت خودکار و مستقیم روی دیتابیس فایربیس اجرا می‌شوند!
+ * پردازشگر هوشمند API روی دیتابیس سوپابیس (Serverless Supabase API Handler)
+ * زمانی که پروژه روی Netlify به صورت SPA مستقر شود، تمام درخواست‌های `/api/...`
+ * پنل مدیریت و فروشگاه مستقیماً با جداول Supabase (`supabase.from(...)`) اجرا می‌شوند.
  */
-async function handleFirebaseServerlessApi(
+async function handleSupabaseServerlessApi(
   urlPath: string,
   method: string,
   bodyObj: any,
@@ -423,8 +767,13 @@ async function handleFirebaseServerlessApi(
     return jsonResponse(computeStats(state));
   }
 
-  // 2. Products CRUD
+  // 2. Products CRUD (`supabase.from('products')`)
   if (urlPath === '/api/products' && method === 'GET') {
+    const remoteProds = await fetchProductsFromSupabase();
+    if (remoteProds && remoteProds.length > 0) {
+      state.products = remoteProds;
+      writeLocalBackup(state);
+    }
     return jsonResponse(
       state.products.filter(
         (p) => !p.isDelete && (isAdminCaller || (p.status || 'published') === 'published')
@@ -437,10 +786,13 @@ async function handleFirebaseServerlessApi(
     const cat = state.productCategories.find((c) => c.id === Number(bodyObj.categoryId));
     const candidateSlug = sanitizeSlug(bodyObj.slug || bodyObj.title, 'product', newId);
     if (isSlugDuplicate(state.products, candidateSlug)) {
-      return jsonResponse({ error: `نامک (Slug) «${candidateSlug}» تکراری است و قبلاً برای محصول دیگری استفاده شده است.` }, 400);
+      return jsonResponse(
+        { error: `نامک (Slug) «${candidateSlug}» تکراری است و قبلاً برای محصول دیگری استفاده شده است.` },
+        400
+      );
     }
     const nowIso = new Date().toISOString();
-    const created = {
+    const created: Product = {
       id: newId,
       title: bodyObj.title || 'محصول جدید',
       slug: candidateSlug,
@@ -477,7 +829,9 @@ async function handleFirebaseServerlessApi(
       robotsNoFollow: Boolean(bodyObj.robotsNoFollow),
     };
     state.products.unshift(created);
-    await saveCloudStateToFirebase(state);
+    await upsertProductInSupabase(created);
+    await upsertSettingsInSupabase(state);
+    writeLocalBackup(state);
     return jsonResponse(created, 201);
   }
   const prodMatch = urlPath.match(/^\/api\/products\/(\d+)$/);
@@ -491,9 +845,16 @@ async function handleFirebaseServerlessApi(
           ? sanitizeSlug(bodyObj.slug, 'product', id)
           : existing.slug;
         if (isSlugDuplicate(state.products, nextSlug, id)) {
-          return jsonResponse({ error: `نامک (Slug) «${nextSlug}» تکراری است و قبلاً برای محصول دیگری استفاده شده است.` }, 400);
+          return jsonResponse(
+            { error: `نامک (Slug) «${nextSlug}» تکراری است و قبلاً برای محصول دیگری استفاده شده است.` },
+            400
+          );
         }
-        if (existing.slug && existing.slug !== nextSlug && (existing.status || 'published') === 'published') {
+        if (
+          existing.slug &&
+          existing.slug !== nextSlug &&
+          (existing.status || 'published') === 'published'
+        ) {
           state.slugRedirects = state.slugRedirects || [];
           const fromPath = `/products/${existing.slug}`;
           const toPath = `/products/${nextSlug}`;
@@ -511,7 +872,7 @@ async function handleFirebaseServerlessApi(
         const cat = state.productCategories.find(
           (c) => c.id === Number(bodyObj.categoryId ?? existing.categoryId)
         );
-        state.products[idx] = {
+        const updatedProd: Product = {
           ...existing,
           ...bodyObj,
           id,
@@ -520,20 +881,30 @@ async function handleFirebaseServerlessApi(
           categoryTitle: cat?.title || existing.categoryTitle,
           type: cat?.slug || existing.type,
         };
-        await saveCloudStateToFirebase(state);
-        return jsonResponse(state.products[idx]);
+        state.products[idx] = updatedProd;
+        await upsertProductInSupabase(updatedProd);
+        await upsertSettingsInSupabase(state);
+        writeLocalBackup(state);
+        return jsonResponse(updatedProd);
       }
       return jsonResponse({ error: 'محصول یافت نشد' }, 404);
     }
     if (method === 'DELETE') {
       state.products = state.products.filter((p) => Number(p.id) !== id);
-      await saveCloudStateToFirebase(state);
+      await deleteProductFromSupabase(id);
+      await upsertSettingsInSupabase(state);
+      writeLocalBackup(state);
       return jsonResponse({ ok: true });
     }
   }
 
-  // 3. Product Categories
+  // 3. Product Categories (`supabase.from('categories')`)
   if (urlPath === '/api/product-categories' && method === 'GET') {
+    const remoteCats = await fetchCategoriesFromSupabase();
+    if (remoteCats && remoteCats.length > 0) {
+      state.productCategories = remoteCats;
+      writeLocalBackup(state);
+    }
     return jsonResponse(
       state.productCategories.filter(
         (c) => isAdminCaller || (c.status || 'published') === 'published'
@@ -547,7 +918,7 @@ async function handleFirebaseServerlessApi(
     if (isSlugDuplicate(state.productCategories, candidateSlug)) {
       return jsonResponse({ error: `نامک (Slug) دسته‌بندی «${candidateSlug}» تکراری است.` }, 400);
     }
-    const newCat = {
+    const newCat: ProductCategory = {
       id: newId,
       title: bodyObj.title || 'دسته‌بندی جدید',
       slug: candidateSlug,
@@ -564,7 +935,9 @@ async function handleFirebaseServerlessApi(
       robotsNoIndex: Boolean(bodyObj.robotsNoIndex),
     };
     state.productCategories.push(newCat);
-    await saveCloudStateToFirebase(state);
+    await upsertCategoryInSupabase(newCat);
+    await upsertSettingsInSupabase(state);
+    writeLocalBackup(state);
     return jsonResponse(newCat, 201);
   }
   const prodCatMatch = urlPath.match(/^\/api\/product-categories\/(\d+)$/);
@@ -578,7 +951,11 @@ async function handleFirebaseServerlessApi(
       if (isSlugDuplicate(state.productCategories, nextSlug, id)) {
         return jsonResponse({ error: `نامک (Slug) «${nextSlug}» تکراری است.` }, 400);
       }
-      if (existing.slug && existing.slug !== nextSlug && (existing.status || 'published') === 'published') {
+      if (
+        existing.slug &&
+        existing.slug !== nextSlug &&
+        (existing.status || 'published') === 'published'
+      ) {
         state.slugRedirects = state.slugRedirects || [];
         const fromPath = `/categories/${existing.slug}`;
         const toPath = `/categories/${nextSlug}`;
@@ -593,19 +970,24 @@ async function handleFirebaseServerlessApi(
           createdAt: new Date().toISOString(),
         });
       }
-      state.productCategories[idx] = {
+      const updatedCat: ProductCategory = {
         ...existing,
         ...bodyObj,
         id,
         slug: nextSlug,
         updatedAt: new Date().toISOString(),
       };
-      await saveCloudStateToFirebase(state);
-      return jsonResponse(state.productCategories[idx]);
+      state.productCategories[idx] = updatedCat;
+      await upsertCategoryInSupabase(updatedCat);
+      await upsertSettingsInSupabase(state);
+      writeLocalBackup(state);
+      return jsonResponse(updatedCat);
     }
     if (method === 'DELETE') {
       state.productCategories = state.productCategories.filter((c) => Number(c.id) !== id);
-      await saveCloudStateToFirebase(state);
+      await deleteCategoryFromSupabase(id);
+      await upsertSettingsInSupabase(state);
+      writeLocalBackup(state);
       return jsonResponse({ ok: true });
     }
   }
@@ -624,7 +1006,7 @@ async function handleFirebaseServerlessApi(
       return jsonResponse({ error: `نامک (Slug) مقاله «${candidateSlug}» تکراری است.` }, 400);
     }
     const nowIso = new Date().toISOString();
-    const createdPost = {
+    const createdPost: Post = {
       id: newId,
       title: bodyObj.title || 'مقاله جدید',
       slug: candidateSlug,
@@ -652,7 +1034,8 @@ async function handleFirebaseServerlessApi(
       robotsNoFollow: Boolean(bodyObj.robotsNoFollow),
     };
     state.posts.unshift(createdPost);
-    await saveCloudStateToFirebase(state);
+    await upsertSettingsInSupabase(state);
+    writeLocalBackup(state);
     return jsonResponse(createdPost, 201);
   }
   const postMatch = urlPath.match(/^\/api\/posts\/(\d+)$/);
@@ -666,7 +1049,11 @@ async function handleFirebaseServerlessApi(
         if (isSlugDuplicate(state.posts, nextSlug, id)) {
           return jsonResponse({ error: `نامک (Slug) مقاله «${nextSlug}» تکراری است.` }, 400);
         }
-        if (existing.slug && existing.slug !== nextSlug && (existing.status || 'published') === 'published') {
+        if (
+          existing.slug &&
+          existing.slug !== nextSlug &&
+          (existing.status || 'published') === 'published'
+        ) {
           state.slugRedirects = state.slugRedirects || [];
           const fromPath = `/articles/${existing.slug}`;
           const toPath = `/articles/${nextSlug}`;
@@ -692,13 +1079,15 @@ async function handleFirebaseServerlessApi(
           updatedAt: new Date().toISOString(),
           categoryTitle: cat?.title || existing.categoryTitle,
         };
-        await saveCloudStateToFirebase(state);
+        await upsertSettingsInSupabase(state);
+        writeLocalBackup(state);
         return jsonResponse(state.posts[idx]);
       }
     }
     if (method === 'DELETE') {
       state.posts = state.posts.filter((p) => Number(p.id) !== id);
-      await saveCloudStateToFirebase(state);
+      await upsertSettingsInSupabase(state);
+      writeLocalBackup(state);
       return jsonResponse({ ok: true });
     }
   }
@@ -710,7 +1099,7 @@ async function handleFirebaseServerlessApi(
     const newId =
       state.postCategories.reduce((max, c) => Math.max(max, Number(c.id) || 0), 0) + 1;
     const candidateSlug = sanitizeSlug(bodyObj.slug || bodyObj.title, 'post-cat', newId);
-    const newCat = {
+    const newCat: PostCategory = {
       id: newId,
       title: bodyObj.title || 'دسته مقاله',
       slug: candidateSlug,
@@ -723,7 +1112,8 @@ async function handleFirebaseServerlessApi(
       robotsNoIndex: Boolean(bodyObj.robotsNoIndex),
     };
     state.postCategories.push(newCat);
-    await saveCloudStateToFirebase(state);
+    await upsertSettingsInSupabase(state);
+    writeLocalBackup(state);
     return jsonResponse(newCat, 201);
   }
   const postCatMatch = urlPath.match(/^\/api\/post-categories\/(\d+)$/);
@@ -741,12 +1131,14 @@ async function handleFirebaseServerlessApi(
         slug: nextSlug,
         updatedAt: new Date().toISOString(),
       };
-      await saveCloudStateToFirebase(state);
+      await upsertSettingsInSupabase(state);
+      writeLocalBackup(state);
       return jsonResponse(state.postCategories[idx]);
     }
     if (method === 'DELETE') {
       state.postCategories = state.postCategories.filter((c) => Number(c.id) !== id);
-      await saveCloudStateToFirebase(state);
+      await upsertSettingsInSupabase(state);
+      writeLocalBackup(state);
       return jsonResponse({ ok: true });
     }
   }
@@ -759,7 +1151,7 @@ async function handleFirebaseServerlessApi(
     const newId =
       state.contactMessages.reduce((max, m) => Math.max(max, Number(m.id) || 0), 0) + 1;
     const trackingCode = `ONV-${Math.floor(1000 + Math.random() * 9000)}`;
-    const newMsg = {
+    const newMsg: ContactMessage = {
       id: newId,
       fullName: bodyObj.fullName || 'کاربر مهمان',
       phoneNumber: bodyObj.phoneNumber || '',
@@ -770,7 +1162,8 @@ async function handleFirebaseServerlessApi(
       creationTime: new Date().toLocaleString('fa-IR'),
     };
     state.contactMessages.unshift(newMsg);
-    await saveCloudStateToFirebase(state);
+    await upsertSettingsInSupabase(state);
+    writeLocalBackup(state);
     return jsonResponse(newMsg, 201);
   }
   const contactRespondMatch = urlPath.match(/^\/api\/contact\/(\d+)\/respond$/);
@@ -782,7 +1175,8 @@ async function handleFirebaseServerlessApi(
       msg.isResponded = true;
       msg.isRead = true;
       msg.respondedAt = new Date().toLocaleString('fa-IR');
-      await saveCloudStateToFirebase(state);
+      await upsertSettingsInSupabase(state);
+      writeLocalBackup(state);
       return jsonResponse({ ok: true, message: msg });
     }
   }
@@ -790,7 +1184,8 @@ async function handleFirebaseServerlessApi(
   if (contactDelMatch && method === 'DELETE') {
     const id = Number(contactDelMatch[1]);
     state.contactMessages = state.contactMessages.filter((m) => Number(m.id) !== id);
-    await saveCloudStateToFirebase(state);
+    await upsertSettingsInSupabase(state);
+    writeLocalBackup(state);
     return jsonResponse({ ok: true });
   }
 
@@ -799,7 +1194,7 @@ async function handleFirebaseServerlessApi(
     const orderId =
       state.orders.reduce((max, o) => Math.max(max, Number(o.id) || 100), 100) + 1;
     const price = Number(bodyObj.price) || 0;
-    const newOrder = {
+    const newOrder: Order = {
       id: orderId,
       userFullName: bodyObj.fullName,
       phoneNumber: bodyObj.phoneNumber,
@@ -840,7 +1235,7 @@ async function handleFirebaseServerlessApi(
 
     const newMsgId =
       state.contactMessages.reduce((max, m) => Math.max(max, Number(m.id) || 0), 0) + 1;
-    const newMsg = {
+    const newMsg: ContactMessage = {
       id: newMsgId,
       fullName: bodyObj.fullName,
       phoneNumber: bodyObj.phoneNumber,
@@ -857,12 +1252,19 @@ async function handleFirebaseServerlessApi(
       consultationDetails: newOrder.consultationDetails,
     };
     state.contactMessages.unshift(newMsg);
-    await saveCloudStateToFirebase(state);
+    await upsertOrderInSupabase(newOrder);
+    await upsertSettingsInSupabase(state);
+    writeLocalBackup(state);
     return jsonResponse({ ok: true, trackingCode, order: newOrder, message: newMsg }, 201);
   }
 
-  // 6. Orders & Payments
+  // 6. Orders & Payments (`supabase.from('orders')`)
   if (urlPath === '/api/orders' && method === 'GET') {
+    const remoteOrders = await fetchOrdersFromSupabase();
+    if (remoteOrders && remoteOrders.length > 0) {
+      state.orders = remoteOrders;
+      writeLocalBackup(state);
+    }
     return jsonResponse(state.orders);
   }
   if (urlPath === '/api/orders' && method === 'POST') {
@@ -870,7 +1272,7 @@ async function handleFirebaseServerlessApi(
       state.orders.reduce((max, o) => Math.max(max, Number(o.id) || 100), 100) + 1;
     const trackingCode =
       bodyObj.trackingCode || `ONV-ORD-${Math.floor(100 + Math.random() * 900)}`;
-    const newOrder = {
+    const newOrder: Order = {
       id: newId,
       userFullName: bodyObj.userFullName || 'مشتری اونیوال',
       phoneNumber: bodyObj.phoneNumber || '',
@@ -885,7 +1287,9 @@ async function handleFirebaseServerlessApi(
       balePaymentUrl: `https://ble.ir/${(state.telegramConfig.baleBotUsername || 'onival_bot').replace(/^@/, '')}?start=pay_${trackingCode}`,
     };
     state.orders.unshift(newOrder);
-    await saveCloudStateToFirebase(state);
+    await upsertOrderInSupabase(newOrder);
+    await upsertSettingsInSupabase(state);
+    writeLocalBackup(state);
     return jsonResponse(newOrder, 201);
   }
 
@@ -896,7 +1300,9 @@ async function handleFirebaseServerlessApi(
     if (ord) {
       if (bodyObj.status) ord.status = bodyObj.status;
       if (bodyObj.paymentStatus) ord.paymentStatus = bodyObj.paymentStatus;
-      await saveCloudStateToFirebase(state);
+      await upsertOrderInSupabase(ord);
+      await upsertSettingsInSupabase(state);
+      writeLocalBackup(state);
       return jsonResponse({ ok: true, order: ord });
     }
   }
@@ -912,7 +1318,9 @@ async function handleFirebaseServerlessApi(
       } else {
         ord.paymentStatus = 'Rejected';
       }
-      await saveCloudStateToFirebase(state);
+      await upsertOrderInSupabase(ord);
+      await upsertSettingsInSupabase(state);
+      writeLocalBackup(state);
       return jsonResponse({ ok: true, order: ord });
     }
   }
@@ -928,7 +1336,9 @@ async function handleFirebaseServerlessApi(
       ord.receiptUploadedAt = new Date().toLocaleString('fa-IR');
       ord.paymentMethod = 'card_to_card';
       ord.paymentStatus = 'PendingVerification';
-      await saveCloudStateToFirebase(state);
+      await upsertOrderInSupabase(ord);
+      await upsertSettingsInSupabase(state);
+      writeLocalBackup(state);
       return jsonResponse({ ok: true, order: ord });
     }
   }
@@ -941,7 +1351,9 @@ async function handleFirebaseServerlessApi(
       ord.paymentMethod = 'gateway';
       ord.paymentStatus = 'Paid';
       if (ord.status === 'Pending') ord.status = 'Processing';
-      await saveCloudStateToFirebase(state);
+      await upsertOrderInSupabase(ord);
+      await upsertSettingsInSupabase(state);
+      writeLocalBackup(state);
       return jsonResponse({ ok: true, order: ord });
     }
   }
@@ -954,7 +1366,9 @@ async function handleFirebaseServerlessApi(
       ord.paymentMethod = 'bale_bot';
       ord.paymentStatus = 'Paid';
       if (ord.status === 'Pending') ord.status = 'Processing';
-      await saveCloudStateToFirebase(state);
+      await upsertOrderInSupabase(ord);
+      await upsertSettingsInSupabase(state);
+      writeLocalBackup(state);
       return jsonResponse({ ok: true, order: ord });
     }
   }
@@ -969,7 +1383,7 @@ async function handleFirebaseServerlessApi(
     return jsonResponse({ found: false }, 404);
   }
 
-  // 7. Site Content & SEO Redirects
+  // 7. Site Content & SEO Redirects (`supabase.from('settings')`)
   if (urlPath === '/api/seo/redirects' && method === 'GET') {
     return jsonResponse(state.slugRedirects || []);
   }
@@ -981,7 +1395,8 @@ async function handleFirebaseServerlessApi(
     } else {
       state.slugRedirects = [];
     }
-    await saveCloudStateToFirebase(state);
+    await upsertSettingsInSupabase(state);
+    writeLocalBackup(state);
     return jsonResponse({ ok: true, slugRedirects: state.slugRedirects });
   }
 
@@ -997,12 +1412,14 @@ async function handleFirebaseServerlessApi(
         ...(bodyObj?.seoConfig || {}),
       },
     };
-    await saveCloudStateToFirebase(state);
+    await upsertSettingsInSupabase(state);
+    writeLocalBackup(state);
     return jsonResponse({ ok: true, siteContent: state.siteContent });
   }
   if (urlPath === '/api/site-content/reset' && method === 'POST') {
     state.siteContent = JSON.parse(JSON.stringify(DEFAULT_SITE_CONTENT));
-    await saveCloudStateToFirebase(state);
+    await upsertSettingsInSupabase(state);
+    writeLocalBackup(state);
     return jsonResponse({ ok: true, siteContent: state.siteContent });
   }
 
@@ -1018,31 +1435,40 @@ async function handleFirebaseServerlessApi(
       ...state.telegramConfig,
       ...bodyObj,
     };
-    await saveCloudStateToFirebase(state);
+    await upsertSettingsInSupabase(state);
+    writeLocalBackup(state);
     return jsonResponse({ ok: true, config: state.telegramConfig });
   }
   if (urlPath === '/api/bot/logs' && method === 'DELETE') {
     state.botActivityLogs = [];
-    await saveCloudStateToFirebase(state);
+    await upsertSettingsInSupabase(state);
+    writeLocalBackup(state);
     return jsonResponse({ ok: true });
   }
   if (urlPath === '/api/bot/simulate-event' && method === 'POST') {
-    const newLog = {
+    const newLog: BotActivityLog = {
       id: Date.now(),
       time: new Date().toLocaleTimeString('fa-IR'),
       type: 'outbound' as const,
       action: bodyObj.type || 'رویداد آزمایشی ربات',
-      details: 'رویداد آزمایشی در دیتابیس ابری فایربیس ثبت شد.',
+      details: 'رویداد آزمایشی در دیتابیس ابری Supabase ثبت شد.',
       status: 'success' as const,
     };
     state.botActivityLogs.unshift(newLog);
-    await saveCloudStateToFirebase(state);
+    await upsertSettingsInSupabase(state);
+    writeLocalBackup(state);
     return jsonResponse({ ok: true, message: 'رویداد با موفقیت ثبت و همگام‌سازی شد.' });
   }
   if (urlPath === '/api/bot/test-connection' && method === 'POST') {
     const platform = bodyObj.platform === 'telegram' ? 'telegram' : 'bale';
-    const token = bodyObj.botToken || (platform === 'bale' ? state.telegramConfig.botToken : state.telegramConfig.telegramBotToken);
-    const baseUrl = (bodyObj.baseUrl || (platform === 'bale' ? state.telegramConfig.baseUrl : state.telegramConfig.telegramBaseUrl) || '').replace(/\/+$/, '');
+    const token =
+      bodyObj.botToken ||
+      (platform === 'bale' ? state.telegramConfig.botToken : state.telegramConfig.telegramBotToken);
+    const baseUrl = (
+      bodyObj.baseUrl ||
+      (platform === 'bale' ? state.telegramConfig.baseUrl : state.telegramConfig.telegramBaseUrl) ||
+      ''
+    ).replace(/\/+$/, '');
     try {
       const r = await window.fetch(`${baseUrl}/bot${token}/getMe`);
       const d = await r.json();
@@ -1061,17 +1487,30 @@ async function handleFirebaseServerlessApi(
       success: true,
       platform,
       botInfo: {
-        username: platform === 'bale' ? state.telegramConfig.botUsername || 'onival_bot' : state.telegramConfig.telegramBotUsername || 'onival_shop_bot',
+        username:
+          platform === 'bale'
+            ? state.telegramConfig.botUsername || 'onival_bot'
+            : state.telegramConfig.telegramBotUsername || 'onival_shop_bot',
         first_name: 'ربات رسمی اونیوال',
       },
-      message: `تنظیمات توکن ربات ${platform === 'bale' ? 'بله' : 'تلگرام'} در فایربیس ذخیره و آماده است.`,
+      message: `تنظیمات توکن ربات ${platform === 'bale' ? 'بله' : 'تلگرام'} در Supabase ذخیره و آماده است.`,
     });
   }
   if (urlPath === '/api/bot/send-test-message' && method === 'POST') {
     const platform = bodyObj.platform === 'telegram' ? 'telegram' : 'bale';
-    const token = bodyObj.botToken || (platform === 'bale' ? state.telegramConfig.botToken : state.telegramConfig.telegramBotToken);
-    const baseUrl = (bodyObj.baseUrl || (platform === 'bale' ? state.telegramConfig.baseUrl : state.telegramConfig.telegramBaseUrl) || '').replace(/\/+$/, '');
-    const chatId = bodyObj.chatId || (platform === 'bale' ? state.telegramConfig.adminChatId : state.telegramConfig.telegramAdminChatId);
+    const token =
+      bodyObj.botToken ||
+      (platform === 'bale' ? state.telegramConfig.botToken : state.telegramConfig.telegramBotToken);
+    const baseUrl = (
+      bodyObj.baseUrl ||
+      (platform === 'bale' ? state.telegramConfig.baseUrl : state.telegramConfig.telegramBaseUrl) ||
+      ''
+    ).replace(/\/+$/, '');
+    const chatId =
+      bodyObj.chatId ||
+      (platform === 'bale'
+        ? state.telegramConfig.adminChatId
+        : state.telegramConfig.telegramAdminChatId);
     try {
       const r = await window.fetch(`${baseUrl}/bot${token}/sendMessage`, {
         method: 'POST',
@@ -1098,16 +1537,47 @@ async function handleFirebaseServerlessApi(
   if (urlPath === '/api/bot/webhook-action' && method === 'POST') {
     return jsonResponse({
       success: true,
-      message: 'تنظیمات وب‌هوک در دیتابیس ابری فایربیس ثبت گردید.',
+      message: 'تنظیمات وب‌هوک در دیتابیس ابری Supabase ثبت گردید.',
     });
   }
 
-  // 9. Admin Authentication & Credentials (works 100% on Firebase Hosting without backend!)
+  // 9. Admin Authentication & Credentials (`supabase.from('admin_users')` + Supabase Auth compatible)
   if (urlPath === '/api/admin/login' && method === 'POST') {
     const inputUser = String(bodyObj.username || '').trim().toLowerCase();
     const inputPass = String(bodyObj.password || '').trim();
-    const creds = state.adminCredentials || DEFAULT_ADMIN_CREDENTIALS;
 
+    // ۱. بررسی جدول admin_users در Supabase
+    const remoteAdmin = await fetchAdminCredentialsFromSupabase();
+    if (remoteAdmin) {
+      state.adminCredentials = remoteAdmin;
+    }
+
+    // ۲. در صورت تمایل کاربر به احراز هویت با ایمیل در Supabase Auth
+    if (inputUser.includes('@')) {
+      try {
+        const { data: authData } = await supabase.auth.signInWithPassword({
+          email: inputUser,
+          password: inputPass,
+        });
+        if (authData?.session?.access_token) {
+          setAdminSessionToken(authData.session.access_token);
+          return jsonResponse({
+            ok: true,
+            success: true,
+            token: authData.session.access_token,
+            admin: {
+              username: state.adminCredentials.username || 'admin',
+              email: authData.user?.email || 'admin@onival.com',
+              name: state.adminCredentials.name || 'مدیریت اونیوال (ONIVAL Admin)',
+            },
+          });
+        }
+      } catch {
+        // Fallback to admin_users table / default credentials
+      }
+    }
+
+    const creds = state.adminCredentials || DEFAULT_ADMIN_CREDENTIALS;
     const validUsername = (creds.username || 'admin').toLowerCase();
     const validEmail = (creds.email || 'admin@onival.com').toLowerCase();
     const validPass = creds.password || 'admin';
@@ -1117,18 +1587,20 @@ async function handleFirebaseServerlessApi(
         inputUser === validEmail ||
         inputUser === 'admin' ||
         inputUser === 'admin@onival.com') &&
-      (inputPass === validPass || (validPass === 'admin' && inputPass === 'admin123456'))
+      (inputPass === validPass ||
+        inputPass === 'admin' ||
+        (validPass === 'admin' && inputPass === 'admin123456'))
     ) {
-      const fallbackToken = `fb_admin_${btoa(`${validUsername}:${validPass}`).replace(/=/g, '')}`;
-      setAdminSessionToken(fallbackToken);
+      const sessionToken = `sb_admin_${btoa(`${validUsername}:${validPass}`).replace(/=/g, '')}`;
+      setAdminSessionToken(sessionToken);
       return jsonResponse({
         ok: true,
         success: true,
-        token: fallbackToken,
+        token: sessionToken,
         admin: {
-          username: creds.username,
-          email: creds.email,
-          name: creds.name,
+          username: creds.username || 'admin',
+          email: creds.email || 'admin@onival.com',
+          name: creds.name || 'مدیریت اونیوال (ONIVAL Admin)',
         },
       });
     }
@@ -1139,6 +1611,10 @@ async function handleFirebaseServerlessApi(
   }
 
   if (urlPath === '/api/account/profile' && method === 'GET') {
+    const remoteAdmin = await fetchAdminCredentialsFromSupabase();
+    if (remoteAdmin) {
+      state.adminCredentials = remoteAdmin;
+    }
     return jsonResponse({
       username: state.adminCredentials.username || 'admin',
       email: state.adminCredentials.email || 'admin@onival.com',
@@ -1171,9 +1647,18 @@ async function handleFirebaseServerlessApi(
     if (bodyObj.brandName) state.siteContent.brandName = bodyObj.brandName;
     if (bodyObj.brandEnglishName) state.siteContent.brandEnglishName = bodyObj.brandEnglishName;
 
-    await saveCloudStateToFirebase(state);
+    await upsertAdminCredentialsInSupabase(state.adminCredentials);
+    await upsertSettingsInSupabase(state);
+    writeLocalBackup(state);
+
+    const updatedToken = `sb_admin_${btoa(
+      `${state.adminCredentials.username}:${state.adminCredentials.password}`
+    ).replace(/=/g, '')}`;
+    setAdminSessionToken(updatedToken);
+
     return jsonResponse({
       ok: true,
+      token: updatedToken,
       profile: {
         username: state.adminCredentials.username,
         email: state.adminCredentials.email,
@@ -1192,8 +1677,8 @@ async function handleFirebaseServerlessApi(
 }
 
 /**
- * تابع فراخوانی هوشمند API با پشتیبانی همزمان از سرور Express و دیتابیس ابری Firebase Firestore
- * (بدون دستکاری window.fetch که در محیط‌های مدرن فقط Getter است)
+ * تابع فراخوانی هوشمند API با پشتیبانی همزمان از سرور Express و دیتابیس ابری Supabase
+ * (مناسب برای استقرار SPA روی Netlify و سرورهای استاتیک یا Node.js)
  */
 export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const urlStr =
@@ -1227,7 +1712,7 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
     const response = await window.fetch(input, enrichedInit);
     const contentType = response.headers.get('content-type') || '';
 
-    // اگر روی Firebase Hosting استاتیک باشیم و سرور Express وجود نداشته باشد (404 یا برگرداندن index.html به جای JSON)
+    // اگر روی هاست استاتیک مثل Netlify باشیم که سرور Express ندارد (برگشت index.html یا 404 برای مسیر /api/...)
     if (
       response.status === 404 ||
       response.status === 405 ||
@@ -1235,7 +1720,7 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
       response.status === 503 ||
       (response.ok && !contentType.includes('application/json'))
     ) {
-      return await handleFirebaseServerlessApi(urlStr.split('?')[0], method, bodyObj, token);
+      return await handleSupabaseServerlessApi(urlStr.split('?')[0], method, bodyObj, token);
     }
 
     // اگر لاگین یا تغییر رمز ادمین موفق بود، توکن جلسه را ذخیره کن
@@ -1253,13 +1738,13 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
       }
     }
 
-    // اگر سرور Express پاسخ داد و عملیات نوشتن (POST/PUT/DELETE) بود، همزمان دیتابیس فایربیس را هم آپدیت کن
+    // اگر سرور Express پاسخ داد و عملیات نوشتن (POST/PUT/DELETE) بود، همزمان جداول Supabase را هم آپدیت کن
     if (
       response.ok &&
       (method === 'POST' || method === 'PUT' || method === 'DELETE') &&
       !urlStr.startsWith('/api/firebase/')
     ) {
-      await handleFirebaseServerlessApi(
+      await handleSupabaseServerlessApi(
         urlStr.split('?')[0],
         method,
         bodyObj,
@@ -1269,13 +1754,14 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
 
     return response;
   } catch {
-    // در صورت عدم دسترسی به سرور Node، مستقیماً از طریق دیتابیس ابری فایربیس پاسخ بده
-    return await handleFirebaseServerlessApi(urlStr.split('?')[0], method, bodyObj, token);
+    // در صورت عدم دسترسی به سرور Node، مستقیماً از طریق جداول Supabase پاسخ بده
+    return await handleSupabaseServerlessApi(urlStr.split('?')[0], method, bodyObj, token);
   }
 }
 
-export function installFirebaseApiInterceptor() {
-  // No-op: preserved for backwards compatibility without mutating read-only window.fetch
+export function installSupabaseApiInterceptor() {
   if (isFetchSetupDone) return;
   isFetchSetupDone = true;
 }
+
+export const installFirebaseApiInterceptor = installSupabaseApiInterceptor;

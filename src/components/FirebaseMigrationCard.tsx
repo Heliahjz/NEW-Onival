@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Database,
   CloudUpload,
@@ -14,48 +14,118 @@ import {
   HelpCircle,
   Layers,
   Sparkles,
-  Server
+  Server,
 } from 'lucide-react';
 import {
-  getActiveFirebaseConfig,
-  saveRuntimeFirebaseConfig,
-  FIREBASE_CONFIG,
-  CustomFirebaseConfig
-} from '../firebaseConfig';
+  getActiveSupabaseConfig,
+  saveRuntimeSupabaseConfig,
+  SUPABASE_CONFIG,
+  CustomSupabaseConfig,
+  testSupabaseConnection,
+} from '../supabaseClient';
 import {
   runManualSeedDatabase,
   getCachedCloudState,
-  saveCloudStateToFirebase
+  saveCloudStateToSupabase,
+  getAdminSessionToken,
 } from '../services/firebaseSync';
 
 interface FirebaseMigrationCardProps {
   onRefreshAppData?: () => Promise<void> | void;
 }
 
+const SUPABASE_SCHEMA_SQL = `-- اسکریپت ساخت جداول پروژه اونیوال در Supabase SQL Editor
+CREATE TABLE IF NOT EXISTS public.products (
+  id BIGINT PRIMARY KEY,
+  title TEXT NOT NULL,
+  slug TEXT,
+  price NUMERIC DEFAULT 0,
+  discount NUMERIC DEFAULT 0,
+  category_id BIGINT DEFAULT 1,
+  category_title TEXT,
+  image_name TEXT,
+  description TEXT,
+  content TEXT,
+  status TEXT DEFAULT 'published',
+  is_delete BOOLEAN DEFAULT false,
+  payload JSONB,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.categories (
+  id BIGINT PRIMARY KEY,
+  title TEXT NOT NULL,
+  slug TEXT,
+  parent_id BIGINT,
+  sort_order INTEGER DEFAULT 1,
+  description TEXT,
+  image_name TEXT,
+  status TEXT DEFAULT 'published',
+  payload JSONB,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.orders (
+  id BIGINT PRIMARY KEY,
+  tracking_code TEXT,
+  user_full_name TEXT,
+  phone_number TEXT,
+  user_address TEXT,
+  total_price NUMERIC DEFAULT 0,
+  status TEXT DEFAULT 'Pending',
+  payment_status TEXT DEFAULT 'Unpaid',
+  payment_method TEXT DEFAULT 'card_to_card',
+  creation_time TEXT,
+  items JSONB DEFAULT '[]'::jsonb,
+  payload JSONB,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.admin_users (
+  id BIGINT PRIMARY KEY,
+  username TEXT NOT NULL DEFAULT 'admin',
+  email TEXT NOT NULL DEFAULT 'admin@onival.com',
+  password TEXT NOT NULL DEFAULT 'admin',
+  name TEXT DEFAULT 'مدیریت اونیوال (ONIVAL Admin)',
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.settings (
+  key TEXT PRIMARY KEY,
+  value JSONB,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);`;
+
 export const FirebaseMigrationCard: React.FC<FirebaseMigrationCardProps> = ({
   onRefreshAppData,
 }) => {
-  const activeCfg = getActiveFirebaseConfig();
-  const [configForm, setConfigForm] = useState<CustomFirebaseConfig>({
-    apiKey: activeCfg.apiKey || '',
-    authDomain: activeCfg.authDomain || '',
-    projectId: activeCfg.projectId || '',
-    storageBucket: activeCfg.storageBucket || '',
-    messagingSenderId: activeCfg.messagingSenderId || '',
-    appId: activeCfg.appId || '',
-    firestoreDatabaseId: activeCfg.firestoreDatabaseId || '(default)',
+  const activeCfg = getActiveSupabaseConfig();
+  const [configForm, setConfigForm] = useState<CustomSupabaseConfig>({
+    supabaseUrl: activeCfg.supabaseUrl || SUPABASE_CONFIG.supabaseUrl,
+    supabaseAnonKey: activeCfg.supabaseAnonKey || SUPABASE_CONFIG.supabaseAnonKey,
   });
 
   const [isSeeding, setIsSeeding] = useState(false);
   const [isSyncingCloud, setIsSyncingCloud] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<{
+    connected: boolean;
+    tablesReady: boolean;
+    message?: string;
+  }>({ connected: true, tablesReady: false });
+
   const [feedback, setFeedback] = useState<{
     type: 'success' | 'error' | null;
     message: string;
   }>({ type: null, message: '' });
   const [copiedConfig, setCopiedConfig] = useState(false);
+  const [copiedSql, setCopiedSql] = useState(false);
   const [showGuide, setShowGuide] = useState(true);
 
-  // ۱. اجرای راه‌اندازی اولیه (Seed Data) برای ساخت محصولات پیش‌فرض و حساب ادمین در فایربیس
+  useEffect(() => {
+    testSupabaseConnection().then(setConnectionStatus).catch(() => {});
+  }, []);
+
+  // ۱. اجرای راه‌اندازی اولیه (Seed Data) برای ساخت محصولات پیش‌فرض و حساب ادمین در سوپابیس
   const handleSeedDatabase = async (resetToFactory = false) => {
     setIsSeeding(true);
     setFeedback({ type: null, message: '' });
@@ -65,34 +135,36 @@ export const FirebaseMigrationCard: React.FC<FirebaseMigrationCardProps> = ({
         type: 'success',
         message: res.message,
       });
+      const status = await testSupabaseConnection();
+      setConnectionStatus(status);
       await onRefreshAppData?.();
     } catch (err: any) {
       setFeedback({
         type: 'error',
-        message: err?.message || 'خطا در راه‌اندازی اولیه دیتابیس فایربیس',
+        message: err?.message || 'خطا در راه‌اندازی اولیه دیتابیس سوپابیس',
       });
     } finally {
       setIsSeeding(false);
     }
   };
 
-  // ۲. همگام‌سازی فوری تمام اطلاعات فعلی سایت با دیتابیس ابری فایربیس
-  const handleSyncCurrentStateToFirebase = async () => {
+  // ۲. همگام‌سازی فوری تمام اطلاعات فعلی سایت با دیتابیس ابری سوپابیس
+  const handleSyncCurrentStateToSupabase = async () => {
     setIsSyncingCloud(true);
     setFeedback({ type: null, message: '' });
     try {
       const currentState = getCachedCloudState();
-      const ok = await saveCloudStateToFirebase(currentState);
+      const ok = await saveCloudStateToSupabase(currentState);
       setFeedback({
         type: ok ? 'success' : 'error',
         message: ok
-          ? 'تمامی اطلاعات لحظه‌ای سایت (محصولات، سفارشات، مقالات، لوگو، ربات‌ها و حساب ادمین) به طور کامل در دیتابیس ابری Firebase Firestore ذخیره شد.'
-          : 'ذخیره در حافظه محلی انجام شد اما اتصال به کلود فایربیس برقرار نشد. تنظیمات پروژه فایربیس یا Rules را بررسی نمایید.',
+          ? 'تمامی اطلاعات لحظه‌ای سایت (محصولات، دسته‌بندی‌ها، سفارشات، مقالات، لوگو و حساب ادمین) به طور کامل در جداول Supabase ذخیره شد.'
+          : 'ذخیره در حافظه محلی انجام شد؛ برای ثبت در سرور ابری مطمئن شوید جداول (products, categories, orders, admin_users, settings) در Supabase SQL Editor ساخته شده‌اند.',
       });
     } catch {
       setFeedback({
         type: 'error',
-        message: 'خطا در همگام‌سازی با سرور فایربیس.',
+        message: 'خطا در همگام‌سازی با سرور Supabase.',
       });
     } finally {
       setIsSyncingCloud(false);
@@ -108,7 +180,7 @@ export const FirebaseMigrationCard: React.FC<FirebaseMigrationCardProps> = ({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `onival-full-database-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `onival-supabase-backup-${new Date().toISOString().slice(0, 10)}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -120,7 +192,7 @@ export const FirebaseMigrationCard: React.FC<FirebaseMigrationCardProps> = ({
     });
   };
 
-  // ۴. بازگردانی فایل پشتیبان دیتابیس (Import JSON Backup) و انتقال مستقیم به فایربیس
+  // ۴. بازگردانی فایل پشتیبان دیتابیس (Import JSON Backup) و انتقال مستقیم به سوپابیس
   const handleImportBackupFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -133,21 +205,25 @@ export const FirebaseMigrationCard: React.FC<FirebaseMigrationCardProps> = ({
           throw new Error('فرمت فایل پشتیبان معتبر نیست.');
         }
         setIsSyncingCloud(true);
-        await saveCloudStateToFirebase(parsed);
+        await saveCloudStateToSupabase(parsed);
         try {
+          const token = getAdminSessionToken();
           await fetch('/api/firebase/import-state', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
             body: JSON.stringify(parsed),
           });
         } catch {
-          // ignore if serverless
+          // ignore if serverless SPA on Netlify
         }
         await onRefreshAppData?.();
         setFeedback({
           type: 'success',
           message:
-            'تمامی اطلاعات فایل پشتیبان با موفقیت وارد سیستم شد و در دیتابیس فایربیس نیز ثبت گردید.',
+            'تمامی اطلاعات فایل پشتیبان با موفقیت وارد سیستم شد و در دیتابیس Supabase نیز ثبت گردید.',
         });
       } catch (err: any) {
         setFeedback({
@@ -161,42 +237,32 @@ export const FirebaseMigrationCard: React.FC<FirebaseMigrationCardProps> = ({
     reader.readAsText(file);
   };
 
-  const handleSaveCustomFirebaseConfig = (e: React.FormEvent) => {
+  const handleSaveCustomSupabaseConfig = (e: React.FormEvent) => {
     e.preventDefault();
-    saveRuntimeFirebaseConfig(configForm);
+    saveRuntimeSupabaseConfig(configForm);
     setFeedback({
       type: 'success',
       message:
-        'تنظیمات اتصال به فایربیس ذخیره شد. برای اعمال اتصال به پروژه جدید، صفحه را یک بار رفرش (Reload) نمایید.',
+        'تنظیمات اتصال به Supabase ذخیره شد. برای اعمال اتصال به پروژه جدید، صفحه را یک بار رفرش (Reload) نمایید.',
     });
   };
 
-  const handleResetFirebaseConfig = () => {
-    saveRuntimeFirebaseConfig(null);
+  const handleResetSupabaseConfig = () => {
+    saveRuntimeSupabaseConfig(null);
     setConfigForm({
-      apiKey: FIREBASE_CONFIG.apiKey,
-      authDomain: FIREBASE_CONFIG.authDomain,
-      projectId: FIREBASE_CONFIG.projectId,
-      storageBucket: FIREBASE_CONFIG.storageBucket,
-      messagingSenderId: FIREBASE_CONFIG.messagingSenderId,
-      appId: FIREBASE_CONFIG.appId,
-      firestoreDatabaseId: FIREBASE_CONFIG.firestoreDatabaseId || '(default)',
+      supabaseUrl: SUPABASE_CONFIG.supabaseUrl,
+      supabaseAnonKey: SUPABASE_CONFIG.supabaseAnonKey,
     });
     setFeedback({
       type: 'success',
-      message: 'تنظیمات فایربیس به مقادیر پیش‌فرض فایل src/firebaseConfig.ts بازنشانی شد.',
+      message: 'تنظیمات اتصال به مقادیر پیش‌فرض فایل src/supabaseClient.ts بازنشانی شد.',
     });
   };
 
-  const configSnippetCode = `// فایل متمرکز: src/firebaseConfig.ts
-export const FIREBASE_CONFIG = {
-  apiKey: "${configForm.apiKey}",
-  authDomain: "${configForm.authDomain}",
-  projectId: "${configForm.projectId}",
-  storageBucket: "${configForm.storageBucket}",
-  messagingSenderId: "${configForm.messagingSenderId}",
-  appId: "${configForm.appId}",
-  firestoreDatabaseId: "${configForm.firestoreDatabaseId || '(default)'}"
+  const configSnippetCode = `// فایل متمرکز: src/supabaseClient.ts
+export const SUPABASE_CONFIG = {
+  supabaseUrl: import.meta.env.VITE_SUPABASE_URL || "${configForm.supabaseUrl}",
+  supabaseAnonKey: import.meta.env.VITE_SUPABASE_ANON_KEY || "${configForm.supabaseAnonKey}"
 };`;
 
   const handleCopySnippet = () => {
@@ -205,26 +271,39 @@ export const FIREBASE_CONFIG = {
     setTimeout(() => setCopiedConfig(false), 2500);
   };
 
+  const handleCopySql = () => {
+    navigator.clipboard?.writeText(SUPABASE_SCHEMA_SQL);
+    setCopiedSql(true);
+    setTimeout(() => setCopiedSql(false), 2500);
+  };
+
   return (
     <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
       {/* Header */}
-      <div className="p-5 sm:p-6 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 bg-gradient-to-l from-amber-50/70 via-white to-emerald-50/40">
+      <div className="p-5 sm:p-6 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 bg-gradient-to-l from-emerald-50/70 via-white to-amber-50/40">
         <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-2xl bg-amber-500 text-white flex items-center justify-center shadow-md shadow-amber-500/20 shrink-0">
+          <div className="w-11 h-11 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-md shadow-emerald-600/20 shrink-0">
             <Database className="w-5 h-5" />
           </div>
           <div>
             <div className="flex items-center gap-2">
               <h3 className="text-base font-extrabold text-slate-800">
-                مدیریت دیتابیس فایربیس (Firebase Firestore)، راه‌اندازی اولیه (Seed Data) و انتقال سرور
+                مدیریت دیتابیس ابری سوپابیس (Supabase)، راه‌اندازی اولیه (Seed Data) و استقرار Netlify
               </h3>
               <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-700">
                 <ShieldCheck className="w-3.5 h-3.5" />
-                متصل به Cloud Firestore
+                {connectionStatus.tablesReady
+                  ? 'جداول Supabase فعال و متصل'
+                  : 'متصل به سرور Supabase'}
               </span>
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              ساخت خودکار محصولات و ادمین پیش‌فرض در فایربیس، پشتیبان‌گیری کامل تا لحظه انتقال و تنظیمات متمرکز <code className="font-mono text-amber-700">src/firebaseConfig.ts</code>
+              پشتیبانی کامل از جداول <code className="font-mono text-emerald-700">products</code>،{' '}
+              <code className="font-mono text-emerald-700">categories</code>،{' '}
+              <code className="font-mono text-emerald-700">orders</code>،{' '}
+              <code className="font-mono text-emerald-700">admin_users</code> و{' '}
+              <code className="font-mono text-emerald-700">settings</code> از طریق{' '}
+              <code className="font-mono text-amber-700">src/supabaseClient.ts</code>
             </p>
           </div>
         </div>
@@ -234,8 +313,12 @@ export const FIREBASE_CONFIG = {
           onClick={() => setShowGuide(!showGuide)}
           className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer"
         >
-          <HelpCircle className="w-4 h-4 text-amber-600" />
-          <span>{showGuide ? 'بستن راهنمای انتقال فایربیس' : 'مشاهده راهنمای گام‌به‌گام انتقال دیتابیس'}</span>
+          <HelpCircle className="w-4 h-4 text-emerald-600" />
+          <span>
+            {showGuide
+              ? 'بستن راهنمای جداول Supabase و Netlify'
+              : 'مشاهده اسکریپت SQL و راهنمای استقرار'}
+          </span>
         </button>
       </div>
 
@@ -263,27 +346,33 @@ export const FIREBASE_CONFIG = {
             <div>
               <h4 className="text-sm font-black text-slate-800 flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-amber-500" />
-                <span>۱. دکمه راه‌اندازی اولیه دیتابیس (Seed Data) و انتقال کامل اطلاعات</span>
+                <span>۱. راه‌اندازی اولیه خودکار دیتابیس در سوپابیس (Seed Data) و پشتیبان‌گیری</span>
               </h4>
               <p className="text-xs text-slate-500 mt-1">
-                پروژه به محض لود شدن به صورت خودکار دیتابیس خالی را با محصولات پیش‌فرض و اکانت ادمین پر می‌کند. همچنین هر زمان بخواهید می‌توانید با دکمه‌های زیر دیتابیس را دستی Seed یا پشتیبان‌گیری کنید:
+                در صورت خالی بودن جداول در Supabase، سیستم به صورت خودکار محصولات، دسته‌بندی‌ها، تنظیمات و حساب پیش‌فرض ادمین را درج می‌کند. همچنین با دکمه‌های زیر می‌توانید هر زمان عملیات Seed یا همگام‌سازی را اجرا کنید:
               </p>
             </div>
           </div>
 
           {/* اطلاعات حساب ادمین پیش‌فرض */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3.5 rounded-xl bg-white border border-amber-200/80">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3.5 rounded-xl bg-white border border-emerald-200/80">
             <div className="flex items-center justify-between md:justify-start gap-2 text-xs">
               <span className="text-slate-500 font-bold">نام کاربری ادمین پیش‌فرض:</span>
-              <code className="px-2 py-0.5 rounded bg-amber-50 text-amber-800 font-mono font-bold">admin</code>
+              <code className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 font-mono font-bold">
+                admin
+              </code>
             </div>
             <div className="flex items-center justify-between md:justify-start gap-2 text-xs">
               <span className="text-slate-500 font-bold">ایمیل ادمین پیش‌فرض:</span>
-              <code className="px-2 py-0.5 rounded bg-amber-50 text-amber-800 font-mono font-bold">admin@onival.com</code>
+              <code className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 font-mono font-bold">
+                admin@onival.com
+              </code>
             </div>
             <div className="flex items-center justify-between md:justify-start gap-2 text-xs">
               <span className="text-slate-500 font-bold">رمز عبور پیش‌فرض:</span>
-              <code className="px-2 py-0.5 rounded bg-amber-50 text-amber-800 font-mono font-bold">admin</code>
+              <code className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 font-mono font-bold">
+                admin
+              </code>
             </div>
           </div>
 
@@ -297,7 +386,7 @@ export const FIREBASE_CONFIG = {
               <RefreshCw className={`w-4 h-4 ${isSeeding ? 'animate-spin' : ''}`} />
               <span>
                 {isSeeding
-                  ? 'در حال ساخت داده‌ها در فایربیس...'
+                  ? 'در حال تزریق داده‌ها در Supabase...'
                   : 'راه‌اندازی اولیه و تزریق محصولات و ادمین پیش‌فرض (Seed Data)'}
               </span>
             </button>
@@ -305,14 +394,14 @@ export const FIREBASE_CONFIG = {
             <button
               type="button"
               disabled={isSyncingCloud}
-              onClick={handleSyncCurrentStateToFirebase}
+              onClick={handleSyncCurrentStateToSupabase}
               className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition cursor-pointer"
             >
               <CloudUpload className="w-4 h-4" />
               <span>
                 {isSyncingCloud
-                  ? 'در حال ذخیره در فایربیس...'
-                  : 'ذخیره و همگام‌سازی فوری کل اطلاعات فعلی در فایربیس'}
+                  ? 'در حال ذخیره در Supabase...'
+                  : 'ذخیره و همگام‌سازی فوری کل اطلاعات فعلی در Supabase'}
               </span>
             </button>
 
@@ -327,7 +416,7 @@ export const FIREBASE_CONFIG = {
 
             <label className="cursor-pointer inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-bold text-xs transition">
               <FileJson className="w-4 h-4 text-indigo-600" />
-              <span>بازگردانی و انتقال فایل پشتیبان به فایربیس (Import)</span>
+              <span>بازگردانی و انتقال فایل پشتیبان به Supabase (Import)</span>
               <input
                 type="file"
                 accept=".json,application/json"
@@ -338,92 +427,64 @@ export const FIREBASE_CONFIG = {
           </div>
         </div>
 
-        {/* ۲. فایل متمرکز تنظیمات فایربیس (src/firebaseConfig.ts) */}
+        {/* ۲. فایل متمرکز تنظیمات سوپابیس (src/supabaseClient.ts) */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
           <form
-            onSubmit={handleSaveCustomFirebaseConfig}
+            onSubmit={handleSaveCustomSupabaseConfig}
             className="lg:col-span-7 p-4 sm:p-5 rounded-2xl border border-slate-200 space-y-4"
           >
             <div className="flex items-center justify-between">
               <h4 className="text-sm font-black text-slate-800 flex items-center gap-2">
-                <Server className="w-4 h-4 text-indigo-600" />
-                <span>۲. تنظیمات متمرکز اتصال به فایربیس (firebaseConfig)</span>
+                <Server className="w-4 h-4 text-emerald-600" />
+                <span>۲. تنظیمات متمرکز اتصال به سوپابیس (src/supabaseClient.ts)</span>
               </h4>
               <button
                 type="button"
-                onClick={handleResetFirebaseConfig}
+                onClick={handleResetSupabaseConfig}
                 className="text-[11px] text-slate-500 hover:text-slate-800 underline cursor-pointer"
               >
-                بازگردانی به کانفیگ پیش‌فرض
+                بازگردانی به مقادیر پیش‌فرض
               </button>
             </div>
             <p className="text-xs text-slate-500 leading-relaxed">
-              تمامی تنظیمات فایربیس در فایل <code className="font-mono font-bold text-slate-700">src/firebaseConfig.ts</code> متمرکز شده است. برای انتقال به پروژه یا هاست جدید، می‌توانید یا آن فایل را ویرایش کنید و یا مشخصات پروژه فایربیس جدید را در فرم زیر وارد و ذخیره نمایید:
+              پروژه به صورت خودکار متغیرهای محیطی{' '}
+              <code className="font-mono font-bold text-slate-700">
+                import.meta.env.VITE_SUPABASE_URL
+              </code>{' '}
+              و{' '}
+              <code className="font-mono font-bold text-slate-700">
+                import.meta.env.VITE_SUPABASE_ANON_KEY
+              </code>{' '}
+              را از طریق فایل <code className="font-mono font-bold text-slate-700">src/supabaseClient.ts</code> می‌خواند:
             </p>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-3">
               <div>
-                <label className="block text-[11px] font-bold text-slate-700 mb-1">Project ID</label>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  VITE_SUPABASE_URL (Project URL)
+                </label>
                 <input
-                  type="text"
+                  type="url"
                   dir="ltr"
                   required
-                  value={configForm.projectId}
-                  onChange={(e) => setConfigForm({ ...configForm, projectId: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-mono"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-bold text-slate-700 mb-1">API Key</label>
-                <input
-                  type="text"
-                  dir="ltr"
-                  required
-                  value={configForm.apiKey}
-                  onChange={(e) => setConfigForm({ ...configForm, apiKey: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-mono"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-bold text-slate-700 mb-1">Auth Domain</label>
-                <input
-                  type="text"
-                  dir="ltr"
-                  value={configForm.authDomain}
-                  onChange={(e) => setConfigForm({ ...configForm, authDomain: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-mono"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-bold text-slate-700 mb-1">Storage Bucket</label>
-                <input
-                  type="text"
-                  dir="ltr"
-                  value={configForm.storageBucket}
-                  onChange={(e) => setConfigForm({ ...configForm, storageBucket: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-mono"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-bold text-slate-700 mb-1">App ID</label>
-                <input
-                  type="text"
-                  dir="ltr"
-                  value={configForm.appId}
-                  onChange={(e) => setConfigForm({ ...configForm, appId: e.target.value })}
+                  value={configForm.supabaseUrl}
+                  onChange={(e) =>
+                    setConfigForm({ ...configForm, supabaseUrl: e.target.value })
+                  }
                   className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-mono"
                 />
               </div>
               <div>
                 <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                  Firestore Database ID (پیش‌فرض: (default))
+                  VITE_SUPABASE_ANON_KEY (Publishable / Anon Key)
                 </label>
                 <input
                   type="text"
                   dir="ltr"
-                  value={configForm.firestoreDatabaseId || '(default)'}
+                  required
+                  value={configForm.supabaseAnonKey}
                   onChange={(e) =>
-                    setConfigForm({ ...configForm, firestoreDatabaseId: e.target.value })
+                    setConfigForm({ ...configForm, supabaseAnonKey: e.target.value })
                   }
                   className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-mono"
                 />
@@ -433,19 +494,19 @@ export const FIREBASE_CONFIG = {
             <div className="pt-1 flex justify-end">
               <button
                 type="submit"
-                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-sm transition cursor-pointer"
+                className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm transition cursor-pointer"
               >
-                ذخیره تنظیمات اتصال فایربیس
+                ذخیره تنظیمات اتصال Supabase
               </button>
             </div>
           </form>
 
-          {/* پیش‌نمایش کد متمرکز firebaseConfig.ts */}
+          {/* پیش‌نمایش کد متمرکز supabaseClient.ts */}
           <div className="lg:col-span-5 p-4 sm:p-5 rounded-2xl bg-slate-900 text-slate-100 space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
+              <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
                 <Terminal className="w-4 h-4" />
-                <span>فایل متمرکز: src/firebaseConfig.ts</span>
+                <span>فایل متمرکز: src/supabaseClient.ts</span>
               </span>
               <button
                 type="button"
@@ -472,73 +533,48 @@ export const FIREBASE_CONFIG = {
               {configSnippetCode}
             </pre>
             <p className="text-[11px] text-slate-400 leading-relaxed">
-              با تغییر همین چند خط در فایل <code className="text-amber-300 font-mono">src/firebaseConfig.ts</code>، کل پروژه در هر هاست یا سروری به دیتابیس جدید شما متصل می‌شود.
+              در Netlify نیز می‌توانید متغیرهای{' '}
+              <code className="text-amber-300 font-mono">VITE_SUPABASE_URL</code> و{' '}
+              <code className="text-amber-300 font-mono">VITE_SUPABASE_ANON_KEY</code> را در بخش Environment Variables قرار دهید.
             </p>
           </div>
         </div>
 
-        {/* ۳. راهنمای جامع و گام‌به‌گام انتقال دیتابیس در فایربیس گوگل */}
+        {/* ۳. اسکریپت ساخت جداول در Supabase SQL Editor */}
         {showGuide && (
-          <div className="p-5 rounded-2xl bg-amber-50/70 border border-amber-200/80 space-y-4">
-            <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
-              <Layers className="w-4 h-4 text-amber-600" />
-              <span>راهنمای کامل و گام‌به‌گام انتقال دیتابیس به فایربیس گوگل (بدون حذف هیچ‌یک از اطلاعات)</span>
-            </h4>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-700 leading-relaxed">
-              <div className="bg-white p-4 rounded-xl border border-amber-100 space-y-2">
-                <div className="font-black text-amber-700">
-                  روش اول: انتقال آنی از طریق پنل مدیریت (ساده‌ترین و کامل‌ترین روش)
-                </div>
-                <ol className="list-decimal list-inside space-y-1.5 text-slate-600">
-                  <li>
-                    قبل از تغییر سرور یا اکانت فایربیس، در همین بخش روی دکمه{' '}
-                    <strong>«دانلود فایل پشتیبان کامل دیتابیس (JSON)»</strong> کلیک کنید تا تمام اطلاعات سایت تا این لحظه (محصولات، سفارشات، فیش‌ها، تنظیمات ربات، لوگو و رمز ادمین) در یک فایل ذخیره شود.
-                  </li>
-                  <li>
-                    وارد کنسول گوگل فایربیس (<code className="font-mono">console.firebase.google.com</code>) شوید، یک پروژه بسازید و از منوی <strong>Build &gt; Firestore Database</strong> روی <strong>Create database</strong> کلیک کنید.
-                  </li>
-                  <li>
-                    در بخش <strong>Project Settings &gt; General &gt; Your apps (Web)</strong> مقادیر <code className="font-mono">firebaseConfig</code> را کپی کرده و در فایل <code className="font-mono font-bold">src/firebaseConfig.ts</code> (یا فرم بالا) قرار دهید.
-                  </li>
-                  <li>
-                    در تب <strong>Firestore Database &gt; Rules</strong>، قوانین فایل <code className="font-mono">firestore.rules</code> پروژه را قرار داده و <strong>Publish</strong> بزنید.
-                  </li>
-                  <li>
-                    سایت را باز کرده و با دکمه <strong>«بازگردانی و انتقال فایل پشتیبان به فایربیس (Import)»</strong> فایل JSON دانلود شده را انتخاب کنید؛ کل اطلاعات تا آخرین لحظه بدون حذف حتی یک رکورد به فایربیس جدید منتقل می‌شود!
-                  </li>
-                </ol>
-              </div>
-
-              <div className="bg-white p-4 rounded-xl border border-amber-100 space-y-2">
-                <div className="font-black text-indigo-700">
-                  روش دوم: انتقال مستقیم بین دو پروژه فایربیس در Google Cloud (مناسب دیتابیس‌های حجیم)
-                </div>
-                <ol className="list-decimal list-inside space-y-1.5 text-slate-600">
-                  <li>
-                    اگر می‌خواهید دیتابیس Firestore را مستقیماً در کلود گوگل از یک پروژه به پروژه دیگر منتقل کنید، وارد <code className="font-mono">console.cloud.google.com/firestore</code> شوید.
-                  </li>
-                  <li>
-                    از منوی سمت چپ گزینه <strong>Import/Export</strong> را انتخاب کرده و روی <strong>Export</strong> کلیک کنید و یک Bucket در Google Cloud Storage انتخاب نمایید.
-                  </li>
-                  <li>
-                    یا با ابزار خط فرمان Google Cloud دستور زیر را اجرا کنید:
-                    <pre dir="ltr" className="mt-1 p-2 rounded bg-slate-900 text-amber-300 font-mono text-[10px] overflow-x-auto">
-                      gcloud firestore export gs://YOUR_BUCKET_NAME --project=SOURCE_PROJECT_ID
-                    </pre>
-                  </li>
-                  <li>
-                    سپس در پروژه مقصد دستور Import را اجرا نمایید:
-                    <pre dir="ltr" className="mt-1 p-2 rounded bg-slate-900 text-emerald-300 font-mono text-[10px] overflow-x-auto">
-                      gcloud firestore import gs://YOUR_BUCKET_NAME/EXPORT_FOLDER --project=NEW_PROJECT_ID
-                    </pre>
-                  </li>
-                  <li>
-                    در نهایت فقط مقادیر فایل متمرکز <code className="font-mono font-bold">src/firebaseConfig.ts</code> را به پروژه جدید تغییر دهید.
-                  </li>
-                </ol>
-              </div>
+          <div className="p-5 rounded-2xl bg-emerald-50/60 border border-emerald-200/80 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                <Layers className="w-4 h-4 text-emerald-600" />
+                <span>
+                  اسکریپت SQL ساخت جداول در Supabase (products, categories, orders, admin_users, settings)
+                </span>
+              </h4>
+              <button
+                type="button"
+                onClick={handleCopySql}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold cursor-pointer"
+              >
+                {copiedSql ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>اسکریپت SQL کپی شد</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5 text-amber-400" />
+                    <span>کپی اسکریپت SQL برای Supabase</span>
+                  </>
+                )}
+              </button>
             </div>
+
+            <pre
+              dir="ltr"
+              className="text-[11px] font-mono bg-slate-950 text-emerald-300 p-4 rounded-xl overflow-x-auto max-h-60 leading-relaxed border border-slate-800"
+            >
+              {SUPABASE_SCHEMA_SQL}
+            </pre>
           </div>
         )}
       </div>

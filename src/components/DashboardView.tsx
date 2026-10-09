@@ -111,7 +111,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               onClick={() => onNavigate('account')}
               className="px-4 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-400/30 rounded-xl text-sm font-bold flex items-center gap-2 transition cursor-pointer"
             >
-              <span>دیتابیس فایربیس و Seed Data</span>
+              <span>دیتابیس سوپابیس (Supabase) و Seed Data</span>
             </button>
           </div>
         </div>
