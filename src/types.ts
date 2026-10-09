@@ -1,0 +1,341 @@
+export interface ProductSize {
+  name: string;
+  price: number;
+}
+
+export interface Product {
+  id: number;
+  title: string;
+  slug: string;
+  price: number;
+  hasSize: boolean;
+  sizes?: ProductSize[];
+  priceSmall?: number;
+  priceLarge?: number;
+  discount?: number;
+  features?: string[];
+  type?: string;
+  categoryId: number;
+  categoryTitle?: string;
+  imageName: string;
+  description: string;
+  content: string;
+  isDelete?: boolean;
+  creationTime: string;
+}
+
+export interface ProductCategory {
+  id: number;
+  title: string;
+  slug: string;
+  parentId?: number | null;
+  sortOrder?: number;
+}
+
+export interface Post {
+  id: number;
+  title: string;
+  slug: string;
+  categoryId: number;
+  categoryTitle?: string;
+  description: string;
+  content: string;
+  imageName: string;
+  viewCount: number;
+  authorName: string;
+  creationTime: string;
+}
+
+export interface PostCategory {
+  id: number;
+  title: string;
+  slug: string;
+  parentId?: number | null;
+}
+
+export interface ConsultationDetails {
+  topicId?: string;
+  topicTitle: string;
+  preferredDate: string;
+  preferredTimeSlot: string;
+  socialPlatform: string;
+  socialContactId: string;
+  price: number;
+  durationMinutes?: number;
+  question: string;
+  adminResponse?: string;
+  respondedAt?: string;
+  consultationStatus?: 'PendingPayment' | 'PendingVerification' | 'Scheduled' | 'Completed' | 'Cancelled';
+}
+
+export interface ConsultationTopicItem {
+  id: string;
+  title: string;
+  description?: string;
+  price: number;
+  durationMinutes?: number;
+  enabled: boolean;
+}
+
+export interface ConsultationSocialOption {
+  id: string;
+  name: string;
+  placeholder?: string;
+  enabled: boolean;
+  iconType?: 'bale' | 'telegram' | 'whatsapp' | 'eitaa' | 'instagram' | 'phone' | 'other';
+}
+
+export interface ConsultationConfig {
+  basePrice: number;
+  allowAddToCart?: boolean;
+  allowDirectPayment?: boolean;
+  specialistName?: string;
+  specialistTitle?: string;
+  timeSlots: string[];
+  topics: ConsultationTopicItem[];
+  socialPlatforms: ConsultationSocialOption[];
+}
+
+export interface ContactMessage {
+  id: number;
+  fullName: string;
+  phoneNumber?: string;
+  trackingCode: string;
+  message: string;
+  adminResponse?: string;
+  isRead: boolean;
+  isResponded: boolean;
+  creationTime: string;
+  respondedAt?: string;
+  isConsultation?: boolean;
+  consultationDetails?: ConsultationDetails;
+  orderId?: number;
+  paymentStatus?: 'Unpaid' | 'PendingVerification' | 'Paid' | 'Failed';
+  paymentMethod?: 'card_to_card' | 'bale_bot' | 'gateway' | 'online_gateway';
+  totalPrice?: number;
+  receiptImage?: string;
+  receiptImageUrl?: string;
+  receiptNote?: string;
+  receiptUploadedAt?: string;
+}
+
+export interface OrderItem {
+  id: number;
+  productId: number;
+  productName: string;
+  size?: string;
+  quantity: number;
+  unitPrice: number;
+  totalPrice: number;
+}
+
+export interface Order {
+  id: number;
+  userFullName: string;
+  phoneNumber: string;
+  userAddress: string;
+  totalPrice: number;
+  status: 'Pending' | 'Processing' | 'Shipped' | 'Cancelled' | 'Completed';
+  paymentStatus: 'Unpaid' | 'PendingVerification' | 'Paid' | 'Failed';
+  paymentMethod?: 'card_to_card' | 'bale_bot' | 'gateway' | 'online_gateway';
+  receiptImageUrl?: string;
+  receiptImage?: string;
+  receiptNote?: string;
+  receiptSubmittedAt?: string;
+  receiptUploadedAt?: string;
+  receiptAdminNote?: string;
+  trackingCode: string;
+  creationTime: string;
+  items: OrderItem[];
+  balePaymentUrl?: string;
+  isConsultation?: boolean;
+  consultationDetails?: ConsultationDetails;
+}
+
+export interface PaymentConfig {
+  cardToCardEnabled: boolean;
+  cardNumber: string;
+  cardHolderName: string;
+  bankName: string;
+  cardDescription: string;
+  gatewayOfflineNoticeTitle?: string;
+  gatewayOfflineNoticeText?: string;
+  gatewayOfflineNotice?: string;
+  baleBotEnabled: boolean;
+  baleBotUsername?: string;
+  baleBotDescription?: string;
+  baleBotButtonText?: string;
+  gatewayEnabled: boolean;
+  gatewayTitle: string;
+  gatewayButtonText?: string;
+  gatewayUrl: string;
+  gatewayMerchantCode: string;
+  gatewayDescription?: string;
+  defaultMethod: 'card_to_card' | 'bale_bot' | 'gateway' | 'online_gateway';
+}
+
+export interface BotActivityLog {
+  id: number;
+  time: string;
+  type: string;
+  platform?: 'bale' | 'telegram' | 'system';
+  text: string;
+  status: 'success' | 'warning' | 'error';
+  details?: string;
+}
+
+export interface TelegramConfig {
+  // Primary / Legacy compatibility fields
+  botToken: string;
+  adminChatId: string;
+  botUsername?: string;
+  baseUrl: string;
+  panelBaseUrl: string;
+  antiSpamSeconds: number;
+  active: boolean;
+
+  // Explicit Bale Bot Settings
+  baleEnabled?: boolean;
+  baleBotToken?: string;
+  baleAdminChatId?: string;
+  baleBotUsername?: string;
+  baleBaseUrl?: string;
+  baleWebhookUrl?: string;
+
+  // Explicit Telegram Bot Settings
+  telegramEnabled?: boolean;
+  telegramBotToken?: string;
+  telegramAdminChatId?: string;
+  telegramBotUsername?: string;
+  telegramBaseUrl?: string;
+  telegramWebhookUrl?: string;
+
+  // Direct Support Channels & Floating Support Widget
+  baleSupportUsername?: string;
+  telegramSupportUsername?: string;
+  whatsappNumber?: string;
+  eitaaSupportId?: string;
+  supportPhone?: string;
+  supportEmail?: string;
+  supportHours?: string;
+  floatingWidgetEnabled?: boolean;
+  floatingWidgetTitle?: string;
+  floatingWidgetWelcome?: string;
+
+  // Automated Notification Triggers
+  notifyOnNewOrder?: boolean;
+  notifyOnReceiptUpload?: boolean;
+  notifyOnNewTicket?: boolean;
+  notifyOnPaymentSuccess?: boolean;
+  notifyCustomerOnStatusChange?: boolean;
+
+  // Customizable Bot Message Templates
+  welcomeTemplate?: string;
+  orderInvoiceTemplate?: string;
+  receiptApprovedTemplate?: string;
+  supportReplyTemplate?: string;
+}
+
+export interface AdminStats {
+  totalProducts: number;
+  totalPosts: number;
+  unreadMessages: number;
+  pendingOrders: number;
+  totalRevenue: number;
+}
+
+export interface HomeSectionConfig {
+  id: 'specialOffers' | 'categories' | 'products' | 'articles' | 'consultationBanner';
+  title: string;
+  subtitle?: string;
+  enabled: boolean;
+  align: 'right' | 'center' | 'left';
+  order: number;
+}
+
+export interface AdminCredentials {
+  username: string;
+  password?: string;
+  email: string;
+  name: string;
+}
+
+export interface SiteContent {
+  brandName: string;
+  brandEnglishName: string;
+  siteLogo?: string;
+  siteLogoFit?: 'cover' | 'contain';
+  siteLogoShape?: 'circle' | 'rounded' | 'free';
+  siteLogoScale?: number;
+  systemTagline: string;
+  tagline?: string;
+  brandDescription?: string;
+  heroTitlePrefix: string;
+  heroSubtitle: string;
+  heroAlign: 'right' | 'center' | 'left';
+  navLabels: {
+    home: string;
+    articles: string;
+    consultation: string;
+    tracking: string;
+    about: string;
+    contact: string;
+  };
+  navigation?: {
+    home?: string;
+    articles?: string;
+    consultation?: string;
+    tracking?: string;
+    about?: string;
+    contact?: string;
+    [key: string]: string | undefined;
+  };
+  pages?: {
+    home?: any;
+    articles?: any;
+    consultation?: any;
+    tracking?: any;
+    about?: any;
+    contact?: any;
+    [key: string]: any;
+  };
+  homeSections: HomeSectionConfig[];
+  specialOffersTitle: string;
+  specialOffersButtonText: string;
+  specialOffersBgColor: string;
+  productsSectionTitle: string;
+  productsSectionSubtitle: string;
+  productsAlign: 'right' | 'center' | 'left';
+  articlesSectionTitle: string;
+  articlesSectionSubtitle: string;
+  articlesPageTitle: string;
+  articlesPageSubtitle: string;
+  articlesAlign: 'right' | 'center' | 'left';
+  consultationBadge: string;
+  consultationTitle: string;
+  consultationSubtitle: string;
+  consultationTopics: string[];
+  consultationAlign: 'right' | 'center' | 'left';
+  trackingTitle: string;
+  trackingSubtitle: string;
+  trackingAlign: 'right' | 'center' | 'left';
+  aboutTitle: string;
+  aboutParagraph1: string;
+  aboutParagraph2: string;
+  aboutStat1Value: string;
+  aboutStat1Label: string;
+  aboutStat2Value: string;
+  aboutStat2Label: string;
+  aboutStat3Value: string;
+  aboutStat3Label: string;
+  contactTitle: string;
+  contactSubtitle: string;
+  contactPhone: string;
+  contactAddress: string;
+  contactWorkingHours: string;
+  contactEmail: string;
+  footerCopyright: string;
+  paymentConfig?: PaymentConfig;
+  consultationConfig?: ConsultationConfig;
+  [key: string]: any;
+}

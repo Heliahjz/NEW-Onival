@@ -1,0 +1,3771 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  ShoppingBag, 
+  Percent, 
+  ArrowLeft, 
+  ArrowRight, 
+  LayoutGrid, 
+  Hexagon, 
+  Pill, 
+  Coffee, 
+  Nut, 
+  X, 
+  Check, 
+  CheckCircle2, 
+  Plus, 
+  Minus, 
+  Search, 
+  Lock, 
+  KeyRound, 
+  Phone, 
+  MapPin, 
+  Sparkles, 
+  Clock, 
+  Truck, 
+  Package, 
+  ChevronRight,
+  ExternalLink,
+  RefreshCw,
+  Send,
+  AlertCircle,
+  BookOpen,
+  Info,
+  PhoneCall,
+  CreditCard,
+  Upload,
+  Copy,
+  Globe,
+  HeartHandshake,
+  ShieldCheck,
+  Image as ImageIcon,
+  XCircle
+} from 'lucide-react';
+import { Product, ProductCategory, Post, ContactMessage, Order, OrderItem, ProductSize, SiteContent, PaymentConfig } from '../types';
+
+interface StorefrontViewProps {
+  products: Product[];
+  categories: ProductCategory[];
+  posts: Post[];
+  messages: ContactMessage[];
+  siteContent?: SiteContent;
+  onBackToAdmin: () => void;
+  onPlaceOrder: (orderData: Partial<Order>) => Promise<any>;
+  onSubmitContact: (contactData: { fullName: string; phoneNumber?: string; message: string }) => Promise<any>;
+  onOrderUpdated?: () => void;
+}
+
+interface CartItem {
+  cartId: string;
+  id: number;
+  name: string;
+  img: string;
+  size: string;
+  price: number;
+  qty: number;
+}
+
+export const StorefrontView: React.FC<StorefrontViewProps> = ({
+  products,
+  categories,
+  posts,
+  messages,
+  siteContent,
+  onBackToAdmin,
+  onPlaceOrder,
+  onSubmitContact,
+  onOrderUpdated,
+}) => {
+  // Navigation tabs
+  const [activePage, setActivePage] = useState<'home' | 'articles' | 'consultation' | 'tracking' | 'about' | 'contact' | 'checkout'>('home');
+  
+  // Category filter: 'all' | 'discounted' | 'honey' | 'supplement' | 'drink' | 'nuts' | or number
+  const [activeCategory, setActiveCategory] = useState<string>('all');
+  
+  // Cart state
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [isCartOpen, setIsCartOpen] = useState(false);
+  
+  // Single Product View & Scroll Restoration
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [selectedSize, setSelectedSize] = useState<string>('استاندارد');
+  const lastScrollYRef = useRef<number>(0);
+  
+  // Article Reader View
+  const [selectedPost, setSelectedPost] = useState<Post | null>(null);
+
+  // Secret Admin Access Modal
+  const [isAdminAuthModalOpen, setIsAdminAuthModalOpen] = useState(false);
+  const [adminUsernameInput, setAdminUsernameInput] = useState('');
+  const [adminPasswordInput, setAdminPasswordInput] = useState('');
+  const [adminAuthError, setAdminAuthError] = useState('');
+  const [isAuthenticatingAdmin, setIsAuthenticatingAdmin] = useState(false);
+  const [copyrightClickCount, setCopyrightClickCount] = useState(0);
+
+  // Checkout Form & Active Invoice State
+  const [checkoutName, setCheckoutName] = useState('');
+  const [checkoutPhone, setCheckoutPhone] = useState('');
+  const [checkoutAddress, setCheckoutAddress] = useState('');
+  const [phoneError, setPhoneError] = useState('');
+  const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+  const [currentInvoice, setCurrentInvoice] = useState<Order | null>(null);
+  const [isConfirmingBale, setIsConfirmingBale] = useState(false);
+  const [isConfirmingGateway, setIsConfirmingGateway] = useState(false);
+
+  // Payment Configuration & Card-to-Card Receipt Upload State
+  const paymentConfig: PaymentConfig = {
+    defaultMethod: siteContent?.paymentConfig?.defaultMethod || 'card_to_card',
+    cardToCardEnabled: siteContent?.paymentConfig?.cardToCardEnabled ?? true,
+    baleBotEnabled: siteContent?.paymentConfig?.baleBotEnabled ?? true,
+    gatewayEnabled: siteContent?.paymentConfig?.gatewayEnabled ?? false,
+    gatewayOfflineNotice:
+      siteContent?.paymentConfig?.gatewayOfflineNotice ||
+      'همراه گرامی، در حال حاضر اتصال مستقیم به درگاه بانکی شاپرک به دلیل به‌روزرسانی زیرساخت بانکی موقتاً غیرفعال است. ضمن پوزش از شکیبایی شما، می‌توانید مبلغ فاکتور را با اطمینان خاطر از طریق «کارت به کارت» واریز نموده و تصویر فیش را در همین صفحه بارگذاری فرمایید تا سفارش شما در اولویت پردازش و ارسال فوری قرار گیرد.',
+    cardNumber: siteContent?.paymentConfig?.cardNumber || '6037-9975-9912-3456',
+    cardHolderName: siteContent?.paymentConfig?.cardHolderName || 'مجموعه فرآورده‌های ارگانیک اونیوال (سارا محمدی)',
+    bankName: siteContent?.paymentConfig?.bankName || 'بانک ملی ایران',
+    cardDescription:
+      siteContent?.paymentConfig?.cardDescription ||
+      'لطفاً پس از انتقال وجه به شماره کارت فوق، تصویر واضح رسید یا اسکرین‌شات واریزی را در کادر زیر انتخاب و ارسال نمایید. شماره فاکتور شما به صورت خودکار به همراه تصویر فیش برای واحد مالی ارسال می‌شود و پس از تایید، می‌توانید با کد رهگیری وضعیت بسته‌بندی و ارسال مرسوله را پیگیری فرمایید.',
+    baleBotUsername: siteContent?.paymentConfig?.baleBotUsername || 'onival_bot',
+    baleBotDescription:
+      siteContent?.paymentConfig?.baleBotDescription ||
+      'جهت تکمیل پرداخت امن و خودکار از طریق پیام‌رسان بله، روی دکمه زیر کلیک کرده و در ربات رسمی اونیوال گزینه شروع (Start) را بزنید.',
+    gatewayTitle: siteContent?.paymentConfig?.gatewayTitle || 'درگاه پرداخت اینترنتی شاپرک (کلیه کارت‌های عضو شتاب)',
+    gatewayButtonText: siteContent?.paymentConfig?.gatewayButtonText || 'ورود به درگاه بانکی و پرداخت آنلاین فاکتور',
+    gatewayUrl: siteContent?.paymentConfig?.gatewayUrl || 'https://sandbox.zarinpal.com/pg/StartPay/',
+    gatewayMerchantCode: siteContent?.paymentConfig?.gatewayMerchantCode || '',
+    gatewayDescription:
+      siteContent?.paymentConfig?.gatewayDescription ||
+      'پرداخت آنلاین و آنی با تمامی کارت‌های بانکی عضو شبکه شتاب از طریق رمز دوم پویا.',
+  };
+
+  const resolveDefaultPaymentTab = (): 'card_to_card' | 'bale_bot' | 'gateway' => {
+    const def = paymentConfig.defaultMethod;
+    if (def === 'card_to_card' && paymentConfig.cardToCardEnabled) return 'card_to_card';
+    if (def === 'bale_bot' && paymentConfig.baleBotEnabled) return 'bale_bot';
+    if (def === 'gateway' && paymentConfig.gatewayEnabled) return 'gateway';
+    if (paymentConfig.cardToCardEnabled) return 'card_to_card';
+    if (paymentConfig.baleBotEnabled) return 'bale_bot';
+    if (paymentConfig.gatewayEnabled) return 'gateway';
+    return 'card_to_card';
+  };
+
+  const [selectedPaymentTab, setSelectedPaymentTab] = useState<'card_to_card' | 'bale_bot' | 'gateway'>(resolveDefaultPaymentTab);
+  const [copiedCard, setCopiedCard] = useState(false);
+  const [receiptPreview, setReceiptPreview] = useState<string>('');
+  const [receiptNote, setReceiptNote] = useState<string>('');
+  const [isUploadingReceipt, setIsUploadingReceipt] = useState(false);
+  const [receiptUploadError, setReceiptUploadError] = useState('');
+
+  useEffect(() => {
+    setSelectedPaymentTab(resolveDefaultPaymentTab());
+  }, [
+    siteContent?.paymentConfig?.defaultMethod,
+    siteContent?.paymentConfig?.cardToCardEnabled,
+    siteContent?.paymentConfig?.baleBotEnabled,
+    siteContent?.paymentConfig?.gatewayEnabled,
+  ]);
+
+  // Specialized Consultation Configuration & State
+  const consultationConfig = React.useMemo(() => {
+    const raw = siteContent?.consultationConfig;
+    const basePrice = raw?.basePrice ?? 120000;
+    const defaultTopics = [
+      {
+        id: 'topic-1',
+        title: 'خواص درمانی عسل ارگانیک سبلان (دیابت، سرماخوردگی، زخم معده)',
+        description: 'بررسی شرایط بدنی و تجویز نوع و میزان مصرف عسل طبیعی مناسب شما',
+        price: 120000,
+        durationMinutes: 30,
+        enabled: true
+      },
+      {
+        id: 'topic-2',
+        title: 'دوز مصرف و نگهداری ژل رویال و گرده گل',
+        description: 'تنظیم برنامه مصرف تخصصی ژل رویال و گرده گل جهت تقویت سیستم ایمنی و انرژی',
+        price: 150000,
+        durationMinutes: 40,
+        enabled: true
+      },
+      {
+        id: 'topic-3',
+        title: 'ترکیبات دمنوش گیاهی ضد استرس و بی‌خوابی',
+        description: 'نسخه ترکیبی دمنوش‌های کوهستانی و عسل برای رفع بی‌خوابی و اضطراب روزانه',
+        price: 110000,
+        durationMinutes: 25,
+        enabled: true
+      },
+      {
+        id: 'topic-4',
+        title: 'سکنجبین سنتی و پاکسازی کبد چرب',
+        description: 'برنامه ۴۰ روزه پاکسازی کبد و تنظیم متابولیسم با فرآورده‌های طبیعی',
+        price: 140000,
+        durationMinutes: 35,
+        enabled: true
+      },
+      {
+        id: 'topic-5',
+        title: 'انتخاب وزن و مشاوره سفارش عمده و خرید مستقیم',
+        description: 'راهنمایی خرید عمده یا سازمانی، بررسی برگه‌های آزمایشگاه و شرایط ارسال',
+        price: 80000,
+        durationMinutes: 20,
+        enabled: true
+      }
+    ];
+
+    let resolvedTopics =
+      raw?.topics && raw.topics.length > 0
+        ? raw.topics.filter(t => t.enabled !== false)
+        : siteContent?.consultationTopics && siteContent.consultationTopics.length > 0
+        ? siteContent.consultationTopics.map((titleStr, idx) => ({
+            id: `topic-legacy-${idx}`,
+            title: titleStr,
+            description: 'مشاوره تخصصی با کارشناس سلامت اونیوال',
+            price: basePrice,
+            durationMinutes: 30,
+            enabled: true
+          }))
+        : defaultTopics;
+
+    if (resolvedTopics.length === 0) resolvedTopics = defaultTopics;
+
+    const defaultSocials = [
+      {
+        id: 'bale',
+        name: 'پیام‌رسان بله (Bale)',
+        placeholder: 'آیدی یا شماره موبایل شما در بله (مثال: @username یا 09123456789)',
+        enabled: true,
+        iconType: 'bale' as const
+      },
+      {
+        id: 'telegram',
+        name: 'تلگرام (Telegram)',
+        placeholder: 'آیدی یا شماره موبایل شما در تلگرام (مثال: @username یا 09123456789)',
+        enabled: true,
+        iconType: 'telegram' as const
+      },
+      {
+        id: 'whatsapp',
+        name: 'واتساپ (WhatsApp)',
+        placeholder: 'شماره موبایل فعال در واتساپ (مثال: 09123456789)',
+        enabled: true,
+        iconType: 'whatsapp' as const
+      },
+      {
+        id: 'eitaa',
+        name: 'پیام‌رسان ایتا (Eitaa)',
+        placeholder: 'آیدی یا شماره موبایل شما در ایتا (مثال: @username یا 09123456789)',
+        enabled: true,
+        iconType: 'eitaa' as const
+      },
+      {
+        id: 'instagram',
+        name: 'دایرکت اینستاگرام (Instagram)',
+        placeholder: 'آیدی پیج اینستاگرام شما (مثال: @your_page)',
+        enabled: true,
+        iconType: 'instagram' as const
+      },
+      {
+        id: 'phone',
+        name: 'تماس تلفنی مستقیم',
+        placeholder: 'شماره تماس مستقیم جهت برقراری تماس کارشناس (مثال: 09123456789)',
+        enabled: true,
+        iconType: 'phone' as const
+      }
+    ];
+
+    const resolvedSocials =
+      raw?.socialPlatforms && raw.socialPlatforms.filter(s => s.enabled !== false).length > 0
+        ? raw.socialPlatforms.filter(s => s.enabled !== false)
+        : defaultSocials;
+
+    const resolvedTimeSlots =
+      raw?.timeSlots && raw.timeSlots.length > 0
+        ? raw.timeSlots
+        : [
+            'نوبت صبح (۰۹:۰۰ الی ۱۲:۰۰)',
+            'نوبت ظهر (۱۲:۰۰ الی ۱۵:۰۰)',
+            'نوبت عصر (۱۶:۰۰ الی ۱۹:۰۰)',
+            'نوبت شب (۱۹:۰۰ الی ۲۱:۰۰)',
+            'اولین زمان خالی کارشناس (فوری)'
+          ];
+
+    return {
+      basePrice,
+      allowAddToCart: raw?.allowAddToCart !== false,
+      allowDirectPayment: raw?.allowDirectPayment !== false,
+      specialistName: raw?.specialistName || 'متخصص طب سنتی و فرآورده‌های کندوی اونیوال',
+      specialistTitle: raw?.specialistTitle || 'مشاوره اختصاصی تغذیه، رژیم درمانی و فرآورده‌های ارگانیک',
+      topics: resolvedTopics,
+      socialPlatforms: resolvedSocials,
+      timeSlots: resolvedTimeSlots
+    };
+  }, [siteContent]);
+
+  const [consultSelectedTopicId, setConsultSelectedTopicId] = useState<string>('');
+  const [consultPreferredDate, setConsultPreferredDate] = useState<string>('فردا');
+  const [consultPreferredTimeSlot, setConsultPreferredTimeSlot] = useState<string>('');
+  const [consultSelectedSocialId, setConsultSelectedSocialId] = useState<string>('');
+  const [consultSocialContactId, setConsultSocialContactId] = useState<string>('');
+  const [consultName, setConsultName] = useState('');
+  const [consultPhone, setConsultPhone] = useState('');
+  const [consultQuestion, setConsultQuestion] = useState('');
+  const [consultBookingError, setConsultBookingError] = useState('');
+  const [isSubmittingConsult, setIsSubmittingConsult] = useState(false);
+  const [consultSuccessCode, setConsultSuccessCode] = useState<string | null>(null);
+
+  const activeConsultTopic =
+    consultationConfig.topics.find(t => t.id === consultSelectedTopicId) || consultationConfig.topics[0];
+  const activeConsultSocial =
+    consultationConfig.socialPlatforms.find(s => s.id === consultSelectedSocialId) || consultationConfig.socialPlatforms[0];
+  const activeConsultTimeSlot =
+    consultPreferredTimeSlot || consultationConfig.timeSlots[0] || 'نوبت عصر (۱۶:۰۰ الی ۱۹:۰۰)';
+  const activeConsultPrice = activeConsultTopic ? activeConsultTopic.price : consultationConfig.basePrice;
+
+  // Tracking Query State
+  const [trackingCodeInput, setTrackingCodeInput] = useState('');
+  const [trackingResult, setTrackingResult] = useState<{
+    type: 'order' | 'message';
+    data: any;
+  } | null>(null);
+  const [trackingSearched, setTrackingSearched] = useState(false);
+  const [isSearchingTracking, setIsSearchingTracking] = useState(false);
+
+  // Fix scrolling bug: When navigating tabs or pages, always scroll to the top
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  }, [activePage]);
+
+  // Lock background body scroll when Cart Drawer or Admin Modal is open on mobile
+  useEffect(() => {
+    if (isCartOpen || isAdminAuthModalOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isCartOpen, isAdminAuthModalOpen]);
+
+  // Navigate to a storefront page and clear any open product/article detail view
+  const handleSelectPage = (page: 'home' | 'articles' | 'consultation' | 'tracking' | 'about' | 'contact' | 'checkout') => {
+    setSelectedProduct(null);
+    setSelectedPost(null);
+    setActivePage(page);
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  };
+
+  // Keyboard shortcut for hidden admin: Ctrl + Shift + A
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && (e.key === 'A' || e.key === 'a' || e.key === 'ش')) {
+        e.preventDefault();
+        setIsAdminAuthModalOpen(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Format Persian currency
+  const formatPrice = (num: number) => {
+    return new Intl.NumberFormat('fa-IR').format(num);
+  };
+
+  // Dynamic brand values & site content
+  const brandName = siteContent?.brandName || 'اونیوال';
+  const brandEnglishName = siteContent?.brandEnglishName || 'ONIVAL';
+  const brandDescription = siteContent?.brandDescription || 'عرضه مستقیم عسل طبیعی، ژل رویال، گرده گل و فرآورده‌های ارگانیک کوهستان';
+  const tagline = siteContent?.tagline || 'فروشگاه تخصصی محصولات ارگانیک و کندوی اونیوال';
+  const navigation = {
+    home: siteContent?.navLabels?.home || siteContent?.navigation?.home || 'خانه',
+    articles: siteContent?.navLabels?.articles || siteContent?.navigation?.articles || 'مقالات',
+    consultation: siteContent?.navLabels?.consultation || siteContent?.navigation?.consultation || 'مشاوره تخصصی',
+    tracking: siteContent?.navLabels?.tracking || siteContent?.navigation?.tracking || 'پیگیری سفارش',
+    about: siteContent?.navLabels?.about || siteContent?.navigation?.about || 'درباره ما',
+    contact: siteContent?.navLabels?.contact || siteContent?.navigation?.contact || 'تماس',
+  };
+
+  // Section id normalizer to seamlessly support both camelCase and snake_case formats
+  const normalizeSectionId = (rawId: string): string => {
+    const id = (rawId || '').toLowerCase().replace(/[-_]/g, '');
+    if (id.includes('hero')) return 'hero';
+    if (id.includes('special') || id.includes('offer')) return 'special_offers';
+    if (id.includes('categor')) return 'categories';
+    if (id.includes('product')) return 'products';
+    if (id.includes('consult')) return 'consultation';
+    if (id.includes('article') || id.includes('post') || id.includes('blog')) return 'articles';
+    if (id.includes('about')) return 'about';
+    return id;
+  };
+
+  const homeSections = siteContent?.homeSections && siteContent.homeSections.length > 0
+    ? [...siteContent.homeSections].sort((a, b) => a.order - b.order)
+    : [
+        { id: 'specialOffers', title: 'پیشنهاد شگفت‌انگیز', subtitle: 'تخفیف‌های استثنایی محصولات برگزیده کندو', enabled: true, order: 1 },
+        { id: 'categories', title: 'دسته‌بندی‌های محصولات', subtitle: 'دسترسی سریع به گروه‌های کالایی', enabled: true, order: 2 },
+        { id: 'products', title: 'لیست محصولات اونیوال', subtitle: 'محصولات ارگانیک و طبیعی با ضمانت اصالت و برگه آزمایشگاه', enabled: true, order: 3 },
+        { id: 'consultationBanner', title: 'مشاوره تخصصی رایگان', subtitle: 'راهنمایی انتخاب عسل دارویی و فرآورده‌های ویژه سلامت', enabled: true, order: 4 },
+        { id: 'articles', title: 'مقالات و مطالب علمی اونیوال', subtitle: 'آخرین نوشته‌ها برای آشنایی با خواص عسل طبیعی، دمنوش‌های گیاهی و سبک زندگی سالم', enabled: true, order: 5 },
+        { id: 'about', title: 'درباره اصالت و کیفیت', subtitle: '۱۰۰٪ طبیعی، خام و بدون حرارت‌دیدگی', enabled: true, order: 6 },
+      ];
+
+  const hasExplicitHero = homeSections.some(s => s.enabled && normalizeSectionId(s.id) === 'hero');
+
+  // Special offers: products with discount > 0
+  const specialOffers = products.filter(p => (p.discount || 0) > 0);
+
+  // Filter products by category
+  const filteredProducts = products.filter(p => {
+    if (activeCategory === 'all') return true;
+    if (activeCategory === 'discounted') return (p.discount || 0) > 0;
+    if (p.type === activeCategory) return true;
+    if (p.categoryTitle && p.categoryTitle.includes(activeCategory)) return true;
+    return false;
+  });
+
+  // Calculate base price for a given product and size name
+  const getBasePrice = (product: Product, sizeName: string): number => {
+    if (product.sizes && product.sizes.length > 0) {
+      const found = product.sizes.find(s => s.name === sizeName);
+      if (found) return found.price;
+      return product.sizes[0].price;
+    }
+    if (sizeName === 'بزرگ' || sizeName === 'large') {
+      return product.priceLarge || product.price;
+    }
+    return product.priceSmall || product.price;
+  };
+
+  // Calculate final discounted price for product and size
+  const calculateFinalPrice = (product: Product, sizeName: string): number => {
+    const base = getBasePrice(product, sizeName);
+    const discount = product.discount || 0;
+    return discount > 0 ? Math.round(base * (100 - discount) / 100) : base;
+  };
+
+  // Get lowest price among available sizes
+  const getMinPrice = (product: Product): number => {
+    if (product.sizes && product.sizes.length > 0) {
+      return Math.min(...product.sizes.map(s => s.price));
+    }
+    return product.priceSmall || product.price;
+  };
+
+  // Cart actions
+  const totalCartCount = cart.reduce((acc, item) => acc + item.qty, 0);
+  const totalCartPrice = cart.reduce((acc, item) => acc + item.price * item.qty, 0);
+
+  const addToCart = (product: Product, sizeName: string) => {
+    const finalPrice = calculateFinalPrice(product, sizeName);
+    const cartId = `${product.id}-${sizeName}`;
+
+    setCart(prev => {
+      const existing = prev.find(item => item.cartId === cartId);
+      if (existing) {
+        return prev.map(item => item.cartId === cartId ? { ...item, qty: item.qty + 1 } : item);
+      }
+      return [
+        ...prev,
+        {
+          cartId,
+          id: product.id,
+          name: product.title,
+          img: product.imageName,
+          size: sizeName,
+          price: finalPrice,
+          qty: 1
+        }
+      ];
+    });
+
+    setIsCartOpen(true);
+    setSelectedProduct(null);
+  };
+
+  const updateCartQty = (cartId: string, delta: number) => {
+    setCart(prev => {
+      return prev
+        .map(item => {
+          if (item.cartId === cartId) {
+            const newQty = item.qty + delta;
+            return newQty > 0 ? { ...item, qty: newQty } : null;
+          }
+          return item;
+        })
+        .filter(Boolean) as CartItem[];
+    });
+  };
+
+  const removeCartItem = (cartId: string) => {
+    setCart(prev => prev.filter(item => item.cartId !== cartId));
+  };
+
+  // Phone validation
+  const validatePhone = (val: string) => {
+    const clean = val.trim();
+    if (!clean) {
+      setPhoneError('شماره موبایل الزامی است');
+      return false;
+    }
+    if (!/^09\d{9}$/.test(clean)) {
+      setPhoneError('شماره موبایل باید با ۰۹ شروع شود و ۱۱ رقم باشد.');
+      return false;
+    }
+    setPhoneError('');
+    return true;
+  };
+
+  // Handle Checkout submission -> Generate Invoice connected to Bale Bot
+  const handleCheckoutSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!validatePhone(checkoutPhone)) return;
+
+    if (!checkoutName.trim() || !checkoutAddress.trim()) {
+      alert('لطفاً نام و آدرس کامل پستی را وارد نمایید.');
+      return;
+    }
+
+    setIsSubmittingOrder(true);
+    try {
+      const trackingCode = `ONV-ORD-${Math.floor(100 + Math.random() * 900)}`;
+      const orderItems: OrderItem[] = cart.map((item, idx) => ({
+        id: idx + 1,
+        productId: item.id,
+        productName: item.name,
+        size: item.size,
+        quantity: item.qty,
+        unitPrice: item.price,
+        totalPrice: item.price * item.qty
+      }));
+
+      const createdOrder = await onPlaceOrder({
+        userFullName: checkoutName,
+        phoneNumber: checkoutPhone,
+        userAddress: checkoutAddress,
+        totalPrice: totalCartPrice,
+        trackingCode,
+        items: orderItems,
+      });
+
+      // Clear shopping cart and set the official issued invoice
+      setCart([]);
+      setReceiptPreview('');
+      setReceiptNote('');
+      setReceiptUploadError('');
+      setSelectedPaymentTab(resolveDefaultPaymentTab());
+      setCurrentInvoice(createdOrder || {
+        id: Date.now(),
+        userFullName: checkoutName,
+        phoneNumber: checkoutPhone,
+        userAddress: checkoutAddress,
+        totalPrice: totalCartPrice,
+        status: 'Pending',
+        paymentStatus: 'Unpaid',
+        paymentMethod: resolveDefaultPaymentTab(),
+        trackingCode,
+        creationTime: new Date().toLocaleDateString('fa-IR'),
+        items: orderItems,
+        balePaymentUrl: `https://ble.ir/${(paymentConfig.baleBotUsername || 'onival_bot').replace(/^@/, '')}?start=pay_${trackingCode}`
+      });
+
+      // Stay on checkout page which now renders the official invoice and configured payment modes
+      window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+    } catch (err) {
+      alert('خطا در ثبت سفارش. لطفاً دوباره تلاش فرمایید.');
+    } finally {
+      setIsSubmittingOrder(false);
+    }
+  };
+
+  // Copy card number helper
+  const handleCopyCardNumber = () => {
+    const rawDigits = (paymentConfig.cardNumber || '').replace(/[^0-9]/g, '');
+    navigator.clipboard?.writeText(rawDigits || paymentConfig.cardNumber);
+    setCopiedCard(true);
+    setTimeout(() => setCopiedCard(false), 2500);
+  };
+
+  // Convert selected receipt image file to base64 DataURL (compressed if large)
+  const handleReceiptFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setReceiptUploadError('');
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setReceiptUploadError('لطفاً یک فایل تصویری معتبر (JPG یا PNG) انتخاب نمایید.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const resultStr = ev.target?.result as string;
+      if (!resultStr) return;
+
+      // Compress image onto canvas so upload is fast and reliable
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 1200;
+        let w = img.width;
+        let h = img.height;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) {
+            h = Math.round((h * maxDim) / w);
+            w = maxDim;
+          } else {
+            w = Math.round((w * maxDim) / h);
+            h = maxDim;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, w, h);
+          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.82);
+          setReceiptPreview(compressedDataUrl);
+        } else {
+          setReceiptPreview(resultStr);
+        }
+      };
+      img.onerror = () => {
+        setReceiptPreview(resultStr);
+      };
+      img.src = resultStr;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Submit receipt image + invoice trackingCode to server for admin verification
+  const handleUploadReceipt = async (orderTrackingCode: string) => {
+    if (!receiptPreview) {
+      setReceiptUploadError('لطفاً ابتدا تصویر فیش واریزی یا اسکرین‌شات تراکنش را انتخاب نمایید.');
+      return;
+    }
+    setReceiptUploadError('');
+    setIsUploadingReceipt(true);
+    try {
+      const res = await fetch(`/api/orders/${encodeURIComponent(orderTrackingCode)}/upload-receipt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          receiptImage: receiptPreview,
+          receiptNote: receiptNote.trim() || undefined,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const updatedOrder: Order = data.order || {
+          ...(currentInvoice || trackingResult?.data),
+          paymentMethod: 'card_to_card',
+          paymentStatus: 'PendingVerification',
+          receiptImage: receiptPreview,
+          receiptNote: receiptNote.trim() || undefined,
+          receiptUploadedAt: new Date().toLocaleString('fa-IR'),
+        };
+        if (currentInvoice && currentInvoice.trackingCode === orderTrackingCode) {
+          setCurrentInvoice(updatedOrder);
+        }
+        if (trackingResult && trackingResult.type === 'order' && trackingResult.data.trackingCode === orderTrackingCode) {
+          setTrackingResult({ type: 'order', data: updatedOrder });
+        }
+        setReceiptPreview('');
+        setReceiptNote('');
+        onOrderUpdated?.();
+      } else {
+        setReceiptUploadError('خطا در ارسال تصویر فیش. لطفاً مجدداً تلاش کنید.');
+      }
+    } catch (err) {
+      console.error(err);
+      setReceiptUploadError('خطا در برقراری ارتباط با سرور.');
+    } finally {
+      setIsUploadingReceipt(false);
+    }
+  };
+
+  // Build formatted gateway URL with dynamic replacements
+  const buildGatewayLink = (order: Order) => {
+    const rawUrl = (paymentConfig.gatewayUrl || '').trim();
+    if (!rawUrl) return '';
+    return rawUrl
+      .replace(/\{amount\}/gi, String(order.totalPrice))
+      .replace(/\{invoice\}/gi, encodeURIComponent(order.trackingCode))
+      .replace(/\{merchant\}/gi, encodeURIComponent(paymentConfig.gatewayMerchantCode || ''));
+  };
+
+  // Handle Online Payment Gateway confirmation
+  const handleConfirmGatewayPayment = async (orderTrackingCode: string) => {
+    setIsConfirmingGateway(true);
+    try {
+      const res = await fetch(`/api/orders/${encodeURIComponent(orderTrackingCode)}/confirm-gateway-payment`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (currentInvoice && currentInvoice.trackingCode === orderTrackingCode) {
+          setCurrentInvoice(
+            data.order || {
+              ...currentInvoice,
+              paymentMethod: 'gateway',
+              paymentStatus: 'Paid',
+              status: 'Processing',
+            }
+          );
+        }
+        if (trackingResult && trackingResult.type === 'order' && trackingResult.data.trackingCode === orderTrackingCode) {
+          setTrackingResult({
+            type: 'order',
+            data:
+              data.order || {
+                ...trackingResult.data,
+                paymentMethod: 'gateway',
+                paymentStatus: 'Paid',
+                status: 'Processing',
+              },
+          });
+        }
+        onOrderUpdated?.();
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsConfirmingGateway(false);
+    }
+  };
+
+  // Handle Bale payment confirmation simulator
+  const handleConfirmBalePayment = async (orderTrackingCode: string) => {
+    setIsConfirmingBale(true);
+    try {
+      const res = await fetch(`/api/orders/${orderTrackingCode}/confirm-bale-payment`, {
+        method: 'POST'
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (currentInvoice) {
+          setCurrentInvoice({
+            ...currentInvoice,
+            paymentMethod: 'bale_bot',
+            paymentStatus: 'Paid',
+            status: 'Processing'
+          });
+        }
+        onOrderUpdated?.();
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsConfirmingBale(false);
+    }
+  };
+
+  // Handle Consultation Booking & Direct Invoice Payment
+  const handleConsultSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setConsultBookingError('');
+
+    if (!consultName.trim()) {
+      setConsultBookingError('لطفاً نام و نام خانوادگی خود را وارد فرمایید.');
+      return;
+    }
+    if (!/^09\d{9}$/.test(consultPhone.trim())) {
+      setConsultBookingError('لطفاً شماره موبایل معتبر ۱۱ رقمی (با شروع ۰۹) وارد نمایید.');
+      return;
+    }
+    if (!consultSocialContactId.trim()) {
+      setConsultBookingError(`لطفاً آیدی یا شماره ارتباطی خود در «${activeConsultSocial?.name || 'شبکه اجتماعی انتخابی'}» را وارد نمایید.`);
+      return;
+    }
+
+    setIsSubmittingConsult(true);
+    try {
+      const res = await fetch('/api/consultations/book', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fullName: consultName.trim(),
+          phoneNumber: consultPhone.trim(),
+          topicId: activeConsultTopic?.id,
+          topicTitle: activeConsultTopic?.title || 'مشاوره تخصصی سلامت',
+          preferredDate: consultPreferredDate || 'فردا',
+          preferredTimeSlot: activeConsultTimeSlot,
+          socialPlatform: activeConsultSocial?.name || 'پیام‌رسان بله',
+          socialContactId: consultSocialContactId.trim(),
+          price: activeConsultPrice,
+          durationMinutes: activeConsultTopic?.durationMinutes || 30,
+          question: consultQuestion.trim() || 'درخواست مشاوره در زمان انتخابی'
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        onOrderUpdated?.();
+
+        if (activeConsultPrice > 0 && data.order) {
+          // Open Official Invoice & 3-Mode Payment Screen (just like product checkout!)
+          setReceiptPreview('');
+          setReceiptNote('');
+          setReceiptUploadError('');
+          setSelectedPaymentTab(resolveDefaultPaymentTab());
+          setCurrentInvoice(data.order);
+          setActivePage('checkout');
+          window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+        } else {
+          setConsultSuccessCode(data.trackingCode || `ONV-CNS-${Math.floor(100 + Math.random() * 900)}`);
+        }
+        setConsultQuestion('');
+      } else {
+        setConsultBookingError('خطا در ثبت رزرو مشاوره. لطفاً مجدداً تلاش کنید.');
+      }
+    } catch (err) {
+      setConsultBookingError('خطا در برقراری ارتباط با سرور.');
+    } finally {
+      setIsSubmittingConsult(false);
+    }
+  };
+
+  // Add Consultation Session directly to Shopping Cart
+  const handleAddConsultationToCart = () => {
+    setConsultBookingError('');
+    const topicTitle = activeConsultTopic?.title || 'مشاوره تخصصی سلامت';
+    const socialName = activeConsultSocial?.name || 'پیام‌رسان بله';
+    const contactHandle = consultSocialContactId.trim() ? ` (${consultSocialContactId.trim()})` : '';
+    const sizeSummary = `${consultPreferredDate || 'فردا'} | ${activeConsultTimeSlot} - ${socialName}${contactHandle}`;
+    const cartId = `consult-${activeConsultTopic?.id || 'default'}-${consultPreferredDate}-${activeConsultTimeSlot}`;
+
+    setCart(prev => {
+      const existing = prev.find(it => it.cartId === cartId);
+      if (existing) {
+        return prev.map(it => (it.cartId === cartId ? { ...it, qty: it.qty + 1 } : it));
+      }
+      return [
+        ...prev,
+        {
+          cartId,
+          id: 9000 + Math.floor(Math.random() * 900),
+          name: `رزرو مشاوره تخصصی: ${topicTitle}`,
+          img: 'https://images.unsplash.com/photo-1576091160550-2173dba999ef?w=600&auto=format&fit=crop&q=80',
+          size: sizeSummary,
+          price: activeConsultPrice,
+          qty: 1
+        }
+      ];
+    });
+
+    if (consultName.trim() && !checkoutName) setCheckoutName(consultName.trim());
+    if (consultPhone.trim() && !checkoutPhone) setCheckoutPhone(consultPhone.trim());
+    if (!checkoutAddress.trim()) {
+      setCheckoutAddress(
+        `مشاوره آنلاین در ${socialName}${contactHandle} | زمان: ${consultPreferredDate || 'فردا'} - ${activeConsultTimeSlot}${
+          consultQuestion.trim() ? ` | شرح: ${consultQuestion.trim()}` : ''
+        }`
+      );
+    }
+
+    setIsCartOpen(true);
+  };
+
+  // Handle Tracking Search
+  const handleTrackingSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const code = trackingCodeInput.trim().toUpperCase();
+    if (!code) return;
+
+    setIsSearchingTracking(true);
+    setTrackingSearched(true);
+
+    try {
+      const trackRes = await fetch(`/api/orders/track/${encodeURIComponent(code)}`);
+      if (trackRes.ok) {
+        const json = await trackRes.json();
+        if (json.found) {
+          setTrackingResult({ type: json.type, data: json.data });
+          setIsSearchingTracking(false);
+          return;
+        }
+      }
+
+      // Fallback check in orders
+      const ordersRes = await fetch('/api/orders');
+      if (ordersRes.ok) {
+        const allOrders: Order[] = await ordersRes.json();
+        const foundOrder = allOrders.find(o => o.trackingCode.toUpperCase() === code);
+        if (foundOrder) {
+          setTrackingResult({ type: 'order', data: foundOrder });
+          setIsSearchingTracking(false);
+          return;
+        }
+      }
+
+      // Fallback check in contact messages
+      const contactRes = await fetch('/api/contact');
+      if (contactRes.ok) {
+        const allMessages: ContactMessage[] = await contactRes.json();
+        const foundMsg = allMessages.find(m => m.trackingCode.toUpperCase() === code);
+        if (foundMsg) {
+          setTrackingResult({ type: 'message', data: foundMsg });
+          setIsSearchingTracking(false);
+          return;
+        }
+      }
+
+      setTrackingResult(null);
+    } catch (err) {
+      setTrackingResult(null);
+    } finally {
+      setIsSearchingTracking(false);
+    }
+  };
+
+  // Handle opening product detail view (native page scroll on mobile & desktop)
+  const handleOpenProduct = (product: Product) => {
+    lastScrollYRef.current = window.scrollY || 0;
+    setSelectedPost(null);
+    setSelectedProduct(product);
+    if (product.sizes && product.sizes.length > 0) {
+      setSelectedSize(product.sizes[0].name);
+    } else {
+      setSelectedSize('کوچک');
+    }
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  };
+
+  // Handle closing product detail view and restoring scroll position
+  const handleCloseProduct = () => {
+    const prevScroll = lastScrollYRef.current;
+    setSelectedProduct(null);
+    setTimeout(() => {
+      window.scrollTo({ top: prevScroll, left: 0, behavior: 'instant' });
+    }, 0);
+  };
+
+  // Handle opening article detail view
+  const handleOpenPost = (post: Post) => {
+    lastScrollYRef.current = window.scrollY || 0;
+    setSelectedProduct(null);
+    setSelectedPost(post);
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  };
+
+  const handleClosePost = () => {
+    const prevScroll = lastScrollYRef.current;
+    setSelectedPost(null);
+    setTimeout(() => {
+      window.scrollTo({ top: prevScroll, left: 0, behavior: 'instant' });
+    }, 0);
+  };
+
+  // Handle "View All" in Amazing Deals banner
+  const handleViewAllOffers = () => {
+    setActiveCategory('discounted');
+    setTimeout(() => {
+      document.getElementById('products-section')?.scrollIntoView({ behavior: 'smooth' });
+    }, 50);
+  };
+
+  // Secret Admin Login Check (validates both Username and Password against server)
+  const handleSecretAdminLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminAuthError('');
+
+    const u = adminUsernameInput.trim();
+    const p = adminPasswordInput.trim();
+
+    if (!u || !p) {
+      setAdminAuthError('لطفاً هم نام کاربری و هم رمز عبور مدیریت را وارد نمایید.');
+      return;
+    }
+
+    setIsAuthenticatingAdmin(true);
+    try {
+      const res = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: u, password: p }),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok && data.ok) {
+        setIsAdminAuthModalOpen(false);
+        setAdminUsernameInput('');
+        setAdminPasswordInput('');
+        setAdminAuthError('');
+        onBackToAdmin();
+      } else {
+        setAdminAuthError(data.error || 'نام کاربری یا رمز عبور مدیریت اشتباه است.');
+      }
+    } catch {
+      if ((u.toLowerCase() === 'admin' || u.toLowerCase() === 'admin@onival.com') && p === 'admin') {
+        setIsAdminAuthModalOpen(false);
+        setAdminUsernameInput('');
+        setAdminPasswordInput('');
+        setAdminAuthError('');
+        onBackToAdmin();
+      } else {
+        setAdminAuthError('خطا در بررسی اطلاعات ورود مدیریت.');
+      }
+    } finally {
+      setIsAuthenticatingAdmin(false);
+    }
+  };
+
+  const handleCopyrightClick = () => {
+    const newCount = copyrightClickCount + 1;
+    setCopyrightClickCount(newCount);
+    if (newCount >= 3) {
+      setIsAdminAuthModalOpen(true);
+      setCopyrightClickCount(0);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#FEFDF5] text-[#292524] font-sans selection:bg-amber-200" dir="rtl">
+      {/* ================= FLOATING HEADER ISLAND ================= */}
+      <header className="fixed top-5 left-0 right-0 z-40 flex justify-center px-4 pointer-events-none transition-all">
+        <nav className="pointer-events-auto bg-white/95 backdrop-blur-md px-4 sm:px-7 py-2.5 rounded-full shadow-lg border border-white/60 flex items-center justify-between gap-3 sm:gap-8 max-w-4xl w-full">
+          {/* Brand Logo: Custom Uploaded Logo OR Hexagon Fallback + Persian brandName + English brandEnglishName */}
+          <div 
+            onClick={() => handleSelectPage('home')}
+            className="flex items-center gap-2.5 cursor-pointer select-none group shrink-0"
+          >
+            {siteContent?.siteLogo ? (
+              <div
+                className={
+                  siteContent.siteLogoShape === 'free'
+                    ? 'h-9 sm:h-10 max-w-[115px] flex items-center justify-center overflow-hidden shrink-0 group-hover:scale-105 transition'
+                    : `w-9 h-9 sm:w-10 sm:h-10 ${
+                        siteContent.siteLogoShape === 'circle' ? 'rounded-full' : 'rounded-xl'
+                      } bg-white border border-stone-200/70 flex items-center justify-center overflow-hidden shrink-0 shadow-xs group-hover:scale-105 transition`
+                }
+              >
+                <img
+                  src={siteContent.siteLogo}
+                  alt={brandName}
+                  style={{
+                    transform:
+                      siteContent.siteLogoScale && siteContent.siteLogoScale !== 100
+                        ? `scale(${siteContent.siteLogoScale / 100})`
+                        : undefined,
+                    transformOrigin: 'center center'
+                  }}
+                  className={`w-full h-full ${
+                    siteContent.siteLogoShape === 'free'
+                      ? 'object-contain max-h-10 w-auto'
+                      : (siteContent.siteLogoFit || 'cover') === 'cover'
+                      ? 'object-cover'
+                      : 'object-contain'
+                  }`}
+                />
+              </div>
+            ) : (
+              <div className="w-8 h-8 rounded-full bg-amber-50 flex items-center justify-center text-amber-600 group-hover:rotate-12 transition">
+                <Hexagon className="w-5 h-5 fill-amber-500/20 text-amber-600 stroke-[2.2]" />
+              </div>
+            )}
+            <div className="flex items-baseline gap-1.5 text-stone-900 tracking-tight">
+              <span className="font-black text-base sm:text-lg">{brandName}</span>
+              <span className="font-mono text-[10px] sm:text-xs font-bold text-amber-600 tracking-wider">{brandEnglishName}</span>
+            </div>
+          </div>
+
+          {/* Navigation Tabs (Desktop) */}
+          <ul className="hidden md:flex items-center gap-5 text-[13px] font-bold text-stone-600">
+            <li>
+              <button 
+                onClick={() => handleSelectPage('home')}
+                className={`transition pb-0.5 ${activePage === 'home' && !selectedProduct && !selectedPost ? 'text-stone-900 border-b-2 border-stone-900 font-extrabold' : 'hover:text-stone-900'}`}
+              >
+                {navigation.home || 'خانه'}
+              </button>
+            </li>
+            <li>
+              <button 
+                onClick={() => handleSelectPage('articles')}
+                className={`transition pb-0.5 ${activePage === 'articles' && !selectedProduct ? 'text-stone-900 border-b-2 border-stone-900 font-extrabold' : 'hover:text-stone-900'}`}
+              >
+                {navigation.articles || 'مقالات'}
+              </button>
+            </li>
+            <li>
+              <button 
+                onClick={() => handleSelectPage('consultation')}
+                className={`transition pb-0.5 flex items-center gap-1 ${activePage === 'consultation' && !selectedProduct && !selectedPost ? 'text-stone-900 border-b-2 border-stone-900 font-extrabold' : 'hover:text-stone-900'}`}
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                <span>{navigation.consultation || 'مشاوره تخصصی'}</span>
+              </button>
+            </li>
+            <li>
+              <button 
+                onClick={() => handleSelectPage('tracking')}
+                className={`transition pb-0.5 ${activePage === 'tracking' && !selectedProduct && !selectedPost ? 'text-stone-900 border-b-2 border-stone-900 font-extrabold' : 'hover:text-stone-900'}`}
+              >
+                {navigation.tracking || 'پیگیری سفارش'}
+              </button>
+            </li>
+            <li>
+              <button 
+                onClick={() => handleSelectPage('about')}
+                className={`transition pb-0.5 ${activePage === 'about' && !selectedProduct && !selectedPost ? 'text-stone-900 border-b-2 border-stone-900 font-extrabold' : 'hover:text-stone-900'}`}
+              >
+                {navigation.about || 'درباره ما'}
+              </button>
+            </li>
+            <li>
+              <button 
+                onClick={() => handleSelectPage('contact')}
+                className={`transition pb-0.5 ${activePage === 'contact' && !selectedProduct && !selectedPost ? 'text-stone-900 border-b-2 border-stone-900 font-extrabold' : 'hover:text-stone-900'}`}
+              >
+                {navigation.contact || 'تماس'}
+              </button>
+            </li>
+          </ul>
+
+          {/* Right Actions: Cart & Hidden Admin Key */}
+          <div className="flex items-center gap-2 sm:gap-3">
+            <button
+              id="btn-open-cart"
+              onClick={() => setIsCartOpen(true)}
+              className="relative p-2.5 rounded-full bg-stone-100 hover:bg-amber-100 text-stone-800 hover:text-amber-700 transition flex items-center justify-center shadow-xs"
+              aria-label="سبد خرید"
+            >
+              <ShoppingBag className="w-4 h-4" />
+              {totalCartCount > 0 && (
+                <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-[#f59e0b] text-white text-[11px] font-extrabold flex items-center justify-center shadow-xs animate-scale">
+                  {totalCartCount}
+                </span>
+              )}
+            </button>
+
+            {/* Hidden admin button in header */}
+            <button
+              onClick={() => setIsAdminAuthModalOpen(true)}
+              title="ورود به پنل مدیریت (دکمه پنهانی)"
+              className="w-7 h-7 rounded-full text-stone-300 hover:text-stone-600 flex items-center justify-center transition"
+            >
+              <Lock className="w-3.5 h-3.5 opacity-40 hover:opacity-100" />
+            </button>
+          </div>
+        </nav>
+      </header>
+
+      {/* Mobile Sub-Navigation Bar */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-stone-200 py-2 px-3 shadow-lg flex items-center justify-around text-[11px] font-bold text-stone-600">
+        <button
+          onClick={() => handleSelectPage('home')}
+          className={`flex flex-col items-center gap-1 ${activePage === 'home' && !selectedProduct && !selectedPost ? 'text-amber-600 font-black' : 'hover:text-stone-900'}`}
+        >
+          <Hexagon className="w-4 h-4" />
+          <span>{navigation.home || 'خانه'}</span>
+        </button>
+        <button
+          onClick={() => handleSelectPage('articles')}
+          className={`flex flex-col items-center gap-1 ${activePage === 'articles' && !selectedProduct ? 'text-amber-600 font-black' : 'hover:text-stone-900'}`}
+        >
+          <BookOpen className="w-4 h-4" />
+          <span>{navigation.articles || 'مقالات'}</span>
+        </button>
+        <button
+          onClick={() => handleSelectPage('consultation')}
+          className={`flex flex-col items-center gap-1 ${activePage === 'consultation' && !selectedProduct && !selectedPost ? 'text-amber-600 font-black' : 'hover:text-stone-900'}`}
+        >
+          <Sparkles className="w-4 h-4" />
+          <span>مشاوره</span>
+        </button>
+        <button
+          onClick={() => handleSelectPage('tracking')}
+          className={`flex flex-col items-center gap-1 ${activePage === 'tracking' && !selectedProduct && !selectedPost ? 'text-amber-600 font-black' : 'hover:text-stone-900'}`}
+        >
+          <Search className="w-4 h-4" />
+          <span>پیگیری</span>
+        </button>
+        <button
+          onClick={() => handleSelectPage('about')}
+          className={`flex flex-col items-center gap-1 ${activePage === 'about' && !selectedProduct && !selectedPost ? 'text-amber-600 font-black' : 'hover:text-stone-900'}`}
+        >
+          <Info className="w-4 h-4" />
+          <span>{navigation.about || 'درباره'}</span>
+        </button>
+        <button
+          onClick={() => handleSelectPage('contact')}
+          className={`flex flex-col items-center gap-1 ${activePage === 'contact' && !selectedProduct && !selectedPost ? 'text-amber-600 font-black' : 'hover:text-stone-900'}`}
+        >
+          <PhoneCall className="w-4 h-4" />
+          <span>{navigation.contact || 'تماس'}</span>
+        </button>
+      </div>
+
+      {/* Main Content Body */}
+      <main className="pt-24 pb-24 md:pb-16 px-4 sm:px-6 max-w-6xl mx-auto">
+        {/* ================= SINGLE PRODUCT PAGE VIEW (NATIVE SCROLL ON MOBILE & DESKTOP) ================= */}
+        {selectedProduct ? (
+          <div className="max-w-4xl mx-auto animate-fadeIn">
+            <div className="flex items-center justify-between gap-3 mb-5">
+              <button 
+                type="button"
+                onClick={handleCloseProduct}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-white border border-stone-200 font-bold text-stone-700 hover:text-stone-900 hover:bg-stone-50 text-xs sm:text-sm transition shadow-2xs cursor-pointer"
+              >
+                <ArrowRight className="w-4 h-4 sm:w-5 sm:h-5 text-amber-600" />
+                <span>بازگشت به لیست محصولات</span>
+              </button>
+
+              {totalCartCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setIsCartOpen(true)}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 font-bold text-xs transition hover:bg-amber-100 cursor-pointer"
+                >
+                  <ShoppingBag className="w-4 h-4 text-amber-600" />
+                  <span>سبد خرید ({totalCartCount})</span>
+                </button>
+              )}
+            </div>
+
+            <div className="bg-white rounded-[28px] p-4 sm:p-8 shadow-sm border border-stone-100">
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-6 lg:gap-10 items-start">
+                {/* Product Gallery Box - Fixed proportional height on mobile, no flex-1 vertical collapse */}
+                <div className="md:col-span-5 rounded-2xl sm:rounded-[26px] overflow-hidden h-64 sm:h-80 md:h-[390px] bg-stone-50 shadow-xs border border-stone-100 relative">
+                  <img 
+                    src={selectedProduct.imageName} 
+                    alt={selectedProduct.title} 
+                    className="w-full h-full object-cover"
+                  />
+                  {(selectedProduct.discount || 0) > 0 && (
+                    <span className="absolute top-3 right-3 bg-[#ef394e] text-white text-xs font-black px-3 py-1 rounded-xl shadow-sm">
+                      {selectedProduct.discount}% تخفیف ویژه
+                    </span>
+                  )}
+                </div>
+
+                {/* Product Info & Dynamic Size Selector */}
+                <div className="md:col-span-7 flex flex-col justify-between space-y-5">
+                  <div>
+                    <span className="inline-block text-xs font-bold text-amber-700 bg-amber-50 px-3 py-1 rounded-full mb-2">
+                      {selectedProduct.categoryTitle || 'محصول ارگانیک اونیوال'}
+                    </span>
+                    <h1 className="text-xl sm:text-2xl font-black text-stone-900 mb-3 leading-snug">
+                      {selectedProduct.title}
+                    </h1>
+                    <p className="text-xs sm:text-sm text-stone-600 leading-relaxed mb-5 whitespace-pre-line">
+                      {selectedProduct.description}
+                    </p>
+
+                    {/* DYNAMIC SIZE SELECTOR */}
+                    <div className="mb-5">
+                      <span className="text-xs font-bold text-stone-800 block mb-2.5">
+                        انتخاب اندازه / وزن محصول:
+                      </span>
+
+                      {selectedProduct.sizes && selectedProduct.sizes.length > 0 ? (
+                        <div className="grid grid-cols-1 sm:flex sm:flex-wrap gap-2">
+                          {selectedProduct.sizes.map((s, idx) => {
+                            const isSel = selectedSize === s.name;
+                            return (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() => setSelectedSize(s.name)}
+                                className={`px-4 py-3 sm:py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-between sm:justify-center gap-2 cursor-pointer border ${
+                                  isSel
+                                    ? 'bg-stone-900 text-white border-stone-900 shadow-md'
+                                    : 'bg-stone-50 text-stone-700 border-stone-200 hover:bg-stone-100'
+                                }`}
+                              >
+                                <span>{s.name}</span>
+                                <span className={`text-[11px] font-extrabold ${isSel ? 'text-amber-300' : 'text-stone-500'}`}>
+                                  ({formatPrice(s.price)} تومان)
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-2 bg-stone-100 p-1.5 rounded-2xl">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedSize('کوچک')}
+                            className={`px-3 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                              selectedSize === 'کوچک'
+                                ? 'bg-white text-stone-900 shadow-sm'
+                                : 'text-stone-500 hover:text-stone-800'
+                            }`}
+                          >
+                            کوچک (بسته ۲۵۰ گرمی)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedSize('بزرگ')}
+                            className={`px-3 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                              selectedSize === 'بزرگ'
+                                ? 'bg-white text-stone-900 shadow-sm'
+                                : 'text-stone-500 hover:text-stone-800'
+                            }`}
+                          >
+                            بزرگ (بسته ۱ کیلوگرمی)
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Price Display */}
+                    <div className="p-4 rounded-2xl bg-amber-50/70 border border-amber-200/80 flex flex-wrap items-center justify-between gap-3">
+                      <span className="text-xs font-bold text-stone-700">
+                        قیمت اندازه «{selectedSize}»:
+                      </span>
+                      {selectedProduct.discount ? (
+                        <div className="flex items-center gap-2.5 flex-wrap">
+                          <span className="text-xs sm:text-sm text-stone-400 line-through">
+                            {formatPrice(getBasePrice(selectedProduct, selectedSize))}
+                          </span>
+                          <span className="text-lg sm:text-2xl font-black text-[#ef394e]">
+                            {formatPrice(calculateFinalPrice(selectedProduct, selectedSize))} تومان
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="text-lg sm:text-2xl font-black text-stone-900">
+                          {formatPrice(calculateFinalPrice(selectedProduct, selectedSize))} تومان
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-4 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => addToCart(selectedProduct, selectedSize)}
+                      className="w-full py-4 bg-[#f59e0b] hover:bg-[#d97706] text-white font-black text-sm rounded-2xl shadow-md transition active:scale-98 flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <ShoppingBag className="w-4 h-4" />
+                      <span>افزودن اندازه انتخابی به سبد خرید</span>
+                    </button>
+
+                    {/* Features List */}
+                    {selectedProduct.features && selectedProduct.features.length > 0 && (
+                      <div className="bg-stone-50 p-4 rounded-2xl border border-stone-100">
+                        <h4 className="text-xs font-bold text-stone-800 mb-2.5">ویژگی‌های تاییدشده محصول:</h4>
+                        <ul className="space-y-2 text-xs text-stone-600">
+                          {selectedProduct.features.map((f, i) => (
+                            <li key={i} className="flex items-center gap-2">
+                              <Check className="w-4 h-4 text-[#4CAF50] shrink-0" />
+                              <span>{f}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : selectedPost ? (
+          /* ================= ARTICLE READER PAGE VIEW ================= */
+          <div className="max-w-3xl mx-auto animate-fadeIn">
+            <button 
+              type="button"
+              onClick={handleClosePost}
+              className="mb-5 inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-white border border-stone-200 font-bold text-stone-700 hover:text-stone-900 hover:bg-stone-50 text-xs sm:text-sm transition shadow-2xs cursor-pointer"
+            >
+              <ArrowRight className="w-4 h-4 sm:w-5 sm:h-5 text-amber-600" />
+              <span>بازگشت به مقالات</span>
+            </button>
+
+            <div className="bg-white rounded-3xl p-5 sm:p-8 shadow-sm border border-stone-100">
+              <div className="flex items-center justify-between pb-3 border-b border-stone-100 mb-4">
+                <span className="text-xs font-bold text-amber-600 bg-amber-50 px-3 py-1 rounded-full">
+                  {selectedPost.categoryTitle || 'دانشنامه اونیوال'}
+                </span>
+                <div className="text-[11px] text-stone-400 flex items-center gap-3">
+                  <span>{selectedPost.creationTime}</span>
+                  <span>نویسنده: {selectedPost.authorName}</span>
+                </div>
+              </div>
+
+              <img 
+                src={selectedPost.imageName} 
+                alt={selectedPost.title} 
+                className="w-full h-56 sm:h-72 object-cover rounded-2xl mb-5"
+              />
+
+              <h1 className="text-lg sm:text-2xl font-black text-stone-900 mb-3 leading-snug">
+                {selectedPost.title}
+              </h1>
+
+              <p className="text-xs sm:text-sm text-stone-600 font-semibold mb-4 leading-relaxed">
+                {selectedPost.description}
+              </p>
+
+              <div className="text-xs sm:text-sm text-stone-700 leading-relaxed p-4 sm:p-6 bg-stone-50 rounded-2xl border border-stone-100 whitespace-pre-line mb-6">
+                {selectedPost.content}
+              </div>
+
+              <div className="flex justify-end">
+                <button 
+                  type="button"
+                  onClick={handleClosePost}
+                  className="px-6 py-2.5 bg-stone-900 text-white rounded-xl text-xs font-bold hover:bg-stone-800 cursor-pointer"
+                >
+                  بازگشت
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <>
+        {/* ================= PAGE 1: HOME ================= */}
+        {activePage === 'home' && (
+          <div className="space-y-8 animate-fadeIn">
+            {/* Always display Hero Header if not explicitly positioned in sections */}
+            {!hasExplicitHero && (
+              <div className="text-center pt-4 pb-1">
+                <h1 className="text-3xl sm:text-4xl font-black text-stone-900 tracking-tight flex items-center justify-center gap-2 flex-wrap">
+                  <span>{siteContent?.heroTitlePrefix || 'فروشگاه تخصصی'}</span>
+                  <span className="text-amber-600">{brandName}</span>
+                  <span className="text-xs font-mono font-bold text-stone-400 border border-stone-200 px-2 py-0.5 rounded-md self-center">
+                    {brandEnglishName}
+                  </span>
+                </h1>
+                <p className="text-xs sm:text-sm text-stone-500 font-medium mt-2">
+                  {siteContent?.heroSubtitle || brandDescription}
+                </p>
+                {siteContent?.systemTagline && (
+                  <p className="text-xs text-stone-400 mt-1 max-w-xl mx-auto">
+                    {siteContent.systemTagline}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {homeSections.map(sec => {
+              if (!sec.enabled) return null;
+
+              const secKey = normalizeSectionId(sec.id);
+              switch (secKey) {
+                case 'hero':
+                  return (
+                    <div key={sec.id} className="text-center pt-4 pb-1">
+                      <h1 className="text-3xl sm:text-4xl font-black text-stone-900 tracking-tight flex items-center justify-center gap-2 flex-wrap">
+                        <span>{sec.title || siteContent?.heroTitlePrefix || 'فروشگاه تخصصی'}</span>
+                        <span className="text-amber-600">{brandName}</span>
+                        <span className="text-xs font-mono font-bold text-stone-400 border border-stone-200 px-2 py-0.5 rounded-md self-center">
+                          {brandEnglishName}
+                        </span>
+                      </h1>
+                      <p className="text-xs sm:text-sm text-stone-500 font-medium mt-2">
+                        {sec.subtitle || siteContent?.heroSubtitle || brandDescription}
+                      </p>
+                      {sec.customText && (
+                        <p className="text-xs text-stone-400 mt-1 max-w-xl mx-auto">
+                          {sec.customText}
+                        </p>
+                      )}
+                    </div>
+                  );
+
+                case 'special_offers':
+                  if (specialOffers.length === 0) return null;
+                  return (
+                    <section key={sec.id} className="bg-[#ef394e] rounded-[22px] p-5 text-white shadow-lg relative overflow-hidden flex flex-col sm:flex-row items-stretch sm:items-center gap-5">
+                      <div className="flex sm:flex-col items-center justify-between sm:justify-center text-center shrink-0 sm:w-36 border-b sm:border-b-0 sm:border-l border-white/20 pb-3 sm:pb-0 sm:pl-4">
+                        <div className="w-12 h-12 rounded-full border-2 border-white flex items-center justify-center mb-1">
+                          <Percent className="w-6 h-6 stroke-[2.5]" />
+                        </div>
+                        <div>
+                          <h2 className="text-base sm:text-lg font-black tracking-tight mt-1">
+                            {sec.title || 'پیشنهاد شگفت‌انگیز'}
+                          </h2>
+                          {sec.subtitle && (
+                            <p className="text-[11px] text-white/80 hidden sm:block mt-0.5">{sec.subtitle}</p>
+                          )}
+                          <button 
+                            id="btn-view-all-deals"
+                            onClick={handleViewAllOffers}
+                            className="mt-2 text-xs border border-white rounded-lg px-3 py-1 font-bold hover:bg-white hover:text-[#ef394e] transition inline-block cursor-pointer"
+                          >
+                            مشاهده همه
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Offer Horizontal Scroll */}
+                      <div className="flex-1 flex gap-3.5 overflow-x-auto pb-2 scrollbar-none items-center">
+                        {specialOffers.map(p => {
+                          const basePrice = getBasePrice(p, p.sizes?.[0]?.name || 'کوچک');
+                          const finalPrice = calculateFinalPrice(p, p.sizes?.[0]?.name || 'کوچک');
+                          return (
+                            <div
+                              key={p.id}
+                              onClick={() => handleOpenProduct(p)}
+                              className="w-40 shrink-0 bg-white rounded-2xl p-2.5 text-center relative cursor-pointer hover:scale-102 transition shadow-sm"
+                            >
+                              <span className="absolute top-2 right-2 bg-[#ef394e] text-white text-[10px] font-black px-2 py-0.5 rounded-md shadow-xs">
+                                {p.discount}%
+                              </span>
+                              <img 
+                                src={p.imageName} 
+                                alt={p.title} 
+                                className="w-full h-24 object-cover rounded-xl mb-2"
+                              />
+                              <div className="text-xs font-bold text-stone-800 line-clamp-1 h-5">{p.title}</div>
+                              <span className="text-[11px] text-stone-400 line-through block mt-1">
+                                {formatPrice(basePrice)}
+                              </span>
+                              <div className="text-xs font-black text-stone-900 mt-0.5">
+                                {formatPrice(finalPrice)} ت
+                              </div>
+                            </div>
+                          );
+                        })}
+
+                        <div 
+                          onClick={handleViewAllOffers}
+                          className="w-24 h-40 shrink-0 bg-white/95 rounded-2xl flex flex-col items-center justify-center text-[#ef394e] font-black text-xs cursor-pointer p-2 text-center hover:bg-white transition shadow-sm"
+                        >
+                          <div className="w-8 h-8 rounded-full border-2 border-[#ef394e] flex items-center justify-center mb-2">
+                            <ArrowLeft className="w-4 h-4" />
+                          </div>
+                          <span>موارد<br />بیشتر</span>
+                        </div>
+                      </div>
+                    </section>
+                  );
+
+                case 'categories':
+                  return (
+                    <div key={sec.id} className="space-y-2">
+                      {sec.title && sec.title !== 'دسته‌بندی‌ها' && (
+                        <div className="text-xs font-bold text-stone-700">{sec.title}</div>
+                      )}
+                      <div className="flex gap-2.5 overflow-x-auto pb-2 scrollbar-none">
+                        <button
+                          onClick={() => setActiveCategory('all')}
+                          className={`whitespace-nowrap px-5 py-2.5 rounded-full font-bold text-xs flex items-center gap-2 transition ${
+                            activeCategory === 'all'
+                              ? 'bg-stone-900 text-white shadow-md'
+                              : 'bg-white border border-stone-200 text-stone-600 hover:border-amber-400'
+                          }`}
+                        >
+                          <LayoutGrid className="w-4 h-4" />
+                          <span>همه محصولات</span>
+                        </button>
+
+                        <button
+                          id="cat-discounted"
+                          onClick={() => setActiveCategory('discounted')}
+                          className={`whitespace-nowrap px-5 py-2.5 rounded-full font-bold text-xs flex items-center gap-2 transition ${
+                            activeCategory === 'discounted'
+                              ? 'bg-[#ef394e] text-white shadow-md'
+                              : 'bg-white border border-rose-200 text-rose-700 hover:bg-rose-50'
+                          }`}
+                        >
+                          <Percent className="w-4 h-4 text-[#ef394e]" />
+                          <span>پیشنهاد شگفت‌انگیز (تخفیف‌دار)</span>
+                          {specialOffers.length > 0 && (
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${activeCategory === 'discounted' ? 'bg-white text-rose-700' : 'bg-rose-100 text-rose-800'}`}>
+                              {specialOffers.length}
+                            </span>
+                          )}
+                        </button>
+
+                        <button
+                          onClick={() => setActiveCategory('honey')}
+                          className={`whitespace-nowrap px-5 py-2.5 rounded-full font-bold text-xs flex items-center gap-2 transition ${
+                            activeCategory === 'honey'
+                              ? 'bg-stone-900 text-white shadow-md'
+                              : 'bg-white border border-stone-200 text-stone-600 hover:border-amber-400'
+                          }`}
+                        >
+                          <Hexagon className="w-4 h-4" />
+                          <span>عسل‌های طبیعی و کوهستان</span>
+                        </button>
+
+                        <button
+                          onClick={() => setActiveCategory('supplement')}
+                          className={`whitespace-nowrap px-5 py-2.5 rounded-full font-bold text-xs flex items-center gap-2 transition ${
+                            activeCategory === 'supplement'
+                              ? 'bg-stone-900 text-white shadow-md'
+                              : 'bg-white border border-stone-200 text-stone-600 hover:border-amber-400'
+                          }`}
+                        >
+                          <Pill className="w-4 h-4" />
+                          <span>مکمل‌ها (ژل رویال و گرده)</span>
+                        </button>
+
+                        <button
+                          onClick={() => setActiveCategory('drink')}
+                          className={`whitespace-nowrap px-5 py-2.5 rounded-full font-bold text-xs flex items-center gap-2 transition ${
+                            activeCategory === 'drink'
+                              ? 'bg-stone-900 text-white shadow-md'
+                              : 'bg-white border border-stone-200 text-stone-600 hover:border-amber-400'
+                          }`}
+                        >
+                          <Coffee className="w-4 h-4" />
+                          <span>نوشیدنی و دمنوش</span>
+                        </button>
+
+                        <button
+                          onClick={() => setActiveCategory('nuts')}
+                          className={`whitespace-nowrap px-5 py-2.5 rounded-full font-bold text-xs flex items-center gap-2 transition ${
+                            activeCategory === 'nuts'
+                              ? 'bg-stone-900 text-white shadow-md'
+                              : 'bg-white border border-stone-200 text-stone-600 hover:border-amber-400'
+                          }`}
+                        >
+                          <Nut className="w-4 h-4" />
+                          <span>خشکبار و گردو</span>
+                        </button>
+
+                        {/* Dynamic categories from backend */}
+                        {categories.map(cat => (
+                          <button
+                            key={cat.id}
+                            onClick={() => setActiveCategory(cat.title)}
+                            className={`whitespace-nowrap px-5 py-2.5 rounded-full font-bold text-xs flex items-center gap-2 transition ${
+                              activeCategory === cat.title
+                                ? 'bg-stone-900 text-white shadow-md'
+                                : 'bg-white border border-stone-200 text-stone-600 hover:border-amber-400'
+                            }`}
+                          >
+                            <span>{cat.title}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+
+                case 'products':
+                  return (
+                    <div key={sec.id} id="products-section" className="scroll-mt-24">
+                      <div className="flex items-center justify-between mb-4">
+                        <div>
+                          <h3 className="text-base sm:text-lg font-black text-stone-900">
+                            {sec.title || ('لیست محصولات ' + brandName)}
+                          </h3>
+                          {sec.subtitle && (
+                            <p className="text-xs text-stone-500 mt-0.5">{sec.subtitle}</p>
+                          )}
+                        </div>
+                        <span className="text-xs text-stone-400 font-medium">
+                          {filteredProducts.length} محصول موجود
+                        </span>
+                      </div>
+
+                      {filteredProducts.length === 0 ? (
+                        <div className="text-center py-16 bg-white rounded-3xl border border-stone-100 text-stone-400 text-xs">
+                          محصولی در این دسته‌بندی یافت نشد.
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                          {filteredProducts.map(product => {
+                            const hasDiscount = (product.discount || 0) > 0;
+                            const defaultSizeName = product.sizes?.[0]?.name || 'کوچک';
+                            const basePrice = getBasePrice(product, defaultSizeName);
+                            const finalPrice = calculateFinalPrice(product, defaultSizeName);
+
+                            return (
+                              <div
+                                key={product.id}
+                                onClick={() => handleOpenProduct(product)}
+                                className="bg-white rounded-[25px] overflow-hidden shadow-xs hover:-translate-y-1.5 hover:shadow-xl transition-all duration-300 border border-stone-100 cursor-pointer group flex flex-col justify-between"
+                              >
+                                <div>
+                                  <div className="h-48 overflow-hidden bg-stone-50 relative">
+                                    <img 
+                                      src={product.imageName} 
+                                      alt={product.title} 
+                                      className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
+                                    />
+                                    {hasDiscount && (
+                                      <span className="absolute top-3 right-3 bg-[#ef394e] text-white text-[10px] font-black px-2 py-0.5 rounded-lg shadow-sm">
+                                        {product.discount}% تخفیف
+                                      </span>
+                                    )}
+                                    {product.sizes && product.sizes.length > 1 && (
+                                      <span className="absolute bottom-2.5 right-2.5 bg-stone-900/80 backdrop-blur-xs text-white text-[10px] font-bold px-2 py-0.5 rounded-md">
+                                        {product.sizes.length} اندازه مختلف
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <div className="p-4">
+                                    <span className="text-[11px] font-bold text-stone-400 block mb-1">
+                                      {product.categoryTitle || 'محصول ارگانیک'}
+                                    </span>
+                                    <h4 className="text-sm font-extrabold text-stone-800 line-clamp-1 mb-1">
+                                      {product.title}
+                                    </h4>
+                                    <p className="text-xs text-stone-500 line-clamp-2 leading-relaxed">
+                                      {product.description}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <div className="px-4 pb-4 pt-2 border-t border-stone-50 flex items-center justify-between">
+                                  <div className="flex flex-col">
+                                    {hasDiscount && (
+                                      <span className="text-[11px] text-stone-400 line-through">
+                                        {formatPrice(basePrice)}
+                                      </span>
+                                    )}
+                                    <span className={`text-sm font-black ${hasDiscount ? 'text-[#ef394e]' : 'text-stone-800'}`}>
+                                      {product.sizes && product.sizes.length > 1 && (
+                                        <span className="text-[10px] font-normal text-stone-400 ml-1">از</span>
+                                      )}
+                                      {formatPrice(finalPrice)} <span className="text-[10px] font-normal text-stone-500">تومان</span>
+                                    </span>
+                                  </div>
+
+                                  <button 
+                                    className="w-9 h-9 rounded-xl bg-stone-900 group-hover:bg-amber-500 text-white flex items-center justify-center transition shadow-xs"
+                                    title="مشاهده اندازه‌ها و خرید"
+                                  >
+                                    <ArrowLeft className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+
+                case 'consultation':
+                  return (
+                    <section key={sec.id} className="bg-gradient-to-l from-amber-500 via-amber-600 to-amber-700 rounded-[24px] p-6 sm:p-8 text-white shadow-md relative overflow-hidden flex flex-col sm:flex-row items-center justify-between gap-6">
+                      <div className="space-y-2 text-center sm:text-right max-w-xl">
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/20 backdrop-blur-xs text-xs font-bold text-white mb-1">
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>مشاوره تخصصی و رایگان</span>
+                        </span>
+                        <h3 className="text-xl sm:text-2xl font-black text-white">
+                          {sec.title || ('مشاوره تخصصی سلامت و محصولات ' + brandName)}
+                        </h3>
+                        <p className="text-xs sm:text-sm text-amber-50 leading-relaxed">
+                          {sec.subtitle || 'برای انتخاب بهترین فرآورده کندو متناسب با شرایط بدنی خود، با کارشناسان تخصصی ما در ارتباط باشید.'}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setActivePage('consultation');
+                          window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+                        }}
+                        className="px-6 py-3.5 bg-stone-900 hover:bg-stone-800 text-white rounded-2xl text-xs font-extrabold shadow-lg transition flex items-center gap-2 shrink-0 cursor-pointer"
+                      >
+                        <span>درخواست مشاوره فوری</span>
+                        <ArrowLeft className="w-4 h-4" />
+                      </button>
+                    </section>
+                  );
+
+                case 'articles':
+                  return (
+                    <section key={sec.id} className="mt-8 pt-8 border-t border-stone-200/80">
+                      <div className="flex items-center justify-between mb-2">
+                        <h2 className="text-xl font-black text-stone-900">
+                          {sec.title || ('مقالات و مطالب علمی ' + brandName)}
+                        </h2>
+                        <button 
+                          onClick={() => {
+                            setActivePage('articles');
+                            window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+                          }}
+                          className="text-xs text-amber-600 font-bold hover:underline flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>همه مقالات</span>
+                          <ChevronRight className="w-3.5 h-3.5 rotate-180" />
+                        </button>
+                      </div>
+                      <p className="text-xs text-stone-500 mb-6">
+                        {sec.subtitle || 'آخرین نوشته‌ها برای آشنایی با خواص عسل طبیعی، دمنوش‌های گیاهی و سبک زندگی سالم.'}
+                      </p>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                        {posts.map(post => (
+                          <article 
+                            key={post.id}
+                            onClick={() => handleOpenPost(post)}
+                            className="bg-white rounded-2xl p-5 shadow-xs border border-stone-100 hover:shadow-md transition cursor-pointer flex flex-col justify-between"
+                          >
+                            <div>
+                              <div className="text-[11px] font-extrabold text-[#4CAF50] mb-2">
+                                {post.categoryTitle || 'سبک زندگی ارگانیک'}
+                              </div>
+                              <h3 className="text-sm font-black text-stone-900 leading-snug mb-2 line-clamp-2">
+                                {post.title}
+                              </h3>
+                              <div className="text-[10px] text-stone-400 mb-3 flex items-center gap-2">
+                                <Clock className="w-3 h-3" />
+                                <span>زمان مطالعه: ۵ دقیقه</span>
+                              </div>
+                              <p className="text-xs text-stone-500 leading-relaxed line-clamp-3 mb-4">
+                                {post.description}
+                              </p>
+                            </div>
+
+                            <span className="text-xs font-bold text-amber-600 hover:text-amber-700 flex items-center gap-1 mt-auto">
+                              ادامه مطلب
+                              <ArrowLeft className="w-3.5 h-3.5" />
+                            </span>
+                          </article>
+                        ))}
+                      </div>
+                    </section>
+                  );
+
+                case 'about':
+                  return (
+                    <section key={sec.id} className="bg-white rounded-[26px] p-6 sm:p-8 border border-stone-100 shadow-xs space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-100 pb-4">
+                        <div>
+                          <h3 className="text-lg font-black text-stone-900">
+                            {sec.title || ('درباره اصالت و تعهد ' + brandName)}
+                          </h3>
+                          <p className="text-xs text-stone-500 mt-1">
+                            {sec.subtitle || 'تضمین اصالت آزمایشگاهی و خلوص ۱۰۰ درصدی کلیه محصولات'}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => {
+                            setActivePage('about');
+                            window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+                          }}
+                          className="text-xs font-bold text-amber-700 hover:text-amber-800 flex items-center gap-1 cursor-pointer self-start sm:self-auto"
+                        >
+                          <span>داستان ما</span>
+                          <ArrowLeft className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      <p className="text-xs sm:text-sm text-stone-600 leading-relaxed">
+                        {sec.customText || siteContent?.pages?.about?.content || 'مجموعه تخصصی اونیوال با همکاری مستقیم زنبورداران محلی و کشاورزان متعهد، محصولات کاملاً سالم، ارگانیک و حرارت‌ندیده را بدون واسطه به دست خانواده‌های ایرانی می‌رساند.'}
+                      </p>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+                        <div className="p-3 bg-stone-50 rounded-xl text-center">
+                          <div className="text-emerald-600 font-black text-base">۱۰۰٪</div>
+                          <div className="text-[11px] text-stone-500 mt-0.5">خام و آزمایش‌شده</div>
+                        </div>
+                        <div className="p-3 bg-stone-50 rounded-xl text-center">
+                          <div className="text-amber-600 font-black text-base">زیر ۲٪</div>
+                          <div className="text-[11px] text-stone-500 mt-0.5">ساکارز طبیعی سبلان</div>
+                        </div>
+                        <div className="p-3 bg-stone-50 rounded-xl text-center">
+                          <div className="text-blue-600 font-black text-base">زنجیره سرد</div>
+                          <div className="text-[11px] text-stone-500 mt-0.5">ارسال ژل رویال</div>
+                        </div>
+                        <div className="p-3 bg-stone-50 rounded-xl text-center">
+                          <div className="text-rose-600 font-black text-base">۷ روز</div>
+                          <div className="text-[11px] text-stone-500 mt-0.5">ضمانت بازگشت وجه</div>
+                        </div>
+                      </div>
+                    </section>
+                  );
+
+                default:
+                  return null;
+              }
+            })}
+          </div>
+        )}
+
+        {/* ================= PAGE 2: ARTICLES ================= */}
+        {activePage === 'articles' && (
+          <div className="space-y-6 animate-fadeIn">
+            <div className="text-center max-w-2xl mx-auto mb-8">
+              <h1 className="text-2xl sm:text-3xl font-black text-stone-900">
+                {siteContent?.pages?.articles?.title || `دانشنامه و مقالات تخصصی ${brandName} (${brandEnglishName})`}
+              </h1>
+              <p className="text-xs text-stone-500 mt-2">
+                {siteContent?.pages?.articles?.subtitle || 'مرجع جامع راهنمای تشخیص عسل طبیعی، فواید ژل رویال، دمنوش‌های گیاهی و تغذیه ارگانیک'}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {posts.map(post => (
+                <article 
+                  key={post.id}
+                  onClick={() => handleOpenPost(post)}
+                  className="bg-white rounded-2xl overflow-hidden shadow-xs border border-stone-100 hover:shadow-lg transition cursor-pointer flex flex-col"
+                >
+                  <img 
+                    src={post.imageName} 
+                    alt={post.title} 
+                    className="h-44 w-full object-cover"
+                  />
+                  <div className="p-5 flex-1 flex flex-col justify-between">
+                    <div>
+                      <div className="text-[11px] font-bold text-[#4CAF50] mb-1">
+                        {post.categoryTitle || 'مقالات اونیوال'}
+                      </div>
+                      <h3 className="text-sm font-black text-stone-900 mb-2 leading-snug">
+                        {post.title}
+                      </h3>
+                      <p className="text-xs text-stone-500 line-clamp-3 leading-relaxed mb-4">
+                        {post.description}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] text-stone-400 pt-3 border-t border-stone-50">
+                      <span>نویسنده: {post.authorName}</span>
+                      <span className="text-amber-600 font-bold flex items-center gap-1">
+                        مطالعه
+                        <ArrowLeft className="w-3 h-3" />
+                      </span>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ================= PAGE 3: SPECIALIZED CONSULTATION ================= */}
+        {activePage === 'consultation' && (
+          <div className="max-w-3xl mx-auto space-y-6 animate-fadeIn">
+            <div className="text-center mb-6">
+              <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-amber-100 text-amber-800 text-xs font-black mb-2">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>{siteContent?.consultationBadge || 'مشاوره تخصصی و رزرو آنلاین کارشناس سلامت'}</span>
+              </div>
+              <h1 className="text-2xl sm:text-3xl font-black text-stone-900">
+                {siteContent?.consultationTitle || 'رزرو نوبت مشاوره تخصصی سلامت و محصولات اونیوال'}
+              </h1>
+              <p className="text-xs sm:text-sm text-stone-500 mt-2 max-w-xl mx-auto leading-relaxed">
+                {siteContent?.consultationSubtitle ||
+                  'موضوع مشاوره، زمان مورد نظر و شبکه اجتماعی دلخواه خود را مشخص نمایید تا پس از صدور فاکتور، کارشناس سلامت اونیوال در زمان مقرر با شما ارتباط برقرار کند.'}
+              </p>
+            </div>
+
+            {consultSuccessCode ? (
+              <div className="bg-white rounded-3xl p-8 border border-emerald-200 shadow-lg text-center space-y-4">
+                <div className="w-14 h-14 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto">
+                  <CheckCircle2 className="w-8 h-8" />
+                </div>
+                <h3 className="text-lg font-black text-stone-900">رزرو نوبت مشاوره شما با موفقیت ثبت شد</h3>
+                <p className="text-xs text-stone-600 max-w-md mx-auto leading-relaxed">
+                  کارشناس سلامت اونیوال در زمان انتخاب‌شده از طریق شبکه اجتماعی تعیین‌شده با شما ارتباط برقرار خواهد کرد.
+                </p>
+                <div className="p-4 rounded-2xl bg-amber-50 border border-dashed border-amber-400 max-w-sm mx-auto">
+                  <span className="text-[11px] text-amber-700 block mb-1">کد رهگیری و فاکتور مشاوره شما:</span>
+                  <span className="text-lg font-mono font-black text-stone-900 tracking-wider">
+                    {consultSuccessCode}
+                  </span>
+                </div>
+                <div className="flex flex-wrap justify-center gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTrackingCodeInput(consultSuccessCode);
+                      setActivePage('tracking');
+                      setConsultSuccessCode(null);
+                    }}
+                    className="px-5 py-2.5 bg-stone-900 text-white rounded-xl text-xs font-bold hover:bg-stone-800 transition cursor-pointer"
+                  >
+                    پیگیری وضعیت نوبت مشاوره
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConsultSuccessCode(null)}
+                    className="px-5 py-2.5 border border-stone-200 text-stone-600 rounded-xl text-xs font-bold hover:bg-stone-50 cursor-pointer"
+                  >
+                    رزرو نوبت جدید
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-white rounded-3xl p-5 sm:p-8 shadow-sm border border-stone-100 space-y-6">
+                {/* Specialist Info Banner */}
+                <div className="bg-gradient-to-r from-amber-50 via-stone-50 to-amber-50/60 border border-amber-200/80 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-2xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+                      <Sparkles className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="text-xs sm:text-sm font-black text-stone-900">
+                        {consultationConfig.specialistName}
+                      </div>
+                      <div className="text-[11px] text-stone-500 mt-0.5">
+                        {consultationConfig.specialistTitle}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="bg-white px-3.5 py-2 rounded-xl border border-amber-200 text-right sm:text-left shrink-0">
+                    <span className="text-[10px] text-stone-400 block">تعرفه جلسه انتخابی:</span>
+                    <span className="text-sm font-black text-amber-700">
+                      {activeConsultPrice > 0 ? `${formatPrice(activeConsultPrice)} تومان` : 'رایگان'}
+                    </span>
+                  </div>
+                </div>
+
+                <form onSubmit={handleConsultSubmit} className="space-y-6">
+                  {/* STEP 1: SELECT CONSULTATION TOPIC & PRICE */}
+                  <div className="space-y-3">
+                    <label className="block text-xs sm:text-sm font-black text-stone-900">
+                      ۱. انتخاب موضوع مشاوره تخصصی:
+                    </label>
+                    <div className="grid grid-cols-1 gap-2.5">
+                      {consultationConfig.topics.map(topic => {
+                        const isSelected = activeConsultTopic?.id === topic.id;
+                        return (
+                          <div
+                            key={topic.id}
+                            onClick={() => setConsultSelectedTopicId(topic.id)}
+                            className={`p-4 rounded-2xl border-2 transition cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                              isSelected
+                                ? 'border-amber-500 bg-amber-50/40 shadow-xs'
+                                : 'border-stone-200/80 bg-white hover:border-amber-300'
+                            }`}
+                          >
+                            <div className="flex items-start gap-3">
+                              <div
+                                className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5 ${
+                                  isSelected ? 'border-amber-600 bg-amber-500 text-white' : 'border-stone-300'
+                                }`}
+                              >
+                                {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
+                              </div>
+                              <div>
+                                <div className="text-xs sm:text-sm font-black text-stone-900">{topic.title}</div>
+                                {topic.description && (
+                                  <div className="text-[11px] text-stone-500 mt-1 leading-relaxed">
+                                    {topic.description}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex sm:flex-col items-center sm:items-end justify-between gap-1.5 pr-8 sm:pr-0 shrink-0">
+                              <span className="text-xs sm:text-sm font-black text-amber-700 bg-amber-100/80 px-3 py-1 rounded-xl">
+                                {topic.price > 0 ? `${formatPrice(topic.price)} تومان` : 'رایگان'}
+                              </span>
+                              <span className="text-[10px] text-stone-400 font-bold flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                <span>مدت: {topic.durationMinutes || 30} دقیقه</span>
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* STEP 2: SELECT DATE & TIME SLOT */}
+                  <div className="space-y-4 pt-4 border-t border-stone-100">
+                    <label className="block text-xs sm:text-sm font-black text-stone-900">
+                      ۲. انتخاب روز و زمان دلخواه مشاوره:
+                    </label>
+
+                    <div className="space-y-2">
+                      <span className="text-xs font-bold text-stone-600 block">انتخاب روز مشاوره:</span>
+                      <div className="flex flex-wrap gap-2">
+                        {['امروز', 'فردا', 'پس‌فردا', 'پنج‌شنبه این هفته', 'شنبه آینده'].map(dayLabel => (
+                          <button
+                            key={dayLabel}
+                            type="button"
+                            onClick={() => setConsultPreferredDate(dayLabel)}
+                            className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                              consultPreferredDate === dayLabel
+                                ? 'bg-stone-900 text-white border-stone-900 shadow-xs'
+                                : 'bg-stone-50 text-stone-700 border-stone-200 hover:bg-stone-100'
+                            }`}
+                          >
+                            {dayLabel}
+                          </button>
+                        ))}
+                        <input
+                          type="text"
+                          value={consultPreferredDate}
+                          onChange={e => setConsultPreferredDate(e.target.value)}
+                          placeholder="یا تاریخ دلخواه (مثلاً ۱۴۰۳/۰۷/۲۰)..."
+                          className="flex-1 min-w-[180px] px-3.5 py-2 rounded-xl border border-stone-200 text-xs font-bold text-stone-800 focus:ring-2 focus:ring-amber-400/20"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <span className="text-xs font-bold text-stone-600 block">انتخاب بازه ساعتی تماس کارشناس:</span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {consultationConfig.timeSlots.map(slot => {
+                          const isSlotSelected = activeConsultTimeSlot === slot;
+                          return (
+                            <button
+                              key={slot}
+                              type="button"
+                              onClick={() => setConsultPreferredTimeSlot(slot)}
+                              className={`p-3 rounded-xl border text-xs font-bold flex items-center justify-between transition cursor-pointer ${
+                                isSlotSelected
+                                  ? 'border-amber-500 bg-amber-50 text-amber-950 shadow-xs'
+                                  : 'border-stone-200 bg-stone-50/60 text-stone-700 hover:bg-stone-100'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2">
+                                <Clock className={`w-4 h-4 ${isSlotSelected ? 'text-amber-600' : 'text-stone-400'}`} />
+                                <span>{slot}</span>
+                              </div>
+                              {isSlotSelected && <Check className="w-4 h-4 text-amber-600" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* STEP 3: SELECT SOCIAL MEDIA PLATFORM FOR COMMUNICATION */}
+                  <div className="space-y-4 pt-4 border-t border-stone-100">
+                    <div>
+                      <label className="block text-xs sm:text-sm font-black text-stone-900">
+                        ۳. انتخاب شبکه اجتماعی یا پیام‌رسان جهت ارتباط کارشناس با شما:
+                      </label>
+                      <p className="text-[11px] text-stone-500 mt-0.5">
+                        مشخص نمایید در زمان تعیین‌شده، کارشناس از طریق کدام پیام‌رسان یا شبکه اجتماعی با شما ارتباط بگیرد.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                      {consultationConfig.socialPlatforms.map(social => {
+                        const isSocialSelected = activeConsultSocial?.id === social.id;
+                        return (
+                          <button
+                            key={social.id}
+                            type="button"
+                            onClick={() => setConsultSelectedSocialId(social.id)}
+                            className={`p-3 rounded-2xl border-2 text-xs font-black flex items-center justify-between gap-2 transition cursor-pointer ${
+                              isSocialSelected
+                                ? 'border-emerald-600 bg-emerald-50/70 text-emerald-950 shadow-xs'
+                                : 'border-stone-200 bg-white text-stone-700 hover:border-stone-300'
+                            }`}
+                          >
+                            <span className="truncate">{social.name}</span>
+                            {isSocialSelected && <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="bg-emerald-50/50 border border-emerald-200/80 rounded-2xl p-4 space-y-2">
+                      <label className="block text-xs font-black text-emerald-950">
+                        آیدی یا شماره اکانت شما در «{activeConsultSocial?.name}»:
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={consultSocialContactId}
+                        onChange={e => setConsultSocialContactId(e.target.value)}
+                        placeholder={
+                          activeConsultSocial?.placeholder ||
+                          'آیدی (مثلاً @username) یا شماره موبایل متصل به این پیام‌رسان را وارد کنید...'
+                        }
+                        className="w-full px-4 py-2.5 rounded-xl border border-emerald-300 bg-white text-xs font-mono font-bold text-stone-900 focus:ring-2 focus:ring-emerald-500/20"
+                        dir="ltr"
+                      />
+                    </div>
+                  </div>
+
+                  {/* STEP 4: CUSTOMER INFO & QUESTION */}
+                  <div className="space-y-4 pt-4 border-t border-stone-100">
+                    <label className="block text-xs sm:text-sm font-black text-stone-900">
+                      ۴. مشخصات فردی و شرح موضوع مشاوره:
+                    </label>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold text-stone-700 mb-1.5">
+                          نام و نام خانوادگی
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={consultName}
+                          onChange={e => setConsultName(e.target.value)}
+                          placeholder="مثال: علی احمدی"
+                          className="w-full px-4 py-2.5 rounded-xl border border-stone-200 text-xs focus:ring-2 focus:ring-amber-400/20"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-stone-700 mb-1.5">
+                          شماره موبایل (جهت صدور فاکتور و کد رهگیری)
+                        </label>
+                        <input
+                          type="tel"
+                          required
+                          value={consultPhone}
+                          onChange={e => setConsultPhone(e.target.value)}
+                          placeholder="09123456789"
+                          className="w-full px-4 py-2.5 rounded-xl border border-stone-200 text-xs focus:ring-2 focus:ring-amber-400/20 font-mono text-left"
+                          dir="ltr"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-stone-700 mb-1.5">
+                        شرح پرسش، علائم یا هدف درمانی شما (اختیاری)
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={consultQuestion}
+                        onChange={e => setConsultQuestion(e.target.value)}
+                        placeholder="اگر توضیح یا سوال خاصی پیش از جلسه مشاوره دارید، اینجا بنویسید..."
+                        className="w-full px-4 py-2.5 rounded-xl border border-stone-200 text-xs focus:ring-2 focus:ring-amber-400/20 leading-relaxed font-sans"
+                      />
+                    </div>
+                  </div>
+
+                  {/* STEP 5: SUMMARY INVOICE BOX & PAYMENT / CART ACTIONS */}
+                  <div className="bg-stone-900 text-white rounded-3xl p-5 sm:p-6 space-y-4 shadow-lg">
+                    <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-stone-800">
+                      <div className="text-xs sm:text-sm font-black text-amber-400 flex items-center gap-2">
+                        <CreditCard className="w-4 h-4" />
+                        <span>خلاصه رزرو و صورتحساب جلسه مشاوره</span>
+                      </div>
+                      <span className="text-xs font-mono bg-white/10 px-3 py-1 rounded-full text-stone-200">
+                        مدت جلسه: {activeConsultTopic?.durationMinutes || 30} دقیقه
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                      <div className="bg-white/5 p-3 rounded-xl border border-white/10">
+                        <span className="text-stone-400 block text-[11px] mb-0.5">موضوع انتخاب‌شده:</span>
+                        <span className="font-bold text-white">{activeConsultTopic?.title}</span>
+                      </div>
+                      <div className="bg-white/5 p-3 rounded-xl border border-white/10">
+                        <span className="text-stone-400 block text-[11px] mb-0.5">زمان و شبکه اجتماعی ارتباط:</span>
+                        <span className="font-bold text-emerald-400">
+                          {consultPreferredDate || 'فردا'} | {activeConsultTimeSlot} ({activeConsultSocial?.name})
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+                      <span className="text-xs sm:text-sm text-stone-300 font-bold">مبلغ قابل پرداخت مشاوره:</span>
+                      <span className="text-lg sm:text-2xl font-black text-amber-400">
+                        {activeConsultPrice > 0 ? `${formatPrice(activeConsultPrice)} تومان` : 'رایگان'}
+                      </span>
+                    </div>
+
+                    {consultBookingError && (
+                      <div className="p-3 rounded-xl bg-rose-500/20 border border-rose-400/40 text-rose-200 text-xs font-bold flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 shrink-0" />
+                        <span>{consultBookingError}</span>
+                      </div>
+                    )}
+
+                    <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                      <button
+                        type="submit"
+                        disabled={isSubmittingConsult}
+                        className="flex-1 py-3.5 px-5 bg-amber-500 hover:bg-amber-400 text-stone-950 rounded-2xl text-xs sm:text-sm font-black shadow-md transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                      >
+                        <CreditCard className="w-4 h-4 shrink-0" />
+                        <span>
+                          {isSubmittingConsult
+                            ? 'در حال صدور فاکتور مشاوره...'
+                            : activeConsultPrice > 0
+                            ? 'ثبت رزرو و ادامه جهت پرداخت فاکتور'
+                            : 'ثبت نهایی درخواست مشاوره رایگان'}
+                        </span>
+                      </button>
+
+                      {consultationConfig.allowAddToCart && activeConsultPrice > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleAddConsultationToCart}
+                          className="py-3.5 px-5 bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-2xl text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shrink-0"
+                        >
+                          <ShoppingBag className="w-4 h-4 text-amber-400 shrink-0" />
+                          <span>افزودن به سبد خرید</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </form>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ================= PAGE 4: TRACKING ================= */}
+        {activePage === 'tracking' && (
+          <div className="max-w-2xl mx-auto space-y-5 sm:space-y-6 animate-fadeIn">
+            <div className="text-center mb-4 sm:mb-6 px-1">
+              <h1 className="text-xl sm:text-3xl font-black text-stone-900 leading-snug">
+                پیگیری وضعیت سفارش و پیام مشاوره
+              </h1>
+              <p className="text-xs text-stone-500 mt-2 leading-relaxed">
+                کد رهگیری فاکتور خرید (مانند ONV-ORD-101) یا کد رهگیری پیام مشاوره (مانند ONV-9421) را وارد نمایید.
+              </p>
+            </div>
+
+            <div className="bg-white rounded-3xl p-4 sm:p-8 shadow-sm border border-stone-100 overflow-hidden">
+              <form onSubmit={handleTrackingSearch} className="flex flex-col sm:flex-row gap-2.5">
+                <input 
+                  type="text" 
+                  required
+                  placeholder="مثلاً: ONV-ORD-101"
+                  value={trackingCodeInput}
+                  onChange={e => setTrackingCodeInput(e.target.value)}
+                  className="w-full sm:flex-1 min-w-0 px-4 py-3.5 sm:py-3 rounded-xl border border-stone-200 text-xs font-mono font-bold tracking-wider uppercase text-center sm:text-right focus:ring-2 focus:ring-amber-400/20"
+                  dir="ltr"
+                />
+                <button
+                  type="submit"
+                  disabled={isSearchingTracking}
+                  className="w-full sm:w-auto px-6 py-3.5 sm:py-3 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shrink-0 cursor-pointer shadow-xs"
+                >
+                  <Search className="w-4 h-4 shrink-0" />
+                  <span>{isSearchingTracking ? 'در حال جستجو...' : 'استعلام وضعیت'}</span>
+                </button>
+              </form>
+
+              {trackingSearched && (
+                <div className="mt-6 pt-6 border-t border-stone-100">
+                  {trackingResult ? (
+                    trackingResult.type === 'order' ? (
+                      /* Live Order Status & Stepper Tracker */
+                      <div className="space-y-5 sm:space-y-6">
+                        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-stone-100">
+                          <span className="text-xs font-bold text-amber-700 bg-amber-50 px-3 py-1 rounded-full border border-amber-200 flex items-center gap-1.5">
+                            <Package className="w-3.5 h-3.5 shrink-0" />
+                            <span>سفارش فروشگاه اونیوال</span>
+                          </span>
+                          <span className="text-xs text-stone-500 font-mono font-bold break-all">
+                            {trackingResult.data.trackingCode}
+                          </span>
+                        </div>
+
+                        {/* Interactive Visual Order Timeline Stepper */}
+                        <div className="bg-stone-50 p-3.5 sm:p-5 rounded-2xl border border-stone-200/80">
+                          <div className="text-xs font-black text-stone-800 mb-4">
+                            مراحل پردازش و ارسال مرسوله:
+                          </div>
+                          
+                          <div className="space-y-4">
+                            {/* Step 1: Invoice created */}
+                            <div className="flex items-start gap-3">
+                              <div className="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center shrink-0 text-xs font-bold mt-0.5">
+                                <Check className="w-3.5 h-3.5" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="text-xs font-bold text-stone-900">۱. صدور فاکتور اولیه</div>
+                                <div className="text-[11px] text-stone-500 leading-relaxed">فاکتور ثبت شد و کد رهگیری اختصاص یافت.</div>
+                              </div>
+                            </div>
+
+                            {/* Step 2: Payment & Receipt Verification Status */}
+                            <div className="flex items-start gap-3">
+                              <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs font-bold mt-0.5 ${
+                                trackingResult.data.paymentStatus === 'Paid'
+                                  ? 'bg-emerald-500 text-white'
+                                  : trackingResult.data.paymentStatus === 'PendingVerification'
+                                  ? 'bg-blue-600 text-white animate-pulse'
+                                  : trackingResult.data.paymentStatus === 'Failed'
+                                  ? 'bg-rose-600 text-white'
+                                  : 'bg-amber-500 text-white animate-pulse'
+                              }`}>
+                                {trackingResult.data.paymentStatus === 'Paid' ? <Check className="w-3.5 h-3.5" /> : '۲'}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="text-xs font-bold text-stone-900 flex flex-wrap items-center justify-between gap-1.5">
+                                  <span>۲. وضعیت پرداخت و تأیید مالی فاکتور</span>
+                                  <span className={`text-[10px] px-2.5 py-0.5 rounded-md font-bold ${
+                                    trackingResult.data.paymentStatus === 'Paid'
+                                      ? 'bg-emerald-100 text-emerald-800'
+                                      : trackingResult.data.paymentStatus === 'PendingVerification'
+                                      ? 'bg-blue-100 text-blue-800'
+                                      : trackingResult.data.paymentStatus === 'Failed'
+                                      ? 'bg-rose-100 text-rose-800'
+                                      : 'bg-amber-100 text-amber-800'
+                                  }`}>
+                                    {trackingResult.data.paymentStatus === 'Paid'
+                                      ? 'پرداخت تایید شده'
+                                      : trackingResult.data.paymentStatus === 'PendingVerification'
+                                      ? 'فیش واریزی در انتظار تایید مدیر'
+                                      : trackingResult.data.paymentStatus === 'Failed'
+                                      ? 'فیش رد شده (نیاز به ارسال مجدد)'
+                                      : 'در انتظار پرداخت'}
+                                  </span>
+                                </div>
+
+                                <div className="text-[11px] text-stone-600 mt-1 leading-relaxed">
+                                  {trackingResult.data.paymentStatus === 'Paid' ? (
+                                    <span className="text-emerald-700 font-bold">
+                                      واریزی فاکتور شماره {trackingResult.data.trackingCode} توسط مدیریت تایید شد و سفارش وارد مرحله آماده‌سازی انبار گردید.
+                                    </span>
+                                  ) : trackingResult.data.paymentStatus === 'PendingVerification' ? (
+                                    <span>
+                                      تصویر فیش واریزی شما به همراه شماره فاکتور <strong>{trackingResult.data.trackingCode}</strong> ثبت شده و در صف بررسی مدیریت سفارشات قرار دارد. به محض تایید مدیر، وضعیت سفارش شما به «آماده‌سازی در انبار» تغییر خواهد یافت.
+                                    </span>
+                                  ) : trackingResult.data.paymentStatus === 'Failed' ? (
+                                    <span className="text-rose-600 font-bold">
+                                      فیش ارسالی قبلی مورد تایید قرار نگرفت. {trackingResult.data.receiptAdminNote ? `توضیح مدیر: «${trackingResult.data.receiptAdminNote}»` : 'لطفاً تصویر واضح فیش واریزی را مجدداً بارگذاری نمایید.'}
+                                    </span>
+                                  ) : (
+                                    <span>مبلغ این فاکتور هنوز تسویه نشده است. می‌توانید فیش کارت‌به‌کارت را ارسال کنید یا از روش‌های فعال پرداخت نمایید.</span>
+                                  )}
+                                </div>
+
+                                {/* Show uploaded receipt thumbnail if present */}
+                                {trackingResult.data.receiptImage && (
+                                  <div className="mt-3 p-3 rounded-xl bg-white border border-stone-200 flex items-center gap-3">
+                                    <img
+                                      src={trackingResult.data.receiptImage}
+                                      alt="Receipt"
+                                      className="w-14 h-14 object-cover rounded-lg border border-stone-200 shrink-0"
+                                    />
+                                    <div className="min-w-0 flex-1 text-[11px] space-y-0.5">
+                                      <div className="font-bold text-stone-800 truncate">
+                                        فیش پیوست‌شده به فاکتور {trackingResult.data.trackingCode}
+                                      </div>
+                                      {trackingResult.data.receiptUploadedAt && (
+                                        <div className="text-stone-400">زمان ارسال: {trackingResult.data.receiptUploadedAt}</div>
+                                      )}
+                                      {trackingResult.data.receiptNote && (
+                                        <div className="text-stone-600 truncate">توضیح: {trackingResult.data.receiptNote}</div>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* If not Paid, allow customer to pay or upload receipt right from Tracking Page */}
+                                {trackingResult.data.paymentStatus !== 'Paid' && (
+                                  <div className="mt-3 space-y-2.5">
+                                    <div className="flex flex-wrap gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setCurrentInvoice(trackingResult.data);
+                                          setActivePage('checkout');
+                                          window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+                                        }}
+                                        className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-bold transition cursor-pointer shadow-xs"
+                                      >
+                                        <CreditCard className="w-3.5 h-3.5 shrink-0" />
+                                        <span>
+                                          {trackingResult.data.paymentStatus === 'PendingVerification'
+                                            ? 'مشاهده فاکتور / ویرایش فیش واریزی'
+                                            : 'مشاهده صفحه پرداخت و ارسال فیش واریزی'}
+                                        </span>
+                                      </button>
+
+                                      {paymentConfig.baleBotEnabled && (
+                                        <a
+                                          href={trackingResult.data.balePaymentUrl || `https://ble.ir/${(paymentConfig.baleBotUsername || 'onival_bot').replace(/^@/, '')}?start=pay_${trackingResult.data.trackingCode}`}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold transition"
+                                        >
+                                          <span>پرداخت در ربات بله</span>
+                                          <ExternalLink className="w-3 h-3 shrink-0" />
+                                        </a>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Step 3: Processing in warehouse */}
+                            <div className="flex items-start gap-3">
+                              <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs font-bold mt-0.5 ${
+                                ['Processing', 'Shipped', 'Completed'].includes(trackingResult.data.status)
+                                  ? 'bg-blue-600 text-white'
+                                  : 'bg-stone-200 text-stone-600'
+                              }`}>
+                                {['Shipped', 'Completed'].includes(trackingResult.data.status) ? <Check className="w-3.5 h-3.5" /> : '۳'}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="text-xs font-bold text-stone-900">۳. آماده‌سازی و بسته‌بندی در انبار مرکزی اونیوال</div>
+                                <div className="text-[11px] text-stone-500 leading-relaxed">
+                                  {['Processing', 'Shipped', 'Completed'].includes(trackingResult.data.status)
+                                    ? 'مرسوله در واحد بسته‌بندی تخصصی اونیوال قرار دارد.'
+                                    : 'پس از تایید پرداخت، انبارداری آغاز می‌شود.'}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Step 4: Shipped */}
+                            <div className="flex items-start gap-3">
+                              <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs font-bold mt-0.5 ${
+                                ['Shipped', 'Completed'].includes(trackingResult.data.status)
+                                  ? 'bg-indigo-600 text-white'
+                                  : 'bg-stone-200 text-stone-600'
+                              }`}>
+                                {trackingResult.data.status === 'Completed' ? <Check className="w-3.5 h-3.5" /> : '۴'}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="text-xs font-bold text-stone-900">۴. تحویل به اداره پست / پیک و ارسال</div>
+                                <div className="text-[11px] text-stone-500 leading-relaxed">
+                                  {['Shipped', 'Completed'].includes(trackingResult.data.status)
+                                    ? 'بسته تحویل مامور پست شده و در مسیر مقصد می‌باشد.'
+                                    : 'در نوبت ارسال قرار می‌گیرد.'}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Step 5: Completed */}
+                            <div className="flex items-start gap-3">
+                              <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs font-bold mt-0.5 ${
+                                trackingResult.data.status === 'Completed'
+                                  ? 'bg-emerald-600 text-white'
+                                  : 'bg-stone-200 text-stone-600'
+                              }`}>
+                                ۵
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="text-xs font-bold text-stone-900">۵. تحویل نهایی به خریدار</div>
+                                <div className="text-[11px] text-stone-500 leading-relaxed">
+                                  {trackingResult.data.status === 'Completed'
+                                    ? 'مرسوله با موفقیت به مشتری تحویل داده شد.'
+                                    : 'در انتظار تحویل حضوری.'}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Consultation Details & Specialist Response if this order is a consultation booking */}
+                        {(trackingResult.data.isConsultation || trackingResult.data.consultationDetails) && (
+                          <div className="bg-amber-50/70 rounded-2xl p-4 border border-amber-200 space-y-3 text-xs">
+                            <div className="font-black text-amber-950 flex items-center gap-1.5">
+                              <Sparkles className="w-4 h-4 text-amber-600" />
+                              <span>جزئیات نوبت مشاوره تخصصی شما:</span>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                              <div className="bg-white p-2.5 rounded-xl border border-amber-100">
+                                <span className="text-stone-400 block text-[10px]">موضوع مشاوره:</span>
+                                <span className="font-bold text-stone-900">
+                                  {trackingResult.data.consultationDetails?.topicTitle || 'مشاوره تخصصی سلامت'}
+                                </span>
+                              </div>
+                              <div className="bg-white p-2.5 rounded-xl border border-amber-100">
+                                <span className="text-stone-400 block text-[10px]">زمان انتخابی شما:</span>
+                                <span className="font-bold text-blue-800">
+                                  {trackingResult.data.consultationDetails?.preferredDate} | {trackingResult.data.consultationDetails?.preferredTimeSlot}
+                                </span>
+                              </div>
+                              <div className="sm:col-span-2 bg-white p-2.5 rounded-xl border border-amber-100 flex flex-wrap justify-between gap-2">
+                                <div>
+                                  <span className="text-stone-400 block text-[10px]">شبکه اجتماعی انتخابی جهت تماس کارشناس:</span>
+                                  <span className="font-bold text-emerald-800">
+                                    {trackingResult.data.consultationDetails?.socialPlatform}
+                                  </span>
+                                </div>
+                                <div className="text-left">
+                                  <span className="text-stone-400 block text-[10px]">آیدی / شماره ثبت‌شده:</span>
+                                  <span className="font-mono font-bold text-stone-900">
+                                    {trackingResult.data.consultationDetails?.socialContactId}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {(trackingResult.data.adminResponse || trackingResult.data.consultationDetails?.adminResponse) ? (
+                              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 space-y-1.5">
+                                <div className="font-black text-emerald-900 flex items-center gap-1.5">
+                                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                                  <span>پاسخ و توصیه کارشناس سلامت اونیوال:</span>
+                                </div>
+                                <p className="text-emerald-950 leading-relaxed whitespace-pre-line bg-white p-3 rounded-lg border border-emerald-100">
+                                  {trackingResult.data.adminResponse || trackingResult.data.consultationDetails?.adminResponse}
+                                </p>
+                              </div>
+                            ) : (
+                              <div className="text-[11px] text-amber-800 font-medium">
+                                پس از تایید پرداخت، کارشناس در زمان تعیین‌شده از طریق شبکه اجتماعی انتخابی با شما ارتباط گرفته و نتیجه مشاوره نیز در همین بخش درج خواهد شد.
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Order Meta details */}
+                        <div className="bg-white rounded-2xl p-4 border border-stone-200 space-y-2.5 text-xs">
+                          <div className="flex flex-wrap justify-between gap-1">
+                            <span className="text-stone-500">تحویل‌گیرنده:</span>
+                            <span className="font-bold text-stone-800">{trackingResult.data.userFullName}</span>
+                          </div>
+                          <div className="flex flex-wrap justify-between gap-1">
+                            <span className="text-stone-500">شماره تماس:</span>
+                            <span className="font-mono text-stone-800">{trackingResult.data.phoneNumber}</span>
+                          </div>
+                          <div className="flex flex-wrap justify-between gap-1">
+                            <span className="text-stone-500">مبلغ کل فاکتور:</span>
+                            <span className="font-extrabold text-stone-900">{formatPrice(trackingResult.data.totalPrice)} تومان</span>
+                          </div>
+                          <div className="pt-2 border-t border-stone-100 text-stone-500 leading-relaxed break-words">
+                            <span>آدرس ثبت‌شده: </span>
+                            <span className="text-stone-700">{trackingResult.data.userAddress}</span>
+                          </div>
+                        </div>
+
+                        {/* Items preview */}
+                        {trackingResult.data.items && trackingResult.data.items.length > 0 && (
+                          <div className="bg-stone-50 p-4 rounded-2xl border border-stone-100">
+                            <div className="text-xs font-bold text-stone-700 mb-2">اقلام فاکتور:</div>
+                            <div className="space-y-2">
+                              {trackingResult.data.items.map((it: any, i: number) => (
+                                <div key={i} className="flex flex-wrap justify-between gap-1 text-xs text-stone-600">
+                                  <span className="font-medium">{it.productName} ({it.size || 'استاندارد'}) × {it.quantity}</span>
+                                  <span className="font-bold text-stone-800">{formatPrice(it.totalPrice || it.unitPrice * it.quantity)} تومان</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      /* Consultation Tracking Card */
+                      <div className="space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-xs font-bold text-blue-700 bg-blue-50 px-3 py-1 rounded-full border border-blue-200 flex items-center gap-1.5">
+                            <Sparkles className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                            <span>پیام مشاوره و پشتیبانی</span>
+                          </span>
+                          <span className="text-xs text-stone-400 font-mono font-bold break-all">
+                            {trackingResult.data.trackingCode}
+                          </span>
+                        </div>
+
+                        <div className="bg-stone-50 rounded-2xl p-4 text-xs space-y-2">
+                          <div className="font-bold text-stone-800">متن پیام ارسالی شما:</div>
+                          <p className="text-stone-600 leading-relaxed bg-white p-3 rounded-xl border border-stone-100">
+                            {trackingResult.data.message}
+                          </p>
+                          <div className="text-[11px] text-stone-400 pt-1">
+                            ثبت شده در: {trackingResult.data.creationTime}
+                          </div>
+                        </div>
+
+                        {trackingResult.data.adminResponse ? (
+                          <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 text-xs space-y-2">
+                            <div className="font-bold text-emerald-800 flex items-center gap-1.5">
+                              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                              <span>پاسخ متخصص سلامت اونیوال:</span>
+                            </div>
+                            <p className="text-emerald-950 leading-relaxed bg-white/80 p-3 rounded-xl">
+                              {trackingResult.data.adminResponse}
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl p-4 text-xs flex items-center gap-2">
+                            <Clock className="w-4 h-4 shrink-0 text-amber-600" />
+                            <span>پیام شما در صف بررسی کارشناس قرار دارد و تا ساعاتی دیگر پاسخ آن ثبت می‌گردد.</span>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  ) : (
+                    <div className="text-center py-6 text-xs text-rose-600 font-bold">
+                      هیچ سفارش یا پیامی با این کد رهگیری یافت نشد. لطفاً کد را مجدداً بررسی فرمایید.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ================= PAGE 5: ABOUT US ================= */}
+        {activePage === 'about' && (
+          <div className="max-w-2xl mx-auto bg-white rounded-3xl p-8 shadow-xs border border-stone-100 space-y-4 animate-fadeIn">
+            <h1 className="text-2xl font-black text-stone-900 mb-2">
+              {siteContent?.pages?.about?.title || `درباره فروشگاه ${brandName} (${brandEnglishName})`}
+            </h1>
+            <p className="text-xs sm:text-sm text-stone-600 leading-relaxed whitespace-pre-line">
+              {siteContent?.pages?.about?.content ||
+                `مجموعه تخصصی ${brandName} با همکاری مستقیم زنبورداران محلی و کشاورزان متعهد سبلان و البرز، محصولات کاملاً سالم، ارگانیک و حرارت‌ندیده را بدون واسطه به دست خانواده‌های ایرانی می‌رساند.`}
+            </p>
+            <div className="grid grid-cols-2 gap-4 pt-4 border-t border-stone-100 text-center">
+              <div className="p-4 rounded-2xl bg-stone-50">
+                <span className="text-xl font-black text-[#4CAF50] block">۱۰۰٪</span>
+                <span className="text-xs text-stone-500">طبیعی، خام و آزمایش‌شده</span>
+              </div>
+              <div className="p-4 rounded-2xl bg-stone-50">
+                <span className="text-xl font-black text-amber-500 block">۷ روز</span>
+                <span className="text-xs text-stone-500">ضمانت اصالت و بازگشت وجه</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= PAGE 6: CONTACT US ================= */}
+        {activePage === 'contact' && (
+          <div className="max-w-2xl mx-auto bg-white rounded-3xl p-8 shadow-xs border border-stone-100 space-y-5 animate-fadeIn">
+            <div>
+              <h1 className="text-2xl font-black text-stone-900 mb-2">
+                {siteContent?.contactTitle || siteContent?.pages?.contact?.title || 'تماس با ما و ارتباط با پشتیبانی'}
+              </h1>
+              <p className="text-xs text-stone-600 leading-relaxed">
+                {siteContent?.contactSubtitle || siteContent?.pages?.contact?.subtitle || `جهت پیگیری سفارشات، هماهنگی خرید عمده و ارتباط مستقیم با پشتیبانی ${brandName}:`}
+              </p>
+            </div>
+
+            <div className="space-y-3 text-xs text-stone-700">
+              <div className="flex items-center gap-3 p-3.5 rounded-2xl bg-stone-50 border border-stone-100">
+                <Phone className="w-4 h-4 text-amber-600 shrink-0" />
+                <div>
+                  <span className="text-stone-400 block text-[11px] mb-0.5">تلفن مرکز تماس و پشتیبانی:</span>
+                  <span className="font-bold text-stone-800">
+                    {siteContent?.contactPhone || siteContent?.pages?.contact?.phone || '۰۲۱-۱۲۳۴۵۶۷۸ / ۰۹۱۲۳۴۵۶۷۸۹'}
+                  </span>
+                </div>
+              </div>
+
+              {(siteContent?.contactWorkingHours || siteContent?.supportHours) && (
+                <div className="flex items-center gap-3 p-3.5 rounded-2xl bg-stone-50 border border-stone-100">
+                  <Clock className="w-4 h-4 text-amber-600 shrink-0" />
+                  <div>
+                    <span className="text-stone-400 block text-[11px] mb-0.5">ساعات پاسخگویی:</span>
+                    <span className="font-bold text-stone-800">
+                      {siteContent?.contactWorkingHours || siteContent?.supportHours}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-3 p-3.5 rounded-2xl bg-stone-50 border border-stone-100">
+                <MapPin className="w-4 h-4 text-amber-600 shrink-0" />
+                <div>
+                  <span className="text-stone-400 block text-[11px] mb-0.5">نشانی دفتر مرکزی:</span>
+                  <span className="font-bold text-stone-800">
+                    {siteContent?.contactAddress || siteContent?.pages?.contact?.address || `تهران، مجموعه تخصصی فرآورده‌های ارگانیک ${brandName} (${brandEnglishName})`}
+                  </span>
+                </div>
+              </div>
+
+              {/* Direct Support Messengers Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                <a
+                  href={`https://ble.ir/${(siteContent?.contactBaleId || siteContent?.paymentConfig?.baleBotUsername || 'onival_bot').replace(/^@/, '')}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center justify-between p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-950 hover:bg-emerald-100/70 transition"
+                >
+                  <div>
+                    <div className="text-[11px] text-emerald-700 font-bold">پشتیبانی و ربات بله</div>
+                    <div className="font-mono font-black text-xs mt-0.5" dir="ltr">
+                      @{(siteContent?.contactBaleId || siteContent?.paymentConfig?.baleBotUsername || 'onival_bot').replace(/^@/, '')}
+                    </div>
+                  </div>
+                  <ExternalLink className="w-4 h-4 text-emerald-600 shrink-0" />
+                </a>
+
+                <a
+                  href={`https://t.me/${(siteContent?.contactTelegramId || 'onival_support').replace(/^@/, '')}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center justify-between p-3.5 rounded-2xl bg-sky-50 border border-sky-200 text-sky-950 hover:bg-sky-100/70 transition"
+                >
+                  <div>
+                    <div className="text-[11px] text-sky-700 font-bold">پشتیبانی مستقیم تلگرام</div>
+                    <div className="font-mono font-black text-xs mt-0.5" dir="ltr">
+                      @{(siteContent?.contactTelegramId || 'onival_support').replace(/^@/, '')}
+                    </div>
+                  </div>
+                  <ExternalLink className="w-4 h-4 text-sky-600 shrink-0" />
+                </a>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= PAGE 7: CHECKOUT & INVOICE FLOW ================= */}
+        {activePage === 'checkout' && (
+          <div className="max-w-3xl mx-auto space-y-6 animate-fadeIn">
+            {/* If an official invoice has been issued, show the Invoice & Bale Bot Payment Screen */}
+            {currentInvoice ? (
+              <div className="bg-white rounded-[30px] p-6 sm:p-10 shadow-lg border border-amber-200/80 space-y-6">
+                {/* Invoice Header */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-6 border-b border-stone-100 gap-4">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-10 h-10 rounded-2xl bg-amber-500 text-white flex items-center justify-center font-black">
+                      <Hexagon className="w-6 h-6 stroke-[2]" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-black text-stone-900">
+                        فاکتور رسمی سفارش فروشگاه اونیوال
+                      </h2>
+                      <div className="text-xs text-stone-400 font-mono font-bold">
+                        ONIVAL Official Invoice
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="text-left sm:text-right bg-stone-50 px-4 py-2 rounded-xl border border-stone-200">
+                    <div className="text-[11px] text-stone-400">کد رهگیری فاکتور:</div>
+                    <div className="text-base font-mono font-black text-stone-900 tracking-wider">
+                      {currentInvoice.trackingCode}
+                    </div>
+                  </div>
+                </div>
+
+                  {/* Recipient / Consultation Details */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-stone-50 p-4 rounded-2xl text-xs">
+                    <div>
+                      <span className="text-stone-400 block mb-0.5">
+                        {currentInvoice.isConsultation ? 'نام متقاضی مشاوره:' : 'نام تحویل‌گیرنده:'}
+                      </span>
+                      <span className="font-bold text-stone-800">{currentInvoice.userFullName}</span>
+                    </div>
+                    <div>
+                      <span className="text-stone-400 block mb-0.5">شماره تماس:</span>
+                      <span className="font-mono font-bold text-stone-800">{currentInvoice.phoneNumber}</span>
+                    </div>
+                    {currentInvoice.consultationDetails ? (
+                      <>
+                        <div className="pt-2 border-t border-stone-200/60">
+                          <span className="text-stone-400 block mb-0.5">زمان انتخابی مشاوره:</span>
+                          <span className="font-bold text-amber-800">
+                            {currentInvoice.consultationDetails.preferredDate} | {currentInvoice.consultationDetails.preferredTimeSlot}
+                          </span>
+                        </div>
+                        <div className="pt-2 border-t border-stone-200/60">
+                          <span className="text-stone-400 block mb-0.5">شبکه اجتماعی ارتباط با کارشناس:</span>
+                          <span className="font-bold text-emerald-800">
+                            {currentInvoice.consultationDetails.socialPlatform} ({currentInvoice.consultationDetails.socialContactId})
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="sm:col-span-2 pt-2 border-t border-stone-200/60">
+                        <span className="text-stone-400 block mb-0.5">آدرس پستی تحویل / مشخصات:</span>
+                        <span className="font-medium text-stone-800">{currentInvoice.userAddress}</span>
+                      </div>
+                    )}
+                  </div>
+
+                {/* Items Table */}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-right text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b-2 border-stone-100 text-stone-500">
+                        <th className="pb-3 px-2">#</th>
+                        <th className="pb-3 px-2">شرح کالا</th>
+                        <th className="pb-3 px-2 text-center">اندازه / وزن</th>
+                        <th className="pb-3 px-2 text-center">تعداد</th>
+                        <th className="pb-3 px-2">فی (تومان)</th>
+                        <th className="pb-3 px-2">جمع (تومان)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-50">
+                      {currentInvoice.items.map((it, idx) => (
+                        <tr key={idx}>
+                          <td className="py-3 px-2 text-stone-400">{idx + 1}</td>
+                          <td className="py-3 px-2 font-bold text-stone-800">{it.productName}</td>
+                          <td className="py-3 px-2 text-center text-stone-600 bg-stone-50/50 rounded">
+                            {it.size || 'استاندارد'}
+                          </td>
+                          <td className="py-3 px-2 text-center font-bold">{it.quantity}</td>
+                          <td className="py-3 px-2">{formatPrice(it.unitPrice)}</td>
+                          <td className="py-3 px-2 font-bold text-stone-900">{formatPrice(it.totalPrice)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Total box */}
+                <div className="flex flex-wrap justify-between items-center gap-2 bg-[#fffbeb] p-4 sm:p-5 rounded-2xl font-bold text-sm sm:text-base text-[#d97706] border border-dashed border-[#f59e0b]">
+                  <span>مبلغ کل قابل پرداخت:</span>
+                  <span className="text-lg sm:text-xl font-black">{formatPrice(currentInvoice.totalPrice)} تومان</span>
+                </div>
+
+                {/* ================= CONFIGURABLE 3-MODE PAYMENT SYSTEM ================= */}
+                {currentInvoice.paymentStatus === 'Paid' ? (
+                  /* Paid Confirmation Banner */
+                  <div className="bg-emerald-50 border-2 border-emerald-200 rounded-3xl p-5 sm:p-6 space-y-3">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div className="text-sm font-black text-emerald-900 flex items-center gap-2">
+                        <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                        <span>پرداخت فاکتور با موفقیت تأیید شد!</span>
+                      </div>
+                      <span className="px-3 py-1 rounded-full bg-emerald-600 text-white text-xs font-bold">
+                        شماره فاکتور: {currentInvoice.trackingCode}
+                      </span>
+                    </div>
+                    <p className="text-xs text-emerald-800 leading-relaxed">
+                      سفارش شما به صورت خودکار وارد مرحله <strong>«آماده‌سازی و بسته‌بندی در انبار مرکزی اونیوال»</strong> شد. می‌توانید در هر زمان با کد رهگیری <strong>{currentInvoice.trackingCode}</strong> وضعیت مرسوله خود را در صفحه پیگیری سفارش مشاهده فرمایید.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-5">
+                    {/* Payment Method Selector Tabs (shown when more than 1 method is enabled in admin panel) */}
+                    {([paymentConfig.cardToCardEnabled, paymentConfig.baleBotEnabled, paymentConfig.gatewayEnabled].filter(Boolean).length > 1) && (
+                      <div className="bg-stone-100 p-1.5 rounded-2xl grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+                        {paymentConfig.cardToCardEnabled && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedPaymentTab('card_to_card')}
+                            className={`py-3 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition cursor-pointer ${
+                              selectedPaymentTab === 'card_to_card'
+                                ? 'bg-white text-amber-700 shadow-sm border border-amber-200'
+                                : 'text-stone-600 hover:text-stone-900'
+                            }`}
+                          >
+                            <CreditCard className="w-4 h-4 shrink-0" />
+                            <span>کارت به کارت و آپلود فیش</span>
+                          </button>
+                        )}
+                        {paymentConfig.baleBotEnabled && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedPaymentTab('bale_bot')}
+                            className={`py-3 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition cursor-pointer ${
+                              selectedPaymentTab === 'bale_bot'
+                                ? 'bg-white text-emerald-700 shadow-sm border border-emerald-200'
+                                : 'text-stone-600 hover:text-stone-900'
+                            }`}
+                          >
+                            <Send className="w-4 h-4 shrink-0" />
+                            <span>پرداخت در ربات بله</span>
+                          </button>
+                        )}
+                        {paymentConfig.gatewayEnabled && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedPaymentTab('gateway')}
+                            className={`py-3 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition cursor-pointer ${
+                              selectedPaymentTab === 'gateway'
+                                ? 'bg-white text-blue-700 shadow-sm border border-blue-200'
+                                : 'text-stone-600 hover:text-stone-900'
+                            }`}
+                          >
+                            <Globe className="w-4 h-4 shrink-0" />
+                            <span>درگاه پرداخت اینترنتی</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {/* ==================== MODE 1: CARD-TO-CARD & RECEIPT UPLOAD ==================== */}
+                    {selectedPaymentTab === 'card_to_card' && (
+                      <div className="space-y-4 animate-fadeIn">
+                        {/* Polite Gateway Offline Reassurance Box above Card Number */}
+                        <div className="bg-amber-50/90 border border-amber-200/90 rounded-2xl p-4 sm:p-5 flex items-start gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-700 flex items-center justify-center shrink-0 mt-0.5">
+                            <HeartHandshake className="w-5 h-5" />
+                          </div>
+                          <div className="space-y-1 min-w-0 flex-1">
+                            <div className="text-xs font-black text-amber-950 flex flex-wrap items-center gap-1.5">
+                              <span>اطلاعیه راهنمای پرداخت امن (اختلال موقت درگاه مستقیم بانکی)</span>
+                            </div>
+                            <p className="text-xs text-amber-900/90 leading-relaxed whitespace-pre-line">
+                              {paymentConfig.gatewayOfflineNotice}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Bank Card Box */}
+                        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-stone-900 via-stone-800 to-stone-900 text-white p-5 sm:p-7 shadow-lg border border-stone-700">
+                          <div className="absolute -top-12 -left-12 w-40 h-40 rounded-full bg-amber-500/10 blur-2xl pointer-events-none" />
+                          <div className="absolute -bottom-12 -right-12 w-40 h-40 rounded-full bg-amber-400/10 blur-2xl pointer-events-none" />
+
+                          <div className="relative z-10 space-y-5">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <CreditCard className="w-5 h-5 text-amber-400 shrink-0" />
+                                <span className="text-xs sm:text-sm font-black text-amber-400">
+                                  {paymentConfig.bankName || 'شماره کارت رسمی جهت واریز کارت به کارت'}
+                                </span>
+                              </div>
+                              <span className="text-[11px] bg-white/10 px-3 py-1 rounded-full font-mono text-stone-200">
+                                شماره فاکتور: {currentInvoice.trackingCode}
+                              </span>
+                            </div>
+
+                            {/* Card Number Display + Copy Button */}
+                            <div className="bg-black/30 border border-white/10 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+                              <div
+                                className="text-lg sm:text-2xl font-mono font-black tracking-widest text-white select-all text-center sm:text-left"
+                                dir="ltr"
+                              >
+                                {paymentConfig.cardNumber}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={handleCopyCardNumber}
+                                className="w-full sm:w-auto px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 text-xs font-black flex items-center justify-center gap-1.5 transition cursor-pointer shrink-0"
+                              >
+                                {copiedCard ? (
+                                  <>
+                                    <Check className="w-4 h-4" />
+                                    <span>شماره کارت کپی شد</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="w-4 h-4" />
+                                    <span>کپی شماره کارت</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+
+                            {/* Cardholder Name & Payable Amount */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs pt-1">
+                              <div className="bg-white/5 rounded-xl p-3 border border-white/10">
+                                <span className="text-stone-400 block mb-1 text-[11px]">به نام صاحب حساب:</span>
+                                <span className="font-bold text-white text-xs sm:text-sm">
+                                  {paymentConfig.cardHolderName}
+                                </span>
+                              </div>
+                              <div className="bg-amber-500/15 rounded-xl p-3 border border-amber-400/30">
+                                <span className="text-amber-300 block mb-1 text-[11px]">مبلغ دقیق قابل واریز:</span>
+                                <span className="font-black text-amber-400 text-sm sm:text-base">
+                                  {formatPrice(currentInvoice.totalPrice)} تومان
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Admin Custom Description */}
+                            {paymentConfig.cardDescription && (
+                              <div className="text-xs text-stone-300 leading-relaxed bg-white/5 p-3.5 rounded-xl border border-white/10 whitespace-pre-line">
+                                {paymentConfig.cardDescription}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Receipt Upload & Verification Box */}
+                        <div className="bg-stone-50 rounded-3xl p-5 sm:p-6 border border-stone-200/90 space-y-4">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="text-xs sm:text-sm font-black text-stone-900 flex items-center gap-2">
+                              <Upload className="w-4 h-4 text-amber-600 shrink-0" />
+                              <span>ارسال تصویر فیش واریزی به همراه شماره فاکتور</span>
+                            </div>
+
+                            <span className={`px-3 py-1 rounded-full text-[11px] font-bold flex items-center gap-1.5 ${
+                              currentInvoice.paymentStatus === 'PendingVerification'
+                                ? 'bg-blue-100 text-blue-800'
+                                : currentInvoice.paymentStatus === 'Failed'
+                                ? 'bg-rose-100 text-rose-800'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}>
+                              {currentInvoice.paymentStatus === 'PendingVerification' ? (
+                                <>
+                                  <Clock className="w-3.5 h-3.5 text-blue-600" />
+                                  <span>فیش ارسال شد (در انتظار تایید مدیر)</span>
+                                </>
+                              ) : currentInvoice.paymentStatus === 'Failed' ? (
+                                <>
+                                  <XCircle className="w-3.5 h-3.5 text-rose-600" />
+                                  <span>فیش رد شد - لطفاً مجدداً ارسال کنید</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Clock className="w-3.5 h-3.5 text-amber-600" />
+                                  <span>در انتظار بارگذاری فیش واریزی</span>
+                                </>
+                              )}
+                            </span>
+                          </div>
+
+                          {/* If receipt is already uploaded & pending verification, show reassuring status card */}
+                          {currentInvoice.paymentStatus === 'PendingVerification' && currentInvoice.receiptImage && (
+                            <div className="bg-blue-50/90 border border-blue-200 rounded-2xl p-4 space-y-3">
+                              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                                <img
+                                  src={currentInvoice.receiptImage}
+                                  alt="فیش ارسالی"
+                                  className="w-24 h-24 object-cover rounded-xl border-2 border-white shadow-sm shrink-0"
+                                />
+                                <div className="space-y-1.5 text-xs text-blue-950 flex-1">
+                                  <div className="font-black text-blue-900 flex items-center gap-1.5">
+                                    <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0" />
+                                    <span>تصویر فیش واریزی شما با موفقیت برای مدیریت ارسال گردید!</span>
+                                  </div>
+                                  <p className="leading-relaxed text-blue-800">
+                                    شماره فاکتور و کد پیگیری اختصاصی شما <strong className="font-mono bg-white px-2 py-0.5 rounded border border-blue-200">{currentInvoice.trackingCode}</strong> است.
+                                    تصویر فیش در پنل مدیریت سفارشات ثبت شده و پس از تایید توسط مدیر، وضعیت سفارش در بخش <strong>«پیگیری سفارش»</strong> به صورت خودکار به‌روزرسانی می‌شود.
+                                  </p>
+                                  {currentInvoice.receiptUploadedAt && (
+                                    <div className="text-[11px] text-blue-600">
+                                      زمان ثبت فیش: {currentInvoice.receiptUploadedAt}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Upload Form (allows initial upload or replacing existing image) */}
+                          <div className="space-y-3">
+                            <div className="bg-white rounded-2xl p-3.5 border border-stone-200 flex flex-wrap items-center justify-between gap-2 text-xs">
+                              <span className="text-stone-500">شماره فاکتور متصل به این فیش:</span>
+                              <span className="font-mono font-black text-stone-900 bg-amber-50 px-3 py-1 rounded-lg border border-amber-200">
+                                {currentInvoice.trackingCode}
+                              </span>
+                            </div>
+
+                            <label className="block cursor-pointer">
+                              <input
+                                type="file"
+                                accept="image/*"
+                                onChange={handleReceiptFileChange}
+                                className="hidden"
+                              />
+                              <div className="border-2 border-dashed border-amber-300 hover:border-amber-500 bg-white hover:bg-amber-50/30 transition rounded-2xl p-5 text-center space-y-2">
+                                {receiptPreview ? (
+                                  <div className="space-y-2">
+                                    <img
+                                      src={receiptPreview}
+                                      alt="پیش‌نمایش فیش"
+                                      className="max-h-52 mx-auto rounded-xl border border-stone-200 shadow-xs object-contain"
+                                    />
+                                    <span className="inline-block text-[11px] text-amber-700 font-bold bg-amber-50 px-3 py-1 rounded-full">
+                                      تصویر انتخاب شد (برای تغییر تصویر کلیک کنید)
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <>
+                                    <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center mx-auto">
+                                      <ImageIcon className="w-6 h-6" />
+                                    </div>
+                                    <div className="text-xs font-black text-stone-800">
+                                      {currentInvoice.receiptImage
+                                        ? 'انتخاب تصویر جدید جهت جایگزینی فیش قبلی'
+                                        : 'برای انتخاب تصویر فیش واریزی یا اسکرین‌شات تراکنش کلیک کنید'}
+                                    </div>
+                                    <div className="text-[11px] text-stone-400">
+                                      فرمت‌های مجاز: JPG, PNG (تصویر رسید عابربانک یا اسکرین‌شات همراه بانک)
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            </label>
+
+                            <div>
+                              <label className="block text-xs font-bold text-stone-700 mb-1">
+                                توضیحات اختیاری (مثال: ۴ رقم آخر کارت یا ساعت واریز):
+                              </label>
+                              <input
+                                type="text"
+                                value={receiptNote}
+                                onChange={(e) => setReceiptNote(e.target.value)}
+                                placeholder="مثال: واریز از کارت ۶۰۳۷ به نام سارا محمدی..."
+                                className="w-full px-4 py-2.5 rounded-xl bg-white border border-stone-200 text-xs focus:ring-2 focus:ring-amber-400/20"
+                              />
+                            </div>
+
+                            {receiptUploadError && (
+                              <div className="text-xs text-rose-600 font-bold bg-rose-50 border border-rose-200 p-3 rounded-xl flex items-center gap-1.5">
+                                <AlertCircle className="w-4 h-4 shrink-0" />
+                                <span>{receiptUploadError}</span>
+                              </div>
+                            )}
+
+                            <button
+                              type="button"
+                              disabled={isUploadingReceipt || !receiptPreview}
+                              onClick={() => handleUploadReceipt(currentInvoice.trackingCode)}
+                              className={`w-full py-4 rounded-2xl text-xs sm:text-sm font-black shadow-md transition flex items-center justify-center gap-2 cursor-pointer ${
+                                receiptPreview
+                                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                                  : 'bg-stone-200 text-stone-500 cursor-not-allowed'
+                              }`}
+                            >
+                              <Upload className="w-4 h-4 shrink-0" />
+                              <span>
+                                {isUploadingReceipt
+                                  ? 'در حال ارسال فیش و ثبت در پنل سفارشات...'
+                                  : `ثبت و ارسال فیش واریزی برای فاکتور ${currentInvoice.trackingCode}`}
+                              </span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ==================== MODE 2: BALE BOT PAYMENT ==================== */}
+                    {selectedPaymentTab === 'bale_bot' && (
+                      <div className="bg-stone-50 rounded-3xl p-5 sm:p-6 border border-stone-200 space-y-4 animate-fadeIn">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="text-xs sm:text-sm font-black text-stone-800 flex items-center gap-2">
+                            <Send className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <span>پرداخت فاکتور از طریق ربات رسمی بله:</span>
+                          </div>
+
+                          <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 flex items-center gap-1.5">
+                            <Clock className="w-3.5 h-3.5 text-amber-600" />
+                            <span>در انتظار پرداخت در ربات بله</span>
+                          </span>
+                        </div>
+
+                        <p className="text-xs text-stone-600 leading-relaxed whitespace-pre-line">
+                          {paymentConfig.baleBotDescription}
+                        </p>
+
+                        <div className="bg-white p-3.5 rounded-2xl border border-stone-200 flex flex-wrap items-center justify-between gap-2 text-xs">
+                          <span className="text-stone-500">شماره فاکتور ارسالی به ربات:</span>
+                          <span className="font-mono font-black text-stone-900">{currentInvoice.trackingCode}</span>
+                        </div>
+
+                        <div className="flex flex-col sm:flex-row gap-3 pt-1">
+                          <a
+                            href={
+                              currentInvoice.balePaymentUrl ||
+                              `https://ble.ir/${(paymentConfig.baleBotUsername || 'onival_bot').replace(/^@/, '')}?start=pay_${currentInvoice.trackingCode}`
+                            }
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex-1 py-4 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-xs font-black shadow-md transition flex items-center justify-center gap-2 text-center"
+                          >
+                            <Send className="w-4 h-4 shrink-0" />
+                            <span>
+                              اتصال به ربات بله و پرداخت فاکتور (@{(paymentConfig.baleBotUsername || 'onival_bot').replace(/^@/, '')})
+                            </span>
+                            <ExternalLink className="w-3.5 h-3.5 opacity-75 shrink-0" />
+                          </a>
+
+                          <button
+                            type="button"
+                            disabled={isConfirmingBale}
+                            onClick={() => handleConfirmBalePayment(currentInvoice.trackingCode)}
+                            className="px-5 py-4 bg-amber-500 hover:bg-amber-600 text-white rounded-2xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
+                            title="شبیه‌سازی بازگشت پاسخ موفق از ربات بله"
+                          >
+                            <RefreshCw className={`w-4 h-4 shrink-0 ${isConfirmingBale ? 'animate-spin' : ''}`} />
+                            <span>تأیید آنی پرداخت بله (تست)</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ==================== MODE 3: DIRECT ONLINE PAYMENT GATEWAY ==================== */}
+                    {selectedPaymentTab === 'gateway' && (
+                      <div className="bg-blue-50/60 rounded-3xl p-5 sm:p-6 border border-blue-200 space-y-4 animate-fadeIn">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="text-xs sm:text-sm font-black text-blue-950 flex items-center gap-2">
+                            <Globe className="w-5 h-5 text-blue-600 shrink-0" />
+                            <span>{paymentConfig.gatewayTitle || 'درگاه پرداخت اینترنتی شاپرک'}</span>
+                          </div>
+                          <span className="px-3 py-1 rounded-full text-[11px] font-bold bg-blue-100 text-blue-800 flex items-center gap-1">
+                            <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
+                            <span>متصل به شبکه شتاب</span>
+                          </span>
+                        </div>
+
+                        <p className="text-xs text-stone-600 leading-relaxed whitespace-pre-line">
+                          {paymentConfig.gatewayDescription}
+                        </p>
+
+                        <div className="bg-white rounded-2xl p-4 border border-blue-100 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                          <div className="flex justify-between sm:block">
+                            <span className="text-stone-400 block mb-0.5">شماره فاکتور:</span>
+                            <span className="font-mono font-black text-stone-900">{currentInvoice.trackingCode}</span>
+                          </div>
+                          <div className="flex justify-between sm:block">
+                            <span className="text-stone-400 block mb-0.5">مبلغ قابل پرداخت در درگاه:</span>
+                            <span className="font-black text-blue-700">{formatPrice(currentInvoice.totalPrice)} تومان</span>
+                          </div>
+                          {paymentConfig.gatewayMerchantCode && (
+                            <div className="sm:col-span-2 pt-2 border-t border-stone-100 flex justify-between items-center text-[11px] text-stone-500">
+                              <span>کد پذیرنده / مرچنت درگاه:</span>
+                              <span className="font-mono font-bold text-stone-700">{paymentConfig.gatewayMerchantCode}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex flex-col sm:flex-row gap-3 pt-1">
+                          {buildGatewayLink(currentInvoice) ? (
+                            <a
+                              href={buildGatewayLink(currentInvoice)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="flex-1 py-4 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-xs sm:text-sm font-black shadow-md transition flex items-center justify-center gap-2 text-center"
+                            >
+                              <Globe className="w-4 h-4 shrink-0" />
+                              <span>{paymentConfig.gatewayButtonText || 'ورود به درگاه بانکی و پرداخت آنلاین'}</span>
+                              <ExternalLink className="w-3.5 h-3.5 opacity-80 shrink-0" />
+                            </a>
+                          ) : null}
+
+                          <button
+                            type="button"
+                            disabled={isConfirmingGateway}
+                            onClick={() => handleConfirmGatewayPayment(currentInvoice.trackingCode)}
+                            className={`${
+                              buildGatewayLink(currentInvoice) ? 'px-5' : 'flex-1'
+                            } py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-xs font-black shadow-md transition flex items-center justify-center gap-1.5 cursor-pointer`}
+                          >
+                            <CheckCircle2 className={`w-4 h-4 shrink-0 ${isConfirmingGateway ? 'animate-spin' : ''}`} />
+                            <span>
+                              {buildGatewayLink(currentInvoice)
+                                ? 'تایید و تکمیل پرداخت درگاه بانکی'
+                                : paymentConfig.gatewayButtonText || 'پرداخت آنلاین از طریق درگاه بانکی'}
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Bottom Navigation Buttons */}
+                <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTrackingCodeInput(currentInvoice.trackingCode);
+                      setActivePage('tracking');
+                      window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+                    }}
+                    className="flex-1 py-3 bg-stone-900 text-white rounded-xl text-xs font-bold hover:bg-stone-800 transition cursor-pointer text-center"
+                  >
+                    پیگیری وضعیت لحظه‌ای این سفارش با کد رهگیری
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCurrentInvoice(null);
+                      setActivePage('home');
+                      window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+                    }}
+                    className="py-3 px-6 border border-stone-200 text-stone-600 rounded-xl text-xs font-bold hover:bg-stone-50 transition cursor-pointer text-center"
+                  >
+                    بازگشت به فروشگاه
+                  </button>
+                </div>
+              </div>
+            ) : cart.length === 0 ? (
+              /* Empty Cart State */
+              <div className="text-center py-16 bg-white rounded-3xl border border-stone-100 p-8">
+                <ShoppingBag className="w-12 h-12 text-stone-300 mx-auto mb-3" />
+                <h3 className="text-base font-bold text-stone-800">سبد خرید شما خالی است</h3>
+                <button 
+                  onClick={() => setActivePage('home')}
+                  className="mt-4 px-6 py-2.5 bg-stone-900 text-white rounded-xl text-xs font-bold hover:bg-stone-800 transition cursor-pointer"
+                >
+                  بازگشت به فروشگاه
+                </button>
+              </div>
+            ) : (
+              /* Cart Review & Customer Checkout Form */
+              <div className="bg-white rounded-[30px] p-6 sm:p-10 shadow-sm border border-stone-100">
+                <h2 className="text-xl font-black text-stone-900 text-center mb-6">
+                  پیش‌فاکتور و ثبت اطلاعات تحویل
+                </h2>
+
+                {/* Items in cart table */}
+                <div className="overflow-x-auto mb-6">
+                  <table className="w-full text-right text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b-2 border-stone-100 text-stone-500">
+                        <th className="pb-3 px-2">#</th>
+                        <th className="pb-3 px-2">شرح کالا</th>
+                        <th className="pb-3 px-2 text-center">اندازه / وزن</th>
+                        <th className="pb-3 px-2 text-center">تعداد</th>
+                        <th className="pb-3 px-2">فی (تومان)</th>
+                        <th className="pb-3 px-2">جمع (تومان)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-50">
+                      {cart.map((item, idx) => (
+                        <tr key={item.cartId}>
+                          <td className="py-3 px-2 text-stone-400">{idx + 1}</td>
+                          <td className="py-3 px-2 font-bold text-stone-800">{item.name}</td>
+                          <td className="py-3 px-2 text-center text-stone-600 bg-stone-50/60 rounded">
+                            {item.size}
+                          </td>
+                          <td className="py-3 px-2 text-center font-bold">{item.qty}</td>
+                          <td className="py-3 px-2">{formatPrice(item.price)}</td>
+                          <td className="py-3 px-2 font-bold text-stone-900">{formatPrice(item.price * item.qty)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="flex justify-between items-center bg-[#fffbeb] p-4 rounded-2xl font-bold text-base text-[#d97706] border border-dashed border-[#f59e0b] mb-6">
+                  <span>مبلغ قابل پرداخت:</span>
+                  <span className="text-lg font-black">{formatPrice(totalCartPrice)} تومان</span>
+                </div>
+
+                {/* Customer Details Form */}
+                <form onSubmit={handleCheckoutSubmit} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-stone-700 mb-1.5">
+                      نام و نام خانوادگی تحویل‌گیرنده
+                    </label>
+                    <input 
+                      type="text" 
+                      required
+                      value={checkoutName}
+                      onChange={e => setCheckoutName(e.target.value)}
+                      placeholder="مثال: سارا محمدی"
+                      className="w-full px-4 py-3 rounded-xl border border-stone-200 text-xs focus:ring-2 focus:ring-amber-400/20"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-stone-700 mb-1.5">
+                      شماره تلفن همراه (جهت دریافت لینک فاکتور و کد رهگیری)
+                    </label>
+                    <input 
+                      type="tel" 
+                      required
+                      value={checkoutPhone}
+                      onChange={e => {
+                        setCheckoutPhone(e.target.value);
+                        if (phoneError) validatePhone(e.target.value);
+                      }}
+                      placeholder="۰۹۱۲۳۴۵۶۷۸۹"
+                      className="w-full px-4 py-3 rounded-xl border border-stone-200 text-xs font-mono text-left focus:ring-2 focus:ring-amber-400/20"
+                      dir="ltr"
+                    />
+                    {phoneError && (
+                      <p className="text-rose-500 text-[11px] font-bold mt-1">{phoneError}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-stone-700 mb-1.5">
+                      آدرس دقیق پستی جهت ارسال مرسوله
+                    </label>
+                    <textarea 
+                      rows={3}
+                      required
+                      value={checkoutAddress}
+                      onChange={e => setCheckoutAddress(e.target.value)}
+                      placeholder="استان، شهر، خیابان، کوچه، پلاک، واحد..."
+                      className="w-full px-4 py-3 rounded-xl border border-stone-200 text-xs focus:ring-2 focus:ring-amber-400/20 font-sans"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isSubmittingOrder}
+                    className="w-full py-4 bg-[#f59e0b] hover:bg-[#d97706] text-white rounded-2xl text-sm font-black shadow-md transition cursor-pointer"
+                  >
+                    {isSubmittingOrder ? 'در حال صدور فاکتور رسمی و انتقال به صفحه پرداخت...' : 'ثبت سفارش و ادامه جهت پرداخت فاکتور'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleSelectPage('home')}
+                    className="w-full py-2.5 text-center text-xs text-stone-500 hover:text-stone-800 font-bold transition cursor-pointer"
+                  >
+                    بازگشت به فروشگاه
+                  </button>
+                </form>
+              </div>
+            )}
+          </div>
+        )}
+          </>
+        )}
+      </main>
+
+      {/* ================= FOOTER ================= */}
+      <footer className="bg-stone-900 text-white pt-14 pb-24 md:pb-8 px-6 rounded-t-[40px] mt-20">
+        <div className="max-w-5xl mx-auto flex flex-wrap gap-10 justify-between items-start">
+          <div className="max-w-sm space-y-3">
+            <div className="flex items-center gap-2.5 font-black text-lg">
+              {siteContent?.siteLogo ? (
+                <div
+                  className={
+                    siteContent.siteLogoShape === 'free'
+                      ? 'h-9 max-w-[110px] flex items-center justify-center overflow-hidden shrink-0'
+                      : `w-9 h-9 ${
+                          siteContent.siteLogoShape === 'circle' ? 'rounded-full' : 'rounded-xl'
+                        } bg-white flex items-center justify-center overflow-hidden shrink-0 shadow-xs`
+                  }
+                >
+                  <img
+                    src={siteContent.siteLogo}
+                    alt={brandName}
+                    style={{
+                      transform:
+                        siteContent.siteLogoScale && siteContent.siteLogoScale !== 100
+                          ? `scale(${siteContent.siteLogoScale / 100})`
+                          : undefined,
+                      transformOrigin: 'center center'
+                    }}
+                    className={`w-full h-full ${
+                      siteContent.siteLogoShape === 'free'
+                        ? 'object-contain max-h-9 w-auto'
+                        : (siteContent.siteLogoFit || 'cover') === 'cover'
+                        ? 'object-cover'
+                        : 'object-contain'
+                    }`}
+                  />
+                </div>
+              ) : (
+                <Hexagon className="w-5 h-5 text-amber-500 fill-amber-500/20" />
+              )}
+              <span>فروشگاه تخصصی {brandName} ({brandEnglishName})</span>
+            </div>
+            <p className="text-xs text-stone-400 leading-relaxed">
+              {brandDescription}
+            </p>
+          </div>
+
+          <div>
+            <h4 className="text-sm font-bold text-amber-400 mb-3">دسترسی سریع</h4>
+            <ul className="space-y-2 text-xs text-stone-300">
+              <li><button onClick={() => handleSelectPage('home')} className="hover:text-white cursor-pointer">{navigation.home || 'خانه'}</button></li>
+              <li><button onClick={() => handleSelectPage('articles')} className="hover:text-white cursor-pointer">{navigation.articles || 'مقالات علمی'}</button></li>
+              <li><button onClick={() => handleSelectPage('consultation')} className="hover:text-white cursor-pointer">{navigation.consultation || 'مشاوره تخصصی'}</button></li>
+              <li><button onClick={() => handleSelectPage('tracking')} className="hover:text-white cursor-pointer">{navigation.tracking || 'پیگیری سفارش'}</button></li>
+              <li><button onClick={() => handleSelectPage('about')} className="hover:text-white cursor-pointer">{navigation.about || 'درباره ما'}</button></li>
+              <li><button onClick={() => handleSelectPage('contact')} className="hover:text-white cursor-pointer">{navigation.contact || 'تماس با ما'}</button></li>
+            </ul>
+          </div>
+        </div>
+
+        {/* Footer Bottom with Hidden Admin Access Button */}
+        <div className="max-w-5xl mx-auto border-t border-stone-800 mt-10 pt-6 flex flex-col sm:flex-row items-center justify-between text-xs text-stone-500 gap-3">
+          <div 
+            onClick={handleCopyrightClick}
+            className="cursor-pointer select-none hover:text-stone-400 transition flex items-center gap-1.5"
+            title="کلیک برای ورود ادمین"
+          >
+            <span>© ۲۰۲۶ {brandName} ({brandEnglishName}) • کلیه حقوق محفوظ است.</span>
+            <span className="w-1.5 h-1.5 rounded-full bg-stone-700 hover:bg-amber-500 transition inline-block"></span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              id="btn-secret-admin-entrance"
+              onClick={() => setIsAdminAuthModalOpen(true)}
+              className="text-[11px] text-stone-600 hover:text-amber-400 transition flex items-center gap-1 px-2.5 py-1 rounded-lg hover:bg-stone-800/80 cursor-pointer"
+              title="دکمه پنهانی پنل مدیریت سیستم"
+            >
+              <Lock className="w-3 h-3 opacity-60" />
+              <span>ورود مدیریت</span>
+            </button>
+          </div>
+        </div>
+      </footer>
+
+      {/* ================= MODAL: HIDDEN ADMIN LOGIN GATE ================= */}
+      {isAdminAuthModalOpen && (
+        <div className="fixed inset-0 z-50 bg-stone-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-stone-100 text-center animate-scale">
+            {siteContent?.siteLogo ? (
+              <div
+                className={
+                  siteContent.siteLogoShape === 'free'
+                    ? 'h-14 max-w-[140px] flex items-center justify-center mx-auto mb-3 overflow-hidden'
+                    : `w-14 h-14 ${
+                        siteContent.siteLogoShape === 'circle' ? 'rounded-full' : 'rounded-2xl'
+                      } bg-white border border-stone-200 flex items-center justify-center mx-auto mb-3 shadow-md overflow-hidden`
+                }
+              >
+                <img
+                  src={siteContent.siteLogo}
+                  alt="Logo"
+                  style={{
+                    transform:
+                      siteContent.siteLogoScale && siteContent.siteLogoScale !== 100
+                        ? `scale(${siteContent.siteLogoScale / 100})`
+                        : undefined,
+                    transformOrigin: 'center center'
+                  }}
+                  className={`w-full h-full ${
+                    siteContent.siteLogoShape === 'free'
+                      ? 'object-contain max-h-14 w-auto'
+                      : (siteContent.siteLogoFit || 'cover') === 'cover'
+                      ? 'object-cover'
+                      : 'object-contain'
+                  }`}
+                />
+              </div>
+            ) : (
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500 to-amber-700 text-white flex items-center justify-center mx-auto mb-3 shadow-md shadow-amber-500/20 overflow-hidden">
+                <KeyRound className="w-6 h-6" />
+              </div>
+            )}
+            <h3 className="text-base font-black text-stone-900">
+              ورود به پنل مدیریت سیستم ({brandEnglishName} Admin)
+            </h3>
+            <p className="text-xs text-stone-500 mt-1 mb-4">
+              لطفاً نام کاربری و رمز عبور مدیریت را جهت ورود به پنل وارد نمایید
+            </p>
+
+            <form onSubmit={handleSecretAdminLogin} className="space-y-3.5 text-right">
+              <div>
+                <label className="block text-[11px] font-bold text-stone-700 mb-1">
+                  نام کاربری یا ایمیل مدیریت:
+                </label>
+                <input 
+                  type="text"
+                  autoFocus
+                  required
+                  dir="ltr"
+                  placeholder="نام کاربری (مثال: admin)"
+                  value={adminUsernameInput}
+                  onChange={e => {
+                    setAdminUsernameInput(e.target.value);
+                    setAdminAuthError('');
+                  }}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-stone-200 text-xs focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 text-center font-mono outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-stone-700 mb-1">
+                  رمز عبور مدیریت:
+                </label>
+                <input 
+                  type="password"
+                  required
+                  dir="ltr"
+                  placeholder="رمز عبور (مثال: admin)"
+                  value={adminPasswordInput}
+                  onChange={e => {
+                    setAdminPasswordInput(e.target.value);
+                    setAdminAuthError('');
+                  }}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-stone-200 text-xs focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 text-center font-mono outline-none"
+                />
+              </div>
+
+              {adminAuthError && (
+                <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-600 text-[11px] font-bold text-center">
+                  {adminAuthError}
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsAdminAuthModalOpen(false);
+                    setAdminUsernameInput('');
+                    setAdminPasswordInput('');
+                    setAdminAuthError('');
+                  }}
+                  className="flex-1 py-2.5 border border-stone-200 text-stone-600 rounded-xl text-xs font-bold hover:bg-stone-50 cursor-pointer"
+                >
+                  انصراف
+                </button>
+                <button
+                  type="submit"
+                  disabled={isAuthenticatingAdmin}
+                  className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-md shadow-amber-500/20 cursor-pointer"
+                >
+                  {isAuthenticatingAdmin ? 'در حال بررسی...' : 'ورود به پنل'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ================= DRAWER: SHOPPING CART ================= */}
+      {isCartOpen && (
+        <div 
+          onClick={() => setIsCartOpen(false)}
+          className="fixed inset-0 z-50 bg-stone-900/50 backdrop-blur-xs"
+        />
+      )}
+
+      <div
+        className={`fixed top-0 left-0 z-50 w-[86vw] max-w-sm sm:w-96 h-[100dvh] max-h-screen bg-white shadow-2xl p-4 sm:p-5 flex flex-col justify-start overflow-y-auto overscroll-contain transition-transform duration-300 ease-in-out ${
+          isCartOpen ? 'translate-x-0' : '-translate-x-full pointer-events-none'
+        }`}
+      >
+        <div className="flex items-center justify-between pb-3 border-b border-stone-100 shrink-0">
+          <div className="flex items-center gap-2 font-black text-stone-900 text-sm">
+            <ShoppingBag className="w-4 h-4 text-amber-500" />
+            <span>سبد خرید شما ({totalCartCount})</span>
+          </div>
+          <button 
+            type="button"
+            onClick={() => setIsCartOpen(false)}
+            className="p-1.5 rounded-lg text-stone-400 hover:text-stone-600 hover:bg-stone-100 cursor-pointer"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Cart Items List & Immediate Summary (No flex-1 pushing button to bottom of page) */}
+        {cart.length === 0 ? (
+          <div className="text-center py-12 text-stone-400 text-xs space-y-3">
+            <ShoppingBag className="w-10 h-10 text-stone-300 mx-auto" />
+            <div>سبد خرید شما هنوز خالی است.</div>
+            <button
+              type="button"
+              onClick={() => setIsCartOpen(false)}
+              className="px-5 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-xl text-xs font-bold transition cursor-pointer"
+            >
+              ادامه مشاهده محصولات
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-col space-y-3 pt-2">
+            {/* Scrollable Items Container with bounded max-height so confirm button is always right below */}
+            <div className="max-h-[45vh] sm:max-h-[52vh] overflow-y-auto overscroll-contain divide-y divide-stone-100 pr-0.5">
+              {cart.map(item => (
+                <div key={item.cartId} className="py-3 flex gap-3 items-center">
+                  <img 
+                    src={item.img} 
+                    alt={item.name} 
+                    className="w-14 h-14 rounded-xl object-cover shrink-0 border border-stone-100"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-extrabold text-xs text-stone-800 truncate">{item.name}</div>
+                    <div className="text-[10px] text-stone-400 mb-1">اندازه: {item.size}</div>
+                    <div className="text-xs font-black text-stone-900">{formatPrice(item.price)} ت</div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 bg-stone-50 p-1 rounded-lg border border-stone-200 shrink-0">
+                    <button 
+                      type="button"
+                      onClick={() => updateCartQty(item.cartId, 1)}
+                      className="w-6 h-6 rounded-md bg-white text-stone-700 flex items-center justify-center hover:bg-stone-100 cursor-pointer"
+                    >
+                      <Plus className="w-3 h-3" />
+                    </button>
+                    <span className="text-xs font-bold w-5 text-center">{item.qty}</span>
+                    <button 
+                      type="button"
+                      onClick={() => updateCartQty(item.cartId, -1)}
+                      className="w-6 h-6 rounded-md bg-white text-stone-700 flex items-center justify-center hover:bg-stone-100 cursor-pointer"
+                    >
+                      <Minus className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Cart Summary & Confirm Button directly below items for instant mobile access */}
+            <div className="pt-3 border-t border-stone-200 bg-amber-50/60 rounded-2xl p-3.5 space-y-3 shrink-0">
+              <div className="flex justify-between items-center text-sm font-bold">
+                <span className="text-stone-600 text-xs">جمع کل قابل پرداخت:</span>
+                <span className="font-black text-stone-900 text-sm sm:text-base">{formatPrice(totalCartPrice)} تومان</span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsCartOpen(false);
+                  setCurrentInvoice(null);
+                  handleSelectPage('checkout');
+                }}
+                className="w-full py-3.5 bg-[#f59e0b] hover:bg-[#d97706] text-white rounded-xl text-xs font-black shadow-md transition flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>مشاهده فاکتور و ثبت سفارش</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsCartOpen(false)}
+                className="w-full py-2 text-center text-[11px] font-bold text-stone-500 hover:text-stone-800 transition cursor-pointer"
+              >
+                ادامه خرید در فروشگاه
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
