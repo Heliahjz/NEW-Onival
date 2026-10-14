@@ -35,7 +35,7 @@ import {
   Server
 } from 'lucide-react';
 import { TelegramConfig, BotActivityLog, ContactMessage, Order, SiteContent } from '../types';
-import { apiFetch } from '../services/firebaseSync';
+import { apiFetch } from '../services/dataService';
 
 interface BotSettingsViewProps {
   config: TelegramConfig;

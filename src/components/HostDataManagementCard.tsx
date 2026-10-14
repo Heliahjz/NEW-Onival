@@ -1,0 +1,398 @@
+import React, { useState } from 'react';
+import {
+  Server,
+  CloudDownload,
+  FileJson,
+  RefreshCw,
+  CheckCircle2,
+  AlertCircle,
+  HardDrive,
+  Copy,
+  Check,
+  Terminal,
+  ShieldCheck,
+  HelpCircle,
+  Layers,
+  Sparkles,
+  Info
+} from 'lucide-react';
+import {
+  runManualSeedDatabase,
+  getCachedLocalState,
+  getAdminSessionToken,
+  apiFetch
+} from '../services/dataService';
+
+interface HostDataManagementCardProps {
+  onRefreshAppData?: () => Promise<void> | void;
+}
+
+export const HostDataManagementCard: React.FC<HostDataManagementCardProps> = ({
+  onRefreshAppData,
+}) => {
+  const [isSeeding, setIsSeeding] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [feedback, setFeedback] = useState<{
+    type: 'success' | 'error' | null;
+    message: string;
+  }>({ type: null, message: '' });
+  const [copiedEnv, setCopiedEnv] = useState(false);
+  const [showGuide, setShowGuide] = useState(true);
+
+  // ۱. راه‌اندازی اولیه و بازنشانی محصولات پیش‌فرض روی سرور لینوکس
+  const handleSeedDatabase = async (resetToFactory = false) => {
+    setIsSeeding(true);
+    setFeedback({ type: null, message: '' });
+    try {
+      const res = await runManualSeedDatabase({ resetAllToDefault: resetToFactory });
+      setFeedback({
+        type: 'success',
+        message: res.message,
+      });
+      await onRefreshAppData?.();
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        message: err?.message || 'خطا در راه‌اندازی اولیه داده‌ها روی هاست',
+      });
+    } finally {
+      setIsSeeding(false);
+    }
+  };
+
+  // ۲. همگام‌سازی فوری و ذخیره دائمی دیتابیس در فایل onival-persistent-data.json
+  const handleSyncCurrentState = async () => {
+    setIsSyncing(true);
+    setFeedback({ type: null, message: '' });
+    try {
+      const currentState = getCachedLocalState();
+      const token = getAdminSessionToken();
+      const res = await apiFetch('/api/host/import-state', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify(currentState),
+      });
+
+      if (res.ok) {
+        setFeedback({
+          type: 'success',
+          message: 'تمامی اطلاعات سایت (محصولات، دسته‌بندی‌ها، سفارشات، مقالات، تنظیمات سئو و حساب مدیریت) با موفقیت در دیسک هاست شما (onival-persistent-data.json) ذخیره شد.',
+        });
+      } else {
+        throw new Error('سرور هاست وضعیت ناموفق برگرداند.');
+      }
+    } catch {
+      setFeedback({
+        type: 'error',
+        message: 'خطا در ذخیره‌سازی داده‌ها روی هاست سرور.',
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // ۳. خروجی گرفتن کامل از دیتابیس (JSON Backup)
+  const handleExportFullBackup = () => {
+    const state = getCachedLocalState();
+    const blob = new Blob([JSON.stringify(state, null, 2)], {
+      type: 'application/json;charset=utf-8',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `onival-host-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setFeedback({
+      type: 'success',
+      message: 'فایل پشتیبان کامل دیتابیس سایت با موفقیت دانلود شد.',
+    });
+  };
+
+  // ۴. بازگردانی فایل پشتیبان دیتابیس (Import JSON Backup)
+  const handleImportBackupFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const raw = ev.target?.result as string;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') {
+          throw new Error('فرمت فایل پشتیبان معتبر نیست.');
+        }
+        setIsSyncing(true);
+        const token = getAdminSessionToken();
+        const res = await apiFetch('/api/host/import-state', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+          },
+          body: JSON.stringify(parsed),
+        });
+
+        if (res.ok) {
+          await onRefreshAppData?.();
+          setFeedback({
+            type: 'success',
+            message: 'تمامی اطلاعات فایل پشتیبان با موفقیت در سرور هاست اختصاصی شما ذخیره و بارگذاری گردید.',
+          });
+        } else {
+          throw new Error('خطا در بارگذاری اطلاعات روی سرور هاست.');
+        }
+      } catch (err: any) {
+        setFeedback({
+          type: 'error',
+          message: err?.message || 'خطا در پردازش فایل پشتیبان JSON.',
+        });
+      } finally {
+        setIsSyncing(false);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const sampleEnvConfig = `# تنظیمات محیطی هاست لینوکسی سی‌پنل (.env)
+NODE_ENV=production
+PORT=3000
+APP_URL=https://yourdomain.com
+ADMIN_TOKEN_SECRET=onival_secure_hmac_secret_2025
+
+# تنظیمات ربات‌های بله و تلگرام
+TELEGRAM_BOT_TOKEN=7192837465:AAH8xK9lP2mN4vB6cX8zQ1wE3rT5yU7iO9p
+TELEGRAM_ADMIN_CHAT_ID=923387796
+BALE_API_BASE_URL=https://tapi.bale.ai
+PANEL_BASE_URL=https://yourdomain.com`;
+
+  const handleCopyEnv = () => {
+    navigator.clipboard?.writeText(sampleEnvConfig);
+    setCopiedEnv(true);
+    setTimeout(() => setCopiedEnv(false), 2500);
+  };
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+      {/* Header */}
+      <div className="p-5 sm:p-6 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 bg-gradient-to-l from-indigo-50/70 via-white to-amber-50/40">
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-md shadow-indigo-600/20 shrink-0">
+            <Server className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-base font-extrabold text-slate-800">
+                مدیریت بک‌اند و دیتابیس اختصاصی هاست لینوکس (cPanel / Node.js)
+              </h3>
+              <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-700">
+                <ShieldCheck className="w-3.5 h-3.5" />
+                مستقل از سرورهای شخص ثالث
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              تمام اطلاعات، سفارشات، محصولات، فایل‌های سئو و احراز هویت مستقیماً روی سرور و هاست خودتان مدیریت می‌شوند.
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setShowGuide(!showGuide)}
+          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer"
+        >
+          <HelpCircle className="w-4 h-4 text-indigo-600" />
+          <span>
+            {showGuide
+              ? 'بستن راهنمای استقرار در cPanel'
+              : 'مشاهده راهنمای گام‌به‌گام استقرار در cPanel'}
+          </span>
+        </button>
+      </div>
+
+      <div className="p-5 sm:p-6 space-y-6">
+        {feedback.type && (
+          <div
+            className={`p-4 rounded-xl flex items-center gap-3 text-xs sm:text-sm font-bold ${
+              feedback.type === 'success'
+                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                : 'bg-rose-50 text-rose-700 border border-rose-200'
+            }`}
+          >
+            {feedback.type === 'success' ? (
+              <CheckCircle2 className="w-5 h-5 shrink-0" />
+            ) : (
+              <AlertCircle className="w-5 h-5 shrink-0" />
+            )}
+            <span>{feedback.message}</span>
+          </div>
+        )}
+
+        {/* ۱. وضعیت ذخیره‌سازی محلی روی هاست و دکمه‌های عملیاتی */}
+        <div className="p-4 sm:p-5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h4 className="text-sm font-black text-slate-800 flex items-center gap-2">
+                <HardDrive className="w-4 h-4 text-indigo-600" />
+                <span>۱. ذخیره‌سازی دائمی دیتابیس، راه‌اندازی اولیه و پشتیبان‌گیری</span>
+              </h4>
+              <p className="text-xs text-slate-500 mt-1">
+                داده‌های سایت در فایل پایدار <code className="font-mono font-bold text-slate-700">onival-persistent-data.json</code> در ریشه هاست شما ذخیره می‌شوند و بدون نیاز به هیچ دیتابیس ابری خارجی اجرا می‌گردند:
+              </p>
+            </div>
+          </div>
+
+          {/* اطلاعات حساب ادمین پیش‌فرض */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3.5 rounded-xl bg-white border border-indigo-200/80">
+            <div className="flex items-center justify-between md:justify-start gap-2 text-xs">
+              <span className="text-slate-500 font-bold">نام کاربری ادمین پیش‌فرض:</span>
+              <code className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-800 font-mono font-bold">
+                admin
+              </code>
+            </div>
+            <div className="flex items-center justify-between md:justify-start gap-2 text-xs">
+              <span className="text-slate-500 font-bold">ایمیل ادمین پیش‌فرض:</span>
+              <code className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-800 font-mono font-bold">
+                admin@onival.com
+              </code>
+            </div>
+            <div className="flex items-center justify-between md:justify-start gap-2 text-xs">
+              <span className="text-slate-500 font-bold">رمز عبور پیش‌فرض:</span>
+              <code className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-800 font-mono font-bold">
+                admin
+              </code>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5 pt-1">
+            <button
+              type="button"
+              disabled={isSeeding}
+              onClick={() => handleSeedDatabase(false)}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white font-bold text-xs shadow-md shadow-amber-500/20 transition cursor-pointer"
+            >
+              <RefreshCw className={`w-4 h-4 ${isSeeding ? 'animate-spin' : ''}`} />
+              <span>
+                {isSeeding
+                  ? 'در حال مقداردهی اولیه داده‌ها...'
+                  : 'راه‌اندازی داده‌های اولیه محصولات و ادمین (Seed Data)'}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              disabled={isSyncing}
+              onClick={handleSyncCurrentState}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs shadow-md shadow-indigo-600/20 transition cursor-pointer"
+            >
+              <HardDrive className="w-4 h-4" />
+              <span>
+                {isSyncing
+                  ? 'در حال ذخیره‌سازی در دیسک هاست...'
+                  : 'ذخیره فوری کل اطلاعات در دیسک هاست (Save to Disk)'}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleExportFullBackup}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition cursor-pointer"
+            >
+              <CloudDownload className="w-4 h-4 text-amber-400" />
+              <span>دانلود فایل پشتیبان کامل دیتابیس (JSON Backup)</span>
+            </button>
+
+            <label className="cursor-pointer inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-bold text-xs transition">
+              <FileJson className="w-4 h-4 text-indigo-600" />
+              <span>بازگردانی فایل پشتیبان در هاست (Restore Backup)</span>
+              <input
+                type="file"
+                accept=".json,application/json"
+                onChange={handleImportBackupFile}
+                className="hidden"
+              />
+            </label>
+          </div>
+        </div>
+
+        {/* ۲. راهنمای گام‌به‌گام راه‌اندازی در cPanel */}
+        {showGuide && (
+          <div className="p-5 rounded-2xl bg-indigo-50/50 border border-indigo-200/80 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                <Layers className="w-4 h-4 text-indigo-600" />
+                <span>راهنمای راه‌اندازی پروژه روی هاست لینوکس در cPanel (بخش Setup Node.js App)</span>
+              </h4>
+              <button
+                type="button"
+                onClick={handleCopyEnv}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold cursor-pointer"
+              >
+                {copiedEnv ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>متغیرها کپی شد</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5 text-amber-400" />
+                    <span>کپی نمونه تنظیمات .env</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+              <div className="bg-white p-3.5 rounded-xl border border-indigo-100 shadow-2xs">
+                <div className="font-bold text-slate-800 mb-1 flex items-center gap-1.5">
+                  <span className="w-5 h-5 rounded-full bg-indigo-600 text-white text-[11px] flex items-center justify-center font-bold">۱</span>
+                  <span>آپلود فایل‌ها در هاست</span>
+                </div>
+                <p className="text-slate-600 text-[11px] leading-relaxed">
+                  فایل‌های پروژه را از طریق File Manager یا Git در پوشه دلخواه خود (مثلاً <code className="font-mono text-indigo-700">public_html</code> یا یک زیرپوشه) قرار دهید.
+                </p>
+              </div>
+
+              <div className="bg-white p-3.5 rounded-xl border border-indigo-100 shadow-2xs">
+                <div className="font-bold text-slate-800 mb-1 flex items-center gap-1.5">
+                  <span className="w-5 h-5 rounded-full bg-indigo-600 text-white text-[11px] flex items-center justify-center font-bold">۲</span>
+                  <span>تنظیم Setup Node.js App در cPanel</span>
+                </div>
+                <p className="text-slate-600 text-[11px] leading-relaxed">
+                  نسخه Node.js را روی 18 یا بالاتر بگذارید. فیلد Application startup file را روی <code className="font-mono text-indigo-700">dist/server.cjs</code> یا <code className="font-mono text-indigo-700">server.ts</code> قرار دهید.
+                </p>
+              </div>
+
+              <div className="bg-white p-3.5 rounded-xl border border-indigo-100 shadow-2xs">
+                <div className="font-bold text-slate-800 mb-1 flex items-center gap-1.5">
+                  <span className="w-5 h-5 rounded-full bg-indigo-600 text-white text-[11px] flex items-center justify-center font-bold">۳</span>
+                  <span>اجرای بیلد و راه‌اندازی</span>
+                </div>
+                <p className="text-slate-600 text-[11px] leading-relaxed">
+                  با دستور <code className="font-mono text-indigo-700">npm run build</code> پروژه کامپایل می‌شود و با دکمه Restart در پنل cPanel سایت فعال می‌گردد.
+                </p>
+              </div>
+            </div>
+
+            <div className="pt-2">
+              <span className="text-xs font-bold text-slate-700 block mb-1.5 flex items-center gap-1.5">
+                <Terminal className="w-4 h-4 text-slate-600" />
+                <span>نمونه فایل تنظیمات محیطی (.env) برای هاست شما:</span>
+              </span>
+              <pre
+                dir="ltr"
+                className="text-[11px] font-mono bg-slate-950 text-indigo-300 p-4 rounded-xl overflow-x-auto leading-relaxed border border-slate-800"
+              >
+                {sampleEnvConfig}
+              </pre>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};

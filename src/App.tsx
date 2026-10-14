@@ -18,12 +18,11 @@ import { ConsultationsAdminView } from './components/ConsultationsAdminView';
 import { SeoManagementView } from './components/SeoManagementView';
 import {
   apiFetch,
-  ensureFirebaseSeededOnBoot,
-  saveCloudStateToFirebase,
+  ensureHostSeededOnBoot,
   hasAdminSession,
   setAdminSessionToken,
   clearAdminSessionToken
-} from './services/firebaseSync';
+} from './services/dataService';
 import { 
   Product, 
   ProductCategory, 
@@ -124,21 +123,21 @@ export default function App() {
   useEffect(() => {
     const bootAndSeed = async () => {
       try {
-        // ۱. اجرای خودکار راه‌اندازی اولیه (Auto-Seed) روی دیتابیس فایربیس به محض لود شدن سایت
-        const cloudInit = await ensureFirebaseSeededOnBoot();
-        if (cloudInit.state && hasAdminSession()) {
+        // ۱. بررسی داده‌های اولیه و لود از هاست لینوکسی سرور
+        const hostInit = await ensureHostSeededOnBoot();
+        if (hostInit.state && hasAdminSession()) {
           try {
-            await apiFetch('/api/firebase/import-state', {
+            await apiFetch('/api/host/import-state', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(cloudInit.state),
+              body: JSON.stringify(hostInit.state),
             });
           } catch {
-            // ignore on static hosting
+            // ignore
           }
         }
       } catch (e) {
-        console.error('Firebase auto-seed check error:', e);
+        console.error('Host auto-seed check error:', e);
       } finally {
         await fetchData();
       }

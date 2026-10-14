@@ -22,8 +22,8 @@ import {
   Crop
 } from 'lucide-react';
 import { SiteContent } from '../types';
-import { FirebaseMigrationCard } from './FirebaseMigrationCard';
-import { apiFetch } from '../services/firebaseSync';
+import { HostDataManagementCard } from './HostDataManagementCard';
+import { apiFetch } from '../services/dataService';
 
 interface AccountViewProps {
   siteContent?: SiteContent;
@@ -919,8 +919,8 @@ export const AccountView: React.FC<AccountViewProps> = ({
         </form>
       </div>
 
-      {/* SECTION 3: FIREBASE SEED DATA, BACKUP & CENTRALIZED MIGRATION */}
-      <FirebaseMigrationCard onRefreshAppData={onRefreshData} />
+      {/* SECTION 3: HOST PERSISTENT STORAGE, SEED DATA & CPANEL DEPLOYMENT */}
+      <HostDataManagementCard onRefreshAppData={onRefreshData} />
     </div>
   );
 };

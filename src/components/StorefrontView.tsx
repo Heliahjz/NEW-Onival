@@ -41,7 +41,7 @@ import {
   XCircle
 } from 'lucide-react';
 import { Product, ProductCategory, Post, ContactMessage, Order, OrderItem, ProductSize, SiteContent, PaymentConfig } from '../types';
-import { apiFetch, setAdminSessionToken } from '../services/firebaseSync';
+import { apiFetch, setAdminSessionToken } from '../services/dataService';
 import {
   resolveSeoForPath,
   applyClientDocumentSeo,

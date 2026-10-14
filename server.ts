@@ -884,24 +884,7 @@ function isRequestAdminAuthorized(req: Request): boolean {
   const expectedPrimary = generateAdminSessionToken(validUser, validPass);
   const expectedEmail = generateAdminSessionToken(validEmail, validPass);
 
-  if (token === expectedPrimary || token === expectedEmail) return true;
-
-  if (token.startsWith('sb_admin_')) {
-    try {
-      const decoded = Buffer.from(token.slice('sb_admin_'.length), 'base64').toString('utf8');
-      const [u, p] = decoded.split(':');
-      if (
-        (u === validUser || u === validEmail || u === 'admin' || u === 'admin@onival.com') &&
-        (p === validPass || p === 'admin')
-      ) {
-        return true;
-      }
-    } catch {
-      return false;
-    }
-  }
-
-  return false;
+  return token === expectedPrimary || token === expectedEmail;
 }
 
 function requireAdminAuth(req: Request, res: Response, next: NextFunction) {
@@ -2871,8 +2854,8 @@ app.delete('/api/seo/redirects', (req: Request, res: Response) => {
   res.json({ ok: true, slugRedirects });
 });
 
-// ================= FIREBASE CLOUD SYNC & SEED ENDPOINTS =================
-app.get('/api/firebase/export-state', (req: Request, res: Response) => {
+// ================= HOST SERVER PERSISTENT STATE SYNC & SEED ENDPOINTS =================
+const handleExportHostState = (req: Request, res: Response) => {
   res.json({
     products,
     productCategories,
@@ -2886,9 +2869,9 @@ app.get('/api/firebase/export-state', (req: Request, res: Response) => {
     adminCredentials,
     slugRedirects
   });
-});
+};
 
-app.post('/api/firebase/import-state', (req: Request, res: Response) => {
+const handleImportHostState = (req: Request, res: Response) => {
   const incoming = req.body;
   if (!incoming || typeof incoming !== 'object') {
     return res.status(400).json({ error: 'داده‌های ارسالی نامعتبر است' });
@@ -2927,8 +2910,15 @@ app.post('/api/firebase/import-state', (req: Request, res: Response) => {
     slugRedirects = incoming.slugRedirects;
   }
   savePersistedState();
-  res.json({ ok: true, message: 'دیتابیس سرور با موفقیت از Firebase Firestore همگام‌سازی شد.' });
-});
+  res.json({ ok: true, message: 'دیتابیس سرور هاست اختصاصی با موفقیت به‌روزرسانی و در فایل onival-persistent-data.json ذخیره شد.' });
+};
+
+app.get('/api/host/export-state', handleExportHostState);
+app.post('/api/host/import-state', handleImportHostState);
+
+// Compatibility aliases
+app.get('/api/firebase/export-state', handleExportHostState);
+app.post('/api/firebase/import-state', handleImportHostState);
 
 // ================= TECHNICAL SEO: ROBOTS.TXT & SITEMAP.XML =================
 function getRequestOrigin(req: Request): string {

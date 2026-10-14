@@ -26,7 +26,7 @@ import {
   generateSitemapXml,
   generateRobotsTxt
 } from '../utils/seo';
-import { apiFetch } from '../services/firebaseSync';
+import { apiFetch } from '../services/dataService';
 
 interface SeoManagementViewProps {
   products: Product[];
