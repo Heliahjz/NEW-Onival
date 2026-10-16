@@ -27,7 +27,7 @@ import { apiFetch } from '../services/dataService';
 
 interface AccountViewProps {
   siteContent?: SiteContent;
-  onUpdateSiteContent?: (updated: SiteContent) => Promise<boolean> | void;
+  onUpdateSiteContent?: (updated: SiteContent) => Promise<boolean | void> | void;
   onRefreshData?: () => Promise<void> | void;
 }
 
@@ -57,6 +57,23 @@ export const AccountView: React.FC<AccountViewProps> = ({
   const [logoUploadError, setLogoUploadError] = useState('');
   const [isSavingLogo, setIsSavingLogo] = useState(false);
   const [logoSuccessMsg, setLogoSuccessMsg] = useState('');
+
+  // Global Product Image Frame & Zoom Settings
+  const [globalAspectRatio, setGlobalAspectRatio] = useState<'square' | 'portrait' | 'wide' | 'auto'>(
+    siteContent?.productImageSettings?.aspectRatio || 'square'
+  );
+  const [globalFitMode, setGlobalFitMode] = useState<'cover' | 'contain'>(
+    siteContent?.productImageSettings?.fitMode || 'cover'
+  );
+  const [globalZoomLevel, setGlobalZoomLevel] = useState<number>(
+    siteContent?.productImageSettings?.zoomLevel || 2
+  );
+  const [globalZoomEnabled, setGlobalZoomEnabled] = useState<boolean>(
+    siteContent?.productImageSettings?.zoomEnabled !== false
+  );
+  const [isSavingImageSettings, setIsSavingImageSettings] = useState(false);
+  const [imageSettingsSuccessMsg, setImageSettingsSuccessMsg] = useState('');
+  const [imageSettingsError, setImageSettingsError] = useState('');
 
   // Credentials status state
   const [status, setStatus] = useState<{ type: 'success' | 'error' | null; message: string }>({
@@ -95,11 +112,26 @@ export const AccountView: React.FC<AccountViewProps> = ({
     if (siteContent?.siteLogoScale) {
       setSiteLogoScale(siteContent.siteLogoScale);
     }
+    if (siteContent?.productImageSettings) {
+      if (siteContent.productImageSettings.aspectRatio) {
+        setGlobalAspectRatio(siteContent.productImageSettings.aspectRatio);
+      }
+      if (siteContent.productImageSettings.fitMode) {
+        setGlobalFitMode(siteContent.productImageSettings.fitMode);
+      }
+      if (siteContent.productImageSettings.zoomLevel) {
+        setGlobalZoomLevel(siteContent.productImageSettings.zoomLevel);
+      }
+      if (siteContent.productImageSettings.zoomEnabled !== undefined) {
+        setGlobalZoomEnabled(siteContent.productImageSettings.zoomEnabled);
+      }
+    }
   }, [
     siteContent?.siteLogo,
     siteContent?.siteLogoFit,
     siteContent?.siteLogoShape,
-    siteContent?.siteLogoScale
+    siteContent?.siteLogoScale,
+    siteContent?.productImageSettings
   ]);
 
   // Helper: Automatically trim excess transparent or uniform white margins from uploaded logo
@@ -293,6 +325,45 @@ export const AccountView: React.FC<AccountViewProps> = ({
       setLogoUploadError('خطا در برقراری ارتباط با سرور.');
     } finally {
       setIsSavingLogo(false);
+    }
+  };
+
+  // Save Global Product Image Frame & Zoom Settings
+  const handleSaveImageSettings = async () => {
+    setImageSettingsSuccessMsg('');
+    setImageSettingsError('');
+    setIsSavingImageSettings(true);
+    try {
+      const updatedSettings = {
+        aspectRatio: globalAspectRatio,
+        fitMode: globalFitMode,
+        zoomLevel: Number(globalZoomLevel) || 2,
+        zoomEnabled: globalZoomEnabled,
+        borderRadius: 'normal' as const
+      };
+      const res = await apiFetch('/api/site-content', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productImageSettings: updatedSettings
+        })
+      });
+
+      if (res.ok) {
+        if (siteContent && onUpdateSiteContent) {
+          await onUpdateSiteContent({
+            ...siteContent,
+            productImageSettings: updatedSettings
+          });
+        }
+        setImageSettingsSuccessMsg('تنظیمات کادر عکس‌های محصول و میزان زوم با موفقیت ذخیره شد و در سراسر فروشگاه اعمال گردید.');
+      } else {
+        setImageSettingsError('خطا در ذخیره‌سازی تنظیمات تصاویر در سرور.');
+      }
+    } catch {
+      setImageSettingsError('خطا در برقراری ارتباط با سرور.');
+    } finally {
+      setIsSavingImageSettings(false);
     }
   };
 
@@ -750,7 +821,134 @@ export const AccountView: React.FC<AccountViewProps> = ({
         </div>
       </div>
 
-      {/* SECTION 2: ADMIN LOGIN USERNAME & PASSWORD */}
+      {/* SECTION 2: GLOBAL PRODUCT IMAGE FRAME & ZOOM SETTINGS */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+        <div className="p-5 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center shrink-0">
+              <ZoomIn className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-extrabold text-slate-800">
+                تنظیمات کادر عکس‌های محصول و قدرت بزرگ‌نمایی و زوم (سراسری)
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                تعیین نسبت ابعاد پیش‌فرض کارت‌ها، نحوه قرارگیری عکس در کادر (Fit Mode) و ضریب ذره‌بین برای تمام محصولات
+              </p>
+            </div>
+          </div>
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200">
+            ضریب فعلی: {globalZoomLevel}x
+          </span>
+        </div>
+
+        <div className="p-5 sm:p-6 space-y-6">
+          {imageSettingsError && (
+            <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{imageSettingsError}</span>
+            </div>
+          )}
+
+          {imageSettingsSuccessMsg && (
+            <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              <span>{imageSettingsSuccessMsg}</span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            {/* 1. Aspect Ratio */}
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-slate-700">
+                نسبت ابعاد کادر تصویر (Aspect Ratio):
+              </label>
+              <select
+                value={globalAspectRatio}
+                onChange={(e) => setGlobalAspectRatio(e.target.value as any)}
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:border-amber-500 outline-none"
+              >
+                <option value="square">مربع ۱:۱ (پیشنهادی فروشگاهی - کادر یکدست)</option>
+                <option value="portrait">عمودی ۴:۵ (پرتره کشیده مناسب شیشه عسل و بطری)</option>
+                <option value="wide">عریض ۱۶:۹ (افقی و سینمایی)</option>
+                <option value="auto">طبیعی و آزاد (ارتفاع استاندارد)</option>
+              </select>
+              <p className="text-[11px] text-slate-500">
+                این نسبت در کارت‌های صفحه اصلی، کاتالوگ و گالری اختصاصی محصولات اعمال می‌شود.
+              </p>
+            </div>
+
+            {/* 2. Fit Mode */}
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-slate-700">
+                حالت جاگیری عکس در کادر (Fit Mode):
+              </label>
+              <select
+                value={globalFitMode}
+                onChange={(e) => setGlobalFitMode(e.target.value as any)}
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:border-amber-500 outline-none"
+              >
+                <option value="cover">Cover (پر کردن تمام کادر بدون حاشیه خالی)</option>
+                <option value="contain">Contain (نمایش کامل بدون برش با پس‌زمینه)</option>
+              </select>
+              <p className="text-[11px] text-slate-500">
+                در حالت Cover تمام کادر محصول پر می‌شود و در حالت Contain تمام لبه‌های تصویر دیده می‌شود.
+              </p>
+            </div>
+
+            {/* 3. Zoom Factor */}
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-slate-700 flex items-center justify-between">
+                <span>قدرت زوم ذره‌بین و لایت‌باکس:</span>
+                <span className="text-amber-600 font-black">{globalZoomLevel}x برابر</span>
+              </label>
+              <div className="grid grid-cols-4 gap-1.5 p-1 bg-slate-100 rounded-xl">
+                {[1.5, 2, 2.5, 3].map((lvl) => (
+                  <button
+                    key={lvl}
+                    type="button"
+                    onClick={() => setGlobalZoomLevel(lvl)}
+                    className={`py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+                      globalZoomLevel === lvl
+                        ? 'bg-white text-slate-900 shadow-sm font-black'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {lvl}x
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-slate-500">
+                هنگامی که مشتری ماوس را روی تصویر حرکت می‌دهد یا لایت‌باکس را باز می‌کند، با این ضریب بزرگنمایی می‌شود.
+              </p>
+            </div>
+          </div>
+
+          <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-100">
+            <label className="inline-flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={globalZoomEnabled}
+                onChange={(e) => setGlobalZoomEnabled(e.target.checked)}
+                className="w-4 h-4 rounded text-amber-600 accent-amber-600 cursor-pointer"
+              />
+              <span>فعال بودن قابلیت ذره‌بین تعاملی روی تصاویر محصولات</span>
+            </label>
+
+            <button
+              type="button"
+              disabled={isSavingImageSettings}
+              onClick={handleSaveImageSettings}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white font-bold text-xs shadow-sm transition cursor-pointer self-end sm:self-auto"
+            >
+              <Save className="w-4 h-4 text-amber-400" />
+              <span>{isSavingImageSettings ? 'در حال ذخیره‌سازی...' : 'ذخیره تنظیمات کادر و زوم عکس‌ها'}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* SECTION 3: ADMIN LOGIN USERNAME & PASSWORD */}
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
         <div className="p-5 sm:p-6 border-b border-slate-100 flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center shrink-0">

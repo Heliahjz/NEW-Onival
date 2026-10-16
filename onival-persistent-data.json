@@ -386,7 +386,7 @@
   "telegramConfig": {
     "botToken": "1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34",
     "adminChatId": "923387796",
-    "botUsername": "onival_bot",
+    "botUsername": "Onivalbot",
     "baseUrl": "https://tapi.bale.ai",
     "panelBaseUrl": "http://localhost:3000",
     "antiSpamSeconds": 5,
@@ -394,7 +394,7 @@
     "baleEnabled": true,
     "baleBotToken": "1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34",
     "baleAdminChatId": "923387796",
-    "baleBotUsername": "onival_bot",
+    "baleBotUsername": "Onivalbot",
     "baleBaseUrl": "https://tapi.bale.ai",
     "baleWebhookUrl": "",
     "telegramEnabled": true,
@@ -431,7 +431,13 @@
     "welcomeTemplate": "به ربات رسمی فروشگاه تخصصی اونیوال (ONIVAL) خوش آمدید! 🍯\nاز طریق این ربات می‌توانید فاکتورهای خود را پرداخت کنید و وضعیت سفارش را لحظه‌ای پیگیری نمایید.",
     "orderInvoiceTemplate": "🧾 فاکتور جدید #{trackingCode}\n👤 مشتری: {customerName}\n📞 تماس: {phone}\n💳 مبلغ کل: {amount} تومان\n📍 آدرس: {address}",
     "receiptApprovedTemplate": "✅ فیش واریزی سفارش #{trackingCode} توسط مدیریت تایید شد و مرسوله شما وارد مرحله بسته‌بندی و ارسال گردید.",
-    "supportReplyTemplate": "💬 پاسخ پشتیبانی اونیوال به پیام #{trackingCode}:\n{response}"
+    "supportReplyTemplate": "💬 پاسخ پشتیبانی اونیوال به پیام #{trackingCode}:\n{response}",
+    "baleAdminUsername": "@hasti_hjz",
+    "balePaymentMode": "live",
+    "balePaymentTokenLive": "WALLET-v5gqSc1W1kaBUo2B",
+    "balePaymentTokenTest": "WALLET-TEST-1111111111111111",
+    "baleAutoNotifyAdminAllTransactions": true,
+    "baleAutoSendInvoice": true
   },
   "siteContent": {
     "brandName": "اونیوال",
@@ -544,13 +550,15 @@
       "gatewayOfflineNoticeTitle": "اطلاعیه همراهان گرامی درباره نحوه پرداخت",
       "gatewayOfflineNoticeText": "همراه گرامی و ارجمند، به دلیل بروزرسانی فنی زیرساخت شبکه بانکی، پرداخت مستقیم از طریق درگاه اینترنتی در حال حاضر به صورت موقت قطع می‌باشد. ضمن پوزش از شما و قدردانی از همراهی و شکیبایی ارزشمندتان، می‌توانید مبلغ فاکتور را با اطمینان کامل به صورت «کارت به کارت» واریز نموده و تصویر فیش را در همین صفحه بارگذاری فرمایید تا سفارش شما بدون هیچ‌گونه تاخیری و در اولویت ویژه آماده و ارسال گردد.",
       "baleBotEnabled": true,
-      "baleBotButtonText": "اتصال به ربات بله و پرداخت فاکتور (@onival_bot)",
+      "baleBotButtonText": "اتصال به ربات بله و پرداخت فاکتور (@Onivalbot)",
       "gatewayEnabled": false,
       "gatewayTitle": "پرداخت آنلاین از طریق درگاه بانکی شاپرک",
       "gatewayUrl": "https://zarinp.al/onival",
       "gatewayMerchantCode": "ONIVAL-MERCHANT-982410",
       "gatewayDescription": "پرداخت آنی و امن با کلیه کارت‌های بانکی عضو شبکه شتاب و رمز دوم پویا",
-      "defaultMethod": "card_to_card"
+      "defaultMethod": "card_to_card",
+      "baleBotUsername": "Onivalbot",
+      "baleBotDescription": "اتصال مستقیم به بازوی رسمی بله (@Onivalbot) و دریافت پیش‌فاکتور با امکان پرداخت آنی با کیف پول بله یا کارت به کارت."
     },
     "consultationConfig": {
       "basePrice": 120000,

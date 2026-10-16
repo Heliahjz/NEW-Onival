@@ -248,11 +248,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Footer Info */}
         <div className="p-4 border-t border-slate-800 text-xs text-slate-400">
           <div className="flex items-center justify-between">
-            <span>نسخه اپلت:</span>
-            <span className="font-mono text-slate-300">v1.0.0 (Node.js)</span>
+            <span>سامانه فروشگاه:</span>
+            <span className="font-mono text-amber-400 font-bold">{brandEnglishName || 'ONIVAL'} Core</span>
           </div>
           <div className="mt-1 text-[11px] text-slate-400">
-            مهاجرت مستقیم از مخزن Onival
+            نسخه پایدار ۲.۴ • اتصال به سرور هاست و بات بله
           </div>
         </div>
       </aside>

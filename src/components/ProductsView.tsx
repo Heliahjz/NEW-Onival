@@ -15,6 +15,11 @@ import {
   Package,
   X,
   Image as ImageIcon,
+  Images,
+  Video,
+  Film,
+  ZoomIn,
+  Star,
   ListPlus,
   Upload,
   Check,
@@ -23,7 +28,10 @@ import {
   Globe,
   Eye,
   EyeOff,
-  AlertCircle
+  AlertCircle,
+  Sliders,
+  MoveRight,
+  MoveLeft
 } from 'lucide-react';
 import { sanitizeSlug, isSlugDuplicate } from '../utils/seo';
 
@@ -71,7 +79,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [formError, setFormError] = useState('');
-  const [activeModalTab, setActiveModalTab] = useState<'general' | 'seo'>('general');
+  const [activeModalTab, setActiveModalTab] = useState<'general' | 'media' | 'seo'>('general');
 
   // Form states
   const [title, setTitle] = useState('');
@@ -87,6 +95,13 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
   const [productCategoryId, setProductCategoryId] = useState<number>(categories[0]?.id || 1);
   const [imageName, setImageName] = useState('');
   const [imageAlt, setImageAlt] = useState('');
+  const [images, setImages] = useState<string[]>([]);
+  const [newImageInput, setNewImageInput] = useState('');
+  const [videoUrl, setVideoUrl] = useState('');
+  const [videoType, setVideoType] = useState<'direct' | 'aparat' | 'youtube'>('direct');
+  const [imageAspectRatio, setImageAspectRatio] = useState<'square' | 'portrait' | 'wide' | 'auto'>('square');
+  const [imageFitMode, setImageFitMode] = useState<'cover' | 'contain'>('cover');
+  const [imageZoomLevel, setImageZoomLevel] = useState<number>(2);
   const [discountPercent, setDiscountPercent] = useState<number>(0);
   const [isAmazingOffer, setIsAmazingOffer] = useState<boolean>(false);
 
@@ -119,8 +134,16 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
     setShortDescription('');
     setDescription('');
     setProductCategoryId(categories[0]?.id || 1);
-    setImageName(PRESET_PRODUCT_IMAGES[0].url);
+    const defaultCover = PRESET_PRODUCT_IMAGES[0].url;
+    setImageName(defaultCover);
     setImageAlt('');
+    setImages([defaultCover]);
+    setNewImageInput('');
+    setVideoUrl('');
+    setVideoType('direct');
+    setImageAspectRatio('square');
+    setImageFitMode('cover');
+    setImageZoomLevel(2);
     setDiscountPercent(0);
     setIsAmazingOffer(false);
     setStatus('published');
@@ -162,8 +185,21 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
     setShortDescription(product.shortDescription || product.description || '');
     setDescription(product.content || product.description || '');
     setProductCategoryId(product.categoryId ?? product.productCategoryId ?? (categories[0]?.id || 1));
-    setImageName(product.imageName || PRESET_PRODUCT_IMAGES[0].url);
+    const cover = product.imageName || PRESET_PRODUCT_IMAGES[0].url;
+    setImageName(cover);
     setImageAlt(product.imageAlt || `${product.title} - فروشگاه اونیوال`);
+
+    const currentImages = Array.isArray(product.images) && product.images.length > 0
+      ? product.images
+      : [cover];
+    setImages(currentImages);
+    setNewImageInput('');
+    setVideoUrl(product.videoUrl || '');
+    setVideoType(product.videoType || 'direct');
+    setImageAspectRatio(product.imageAspectRatio || 'square');
+    setImageFitMode(product.imageFitMode || 'cover');
+    setImageZoomLevel(product.imageZoomLevel || 2);
+
     setDiscountPercent(product.discount ?? product.discountPercent ?? 0);
     setIsAmazingOffer(Boolean(product.isAmazingOffer || (product.discount ?? 0) > 0));
     setStatus(product.status || 'published');
@@ -187,10 +223,96 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === 'string') {
-        setImageName(reader.result);
+        const url = reader.result;
+        setImageName(url);
+        if (!images.includes(url)) {
+          setImages([url, ...images]);
+        }
       }
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleMultipleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    files.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          const url = reader.result;
+          setImages((prev) => {
+            if (prev.includes(url)) return prev;
+            return [...prev, url];
+          });
+          setImageName((curr) => curr || url);
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = '';
+  };
+
+  const handleAddImageByUrl = () => {
+    const trimmed = newImageInput.trim();
+    if (!trimmed) return;
+    if (!images.includes(trimmed)) {
+      setImages([...images, trimmed]);
+      if (!imageName) setImageName(trimmed);
+    }
+    setNewImageInput('');
+  };
+
+  const handleRemoveImage = (indexToRemove: number) => {
+    const removedUrl = images[indexToRemove];
+    const nextImages = images.filter((_, idx) => idx !== indexToRemove);
+    setImages(nextImages);
+    if (imageName === removedUrl) {
+      setImageName(nextImages[0] || PRESET_PRODUCT_IMAGES[0].url);
+    }
+  };
+
+  const handleSetAsCover = (url: string) => {
+    setImageName(url);
+  };
+
+  const handleMoveImage = (index: number, direction: 'up' | 'down') => {
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= images.length) return;
+    const reordered = [...images];
+    const [moved] = reordered.splice(index, 1);
+    reordered.splice(targetIndex, 0, moved);
+    setImages(reordered);
+  };
+
+  const handleVideoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 80 * 1024 * 1024) {
+      setFormError('حجم فایل ویدیو حداکثر می‌تواند ۸۰ مگابایت باشد.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setVideoUrl(reader.result);
+        setVideoType('direct');
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleVideoUrlChange = (val: string) => {
+    const trimmed = val.trim();
+    setVideoUrl(trimmed);
+    if (trimmed.includes('aparat.com')) {
+      setVideoType('aparat');
+    } else if (trimmed.includes('youtube.com') || trimmed.includes('youtu.be')) {
+      setVideoType('youtube');
+    } else {
+      setVideoType('direct');
+    }
   };
 
   const handleAddSizeRow = () => {
@@ -236,6 +358,12 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
     const resolvedShortDesc = shortDescription.trim() || `${title.trim()} با تضمین اصالت و کیفیت آزمایشگاهی`;
     const resolvedFullContent = description.trim() || resolvedShortDesc || title.trim();
 
+    const resolvedCover = imageName.trim() || images[0] || PRESET_PRODUCT_IMAGES[0].url;
+    const resolvedImages = images.length > 0 ? images : [resolvedCover];
+    if (!resolvedImages.includes(resolvedCover)) {
+      resolvedImages.unshift(resolvedCover);
+    }
+
     const payload: Partial<Product> = {
       title: title.trim(),
       slug: candidateSlug,
@@ -249,8 +377,14 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
       content: resolvedFullContent,
       categoryId: Number(productCategoryId),
       productCategoryId: Number(productCategoryId),
-      imageName: imageName.trim() || PRESET_PRODUCT_IMAGES[0].url,
+      imageName: resolvedCover,
       imageAlt: imageAlt.trim() || `${title.trim()} - فروشگاه تخصصی اونیوال`,
+      images: resolvedImages,
+      videoUrl: videoUrl.trim() || undefined,
+      videoType: videoUrl.trim() ? videoType : undefined,
+      imageAspectRatio,
+      imageFitMode,
+      imageZoomLevel: Number(imageZoomLevel) || 2,
       discount: resolvedDiscount,
       discountPercent: resolvedDiscount,
       isAmazingOffer,
@@ -513,29 +647,42 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
             </div>
 
             {/* Modal Tabs */}
-            <div className="flex items-center gap-2 mt-4 bg-slate-100 p-1 rounded-xl">
+            <div className="flex items-center gap-1.5 mt-4 bg-slate-100 p-1.5 rounded-xl">
               <button
                 type="button"
                 onClick={() => setActiveModalTab('general')}
-                className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition ${
+                className={`flex-1 py-2 px-2.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
                   activeModalTab === 'general'
                     ? 'bg-white text-slate-900 shadow-sm'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                ۱. مشخصات، قیمت و تصویر محصول
+                <Package className="w-3.5 h-3.5" />
+                ۱. مشخصات و قیمت
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveModalTab('media')}
+                className={`flex-1 py-2 px-2.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                  activeModalTab === 'media'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Images className="w-3.5 h-3.5" />
+                ۲. چند عکس، ویدیو و زوم ({images.length} عکس{videoUrl ? ' + ویدیو' : ''})
               </button>
               <button
                 type="button"
                 onClick={() => setActiveModalTab('seo')}
-                className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                className={`flex-1 py-2 px-2.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
                   activeModalTab === 'seo'
                     ? 'bg-emerald-600 text-white shadow-sm'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
                 <Globe className="w-3.5 h-3.5" />
-                ۲. تنظیمات سئو، اسلاگ، وضعیت انتشار و اسکیما
+                ۳. تنظیمات سئو و انتشار
               </button>
             </div>
 
@@ -583,94 +730,36 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                     </div>
                   </div>
 
-                  {/* Image Selection & Upload */}
-                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-3">
-                    <label className="block text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                      <ImageIcon className="w-4 h-4 text-blue-600" />
-                      تصویر اصلی و متن جایگزین (Image Alt برای سئو تصاویر گوگل)
-                    </label>
-
-                    <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
-                      <div className="w-20 h-20 rounded-xl overflow-hidden bg-slate-200 border border-slate-300 shrink-0">
+                  {/* Quick Cover Preview Banner with Media Tab Shortcut */}
+                  <div className="p-4 bg-blue-50/70 rounded-2xl border border-blue-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-14 h-14 rounded-xl bg-slate-200 border border-slate-300 overflow-hidden shrink-0">
                         {imageName ? (
-                          <img
-                            src={imageName}
-                            alt={imageAlt || title || 'Preview'}
-                            className="w-full h-full object-cover"
-                          />
+                          <img src={imageName} alt="کاور اصلی" className="w-full h-full object-cover" />
                         ) : (
-                          <div className="w-full h-full flex items-center justify-center text-slate-400 text-xs">
+                          <div className="w-full h-full flex items-center justify-center text-slate-400 text-[10px]">
                             بدون عکس
                           </div>
                         )}
                       </div>
-
-                      <div className="flex-1 w-full space-y-2">
-                        <input
-                          type="text"
-                          value={imageName}
-                          onChange={(e) => setImageName(e.target.value)}
-                          dir="ltr"
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                          placeholder="لینک مستقیم تصویر (https://...)"
-                        />
-                        <input
-                          type="text"
-                          value={imageAlt}
-                          onChange={(e) => setImageAlt(e.target.value)}
-                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-                          placeholder="متن جایگزین تصویر (Alt Text) - مثلاً: شیشه عسل طبیعی کوهستان سبلان اونیوال"
-                        />
-
-                        <div className="flex flex-wrap items-center gap-2">
-                          <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-medium cursor-pointer transition-colors">
-                            <Upload className="w-3.5 h-3.5" />
-                            آپلود عکس از سیستم
-                            <input
-                              type="file"
-                              accept="image/*"
-                              onChange={handleImageFileUpload}
-                              className="hidden"
-                            />
-                          </label>
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-blue-950 flex items-center gap-1.5">
+                          <Images className="w-4 h-4 text-blue-600" />
+                          <span>گالری تصاویر و ویدیو ({images.length} تصویر {videoUrl ? '• ۱ ویدیو' : ''})</span>
                         </div>
+                        <p className="text-[11px] text-blue-800/80 mt-0.5">
+                          برای آپلود چند عکس همزمان، ویدیو و تنظیم کادر و زوم به تب دوم بروید.
+                        </p>
                       </div>
                     </div>
 
-                    <div className="pt-1">
-                      <span className="block text-[11px] text-slate-500 mb-1.5">
-                        یا انتخاب سریع از تصاویر آماده:
-                      </span>
-                      <div className="flex items-center gap-2 overflow-x-auto pb-1">
-                        {PRESET_PRODUCT_IMAGES.map((preset, idx) => {
-                          const isSelected = imageName === preset.url;
-                          return (
-                            <button
-                              key={idx}
-                              type="button"
-                              onClick={() => setImageName(preset.url)}
-                              className={`relative w-14 h-14 rounded-lg overflow-hidden border-2 transition-all shrink-0 ${
-                                isSelected
-                                  ? 'border-blue-600 scale-105 shadow-sm'
-                                  : 'border-transparent opacity-75 hover:opacity-100'
-                              }`}
-                              title={preset.label}
-                            >
-                              <img
-                                src={preset.url}
-                                alt={preset.label}
-                                className="w-full h-full object-cover"
-                              />
-                              {isSelected && (
-                                <div className="absolute inset-0 bg-blue-600/30 flex items-center justify-center">
-                                  <Check className="w-4 h-4 text-white" />
-                                </div>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setActiveModalTab('media')}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shrink-0 cursor-pointer text-center"
+                    >
+                      مدیریت گالری، ویدیو و زوم (تب ۲)
+                    </button>
                   </div>
 
                   {/* Category & Stock Availability */}
@@ -863,20 +952,356 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                       placeholder="خلاصه یک خطی از ویژگی‌های محصول..."
                     />
                   </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                      توضیحات کامل و تخصصی محصول (محتوای اصلی صفحه محصول برای کاربران و گوگل)
-                    </label>
-                    <textarea
-                      rows={4}
-                      value={description}
-                      onChange={(e) => setDescription(e.target.value)}
-                      className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                      placeholder="توضیحات کامل درباره خواص، نحوه مصرف، ساکارز و تضمین آزمایشگاهی..."
-                    />
-                  </div>
                 </>
+              ) : activeModalTab === 'media' ? (
+                /* ================= TAB 2: MULTI-IMAGE, VIDEO & ZOOM SETTINGS ================= */
+                <div className="space-y-6 animate-fadeIn">
+                  {/* 1. Multiple Images Gallery Section */}
+                  <div className="p-4 sm:p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-200">
+                      <div>
+                        <div className="text-sm font-black text-slate-900 flex items-center gap-2">
+                          <Images className="w-4 h-4 text-blue-600" />
+                          <span>گالری عکس‌های محصول (آپلود چند عکس)</span>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          می‌توانید چندین تصویر باکیفیت از زاویه‌ها، بسته‌بندی و جزئیات محصول قرار دهید. عکسی که دارای ستاره طلایی است، کاور اصلی محصول خواهد بود.
+                        </p>
+                      </div>
+
+                      <span className="px-3 py-1 rounded-full bg-blue-100 text-blue-800 text-xs font-bold self-start sm:self-auto">
+                        {images.length} تصویر
+                      </span>
+                    </div>
+
+                    {/* Image Actions: Multi-File Upload & URL Adder */}
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <label className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold cursor-pointer transition shadow-xs shrink-0">
+                        <Upload className="w-4 h-4" />
+                        <span>آپلود چند عکس همزمان از کامپیوتر</span>
+                        <input
+                          type="file"
+                          multiple
+                          accept="image/*"
+                          onChange={handleMultipleImageUpload}
+                          className="hidden"
+                        />
+                      </label>
+
+                      <div className="flex-1 flex gap-2">
+                        <input
+                          type="text"
+                          value={newImageInput}
+                          onChange={(e) => setNewImageInput(e.target.value)}
+                          placeholder="افزودن با آدرس اینترنتی عکس (https://...)"
+                          dir="ltr"
+                          className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500/20"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleAddImageByUrl}
+                          disabled={!newImageInput.trim()}
+                          className="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition shrink-0 cursor-pointer"
+                        >
+                          افزودن
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Thumbnails Grid with Star / Reorder / Delete */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+                      {images.map((imgUrl, idx) => {
+                        const isCover = imageName === imgUrl;
+                        return (
+                          <div
+                            key={idx}
+                            className={`group relative rounded-2xl overflow-hidden border-2 bg-white transition shadow-xs ${
+                              isCover ? 'border-amber-500 ring-2 ring-amber-400/20' : 'border-slate-200 hover:border-slate-300'
+                            }`}
+                          >
+                            <div className="aspect-square w-full overflow-hidden bg-slate-100 relative">
+                              <img src={imgUrl} alt={`عکس ${idx + 1}`} className="w-full h-full object-cover" />
+                              <div className="absolute top-2 right-2 bg-black/60 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-md">
+                                #{idx + 1}
+                              </div>
+
+                              {isCover && (
+                                <div className="absolute bottom-2 right-2 left-2 bg-amber-500 text-stone-950 text-[10px] font-black px-2 py-1 rounded-lg text-center flex items-center justify-center gap-1 shadow-md">
+                                  <Star className="w-3 h-3 fill-current" />
+                                  <span>کاور اصلی</span>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="p-2 bg-white flex items-center justify-between gap-1 border-t border-slate-100">
+                              {!isCover ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSetAsCover(imgUrl)}
+                                  className="text-[10px] font-bold text-slate-600 hover:text-amber-700 flex items-center gap-1 p-1 rounded-md hover:bg-amber-50 transition cursor-pointer"
+                                  title="انتخاب به عنوان کاور اصلی"
+                                >
+                                  <Star className="w-3.5 h-3.5" />
+                                  <span>انتخاب کاور</span>
+                                </button>
+                              ) : (
+                                <span className="text-[10px] font-black text-amber-600">کاور فعال</span>
+                              )}
+
+                              <div className="flex items-center gap-1">
+                                {idx > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMoveImage(idx, 'up')}
+                                    className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
+                                    title="حرکت به راست"
+                                  >
+                                    <MoveRight className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                                {idx < images.length - 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMoveImage(idx, 'down')}
+                                    className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
+                                    title="حرکت به چپ"
+                                  >
+                                    <MoveLeft className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveImage(idx)}
+                                  className="p-1 rounded text-rose-500 hover:bg-rose-50 hover:text-rose-700 transition cursor-pointer"
+                                  title="حذف این تصویر"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Presets Quick Picker */}
+                    <div className="pt-2 border-t border-slate-200/80">
+                      <span className="block text-[11px] text-slate-500 mb-1.5 font-bold">
+                        یا افزودن سریع از تصاویر آماده عسل و فرآورده‌های طبیعی:
+                      </span>
+                      <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                        {PRESET_PRODUCT_IMAGES.map((preset, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => {
+                              if (!images.includes(preset.url)) {
+                                setImages([...images, preset.url]);
+                              }
+                              if (!imageName) setImageName(preset.url);
+                            }}
+                            className="relative w-14 h-14 rounded-xl overflow-hidden border border-slate-200 hover:border-blue-500 transition shrink-0 cursor-pointer group"
+                            title={`افزودن ${preset.label}`}
+                          >
+                            <img src={preset.url} alt={preset.label} className="w-full h-full object-cover" />
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-[10px] font-bold transition">
+                              + افزودن
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Alt Text for Google Images SEO */}
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        متن جایگزین عکس اصلی (Image Alt Text برای سئو تصاویر گوگل):
+                      </label>
+                      <input
+                        type="text"
+                        value={imageAlt}
+                        onChange={(e) => setImageAlt(e.target.value)}
+                        placeholder="مثال: شیشه عسل خالص کوهستان سبلان ۱۰۰۰ گرمی اونیوال"
+                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500/20"
+                      />
+                    </div>
+                  </div>
+
+                  {/* 2. Product Video Section */}
+                  <div className="p-4 sm:p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-200">
+                      <div>
+                        <div className="text-sm font-black text-slate-900 flex items-center gap-2">
+                          <Video className="w-4 h-4 text-emerald-600" />
+                          <span>ویدیو محصول (تیزر معرفی، ویدیو تبلیغاتی یا بررسی تصویری)</span>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          امکان آپلود مستقیم ویدیو یا قراردادن لینک ویدیو از آپارات، یوتیوب یا لینک فایل MP4
+                        </p>
+                      </div>
+
+                      {videoUrl && (
+                        <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold flex items-center gap-1">
+                          <Film className="w-3.5 h-3.5" />
+                          <span>دارای ویدیو</span>
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="sm:col-span-2 space-y-2">
+                        <label className="block text-xs font-bold text-slate-700">
+                          لینک ویدیو یا کد Embed آپارات / یوتیوب:
+                        </label>
+                        <input
+                          type="text"
+                          value={videoUrl}
+                          onChange={(e) => handleVideoUrlChange(e.target.value)}
+                          placeholder="مثلاً: https://www.aparat.com/v/... یا لینک مستقیم MP4"
+                          dir="ltr"
+                          className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500/20 font-mono"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-2">
+                          یا آپلود مستقیم فایل ویدیو:
+                        </label>
+                        <label className="w-full flex items-center justify-center gap-2 px-3 py-2.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl text-xs font-bold text-slate-700 cursor-pointer transition">
+                          <Upload className="w-4 h-4 text-emerald-600" />
+                          <span>انتخاب فایل MP4</span>
+                          <input
+                            type="file"
+                            accept="video/mp4,video/webm"
+                            onChange={handleVideoFileUpload}
+                            className="hidden"
+                          />
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Live Video Player Preview */}
+                    {videoUrl && (
+                      <div className="bg-white p-3.5 rounded-2xl border border-slate-200 space-y-2">
+                        <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                          <span>پیش‌نمایش زنده ویدیو در صفحه محصول:</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setVideoUrl('');
+                              setVideoType('direct');
+                            }}
+                            className="text-rose-600 hover:text-rose-800 text-xs flex items-center gap-1 font-bold cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            حذف ویدیو
+                          </button>
+                        </div>
+
+                        <div className="aspect-video w-full max-w-lg mx-auto rounded-xl overflow-hidden bg-black flex items-center justify-center shadow-inner">
+                          {videoType === 'aparat' || videoUrl.includes('aparat.com') ? (
+                            <iframe
+                              src={
+                                videoUrl.includes('/v/')
+                                  ? videoUrl.replace('/v/', '/video/video/embed/videohash/') + '/vt/frame'
+                                  : videoUrl
+                              }
+                              title="پیش‌نمایش ویدیو آپارات"
+                              allowFullScreen
+                              className="w-full h-full border-0"
+                            />
+                          ) : videoType === 'youtube' || videoUrl.includes('youtube.com') || videoUrl.includes('youtu.be') ? (
+                            <iframe
+                              src={
+                                videoUrl.includes('watch?v=')
+                                  ? videoUrl.replace('watch?v=', 'embed/')
+                                  : videoUrl.includes('youtu.be/')
+                                  ? videoUrl.replace('youtu.be/', 'www.youtube.com/embed/')
+                                  : videoUrl
+                              }
+                              title="پیش‌نمایش ویدیو یوتیوب"
+                              allowFullScreen
+                              className="w-full h-full border-0"
+                            />
+                          ) : (
+                            <video controls className="w-full h-full object-contain" src={videoUrl} />
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 3. Image Frame Ratio & Zoom Settings */}
+                  <div className="p-4 sm:p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-4">
+                    <div className="pb-3 border-b border-slate-200">
+                      <div className="text-sm font-black text-slate-900 flex items-center gap-2">
+                        <Sliders className="w-4 h-4 text-amber-600" />
+                        <span>تنظیمات کادر عکس‌های محصول و میزان زوم (Frame & Zoom Settings)</span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        تنظیم نسبت ابعاد کادر تصویر و قدرت بزرگنمایی ذره‌بین و لایت‌باکس در صفحه فروشگاه
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      {/* Aspect Ratio */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                          نسبت کادر عکس (Aspect Ratio)
+                        </label>
+                        <select
+                          value={imageAspectRatio}
+                          onChange={(e) => setImageAspectRatio(e.target.value as any)}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500/20"
+                        >
+                          <option value="square">مربع ۱:۱ (پیش‌نهادی استاندارد فروشگاهی)</option>
+                          <option value="portrait">پرتره عمودی ۴:۵ (مناسب بطری و شیشه)</option>
+                          <option value="wide">عریض ۱۶:۹ (افقی و سینمایی)</option>
+                          <option value="auto">آزاد و طبیعی (بدون محدودیت نسبت)</option>
+                        </select>
+                      </div>
+
+                      {/* Fit Mode */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                          حالت جاگیری عکس در کادر (Fit Mode)
+                        </label>
+                        <select
+                          value={imageFitMode}
+                          onChange={(e) => setImageFitMode(e.target.value as any)}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500/20"
+                        >
+                          <option value="cover">Cover (پر کردن تمام کادر بدون حاشیه)</option>
+                          <option value="contain">Contain (نمایش کامل کل عکس با حاشیه بدون برش)</option>
+                        </select>
+                      </div>
+
+                      {/* Zoom Level */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1">
+                          <ZoomIn className="w-3.5 h-3.5 text-amber-600" />
+                          <span>قدرت زوم بزرگنمایی: {imageZoomLevel}x برابر</span>
+                        </label>
+                        <div className="grid grid-cols-4 gap-1 bg-white p-1 rounded-xl border border-slate-200">
+                          {[1.5, 2, 2.5, 3].map((lvl) => (
+                            <button
+                              key={lvl}
+                              type="button"
+                              onClick={() => setImageZoomLevel(lvl)}
+                              className={`py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                                imageZoomLevel === lvl
+                                  ? 'bg-amber-500 text-stone-950 font-black shadow-xs'
+                                  : 'text-slate-600 hover:text-slate-900'
+                              }`}
+                            >
+                              {lvl}x
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               ) : (
                 /* SEO & Structured Data Tab */
                 <div className="space-y-4">

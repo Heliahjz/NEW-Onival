@@ -39,7 +39,7 @@ export const defaultPaymentConfig: PaymentConfig = {
   gatewayOfflineNoticeText:
     'همراه گرامی و ارجمند، به دلیل بروزرسانی فنی زیرساخت شبکه بانکی، پرداخت مستقیم از طریق درگاه اینترنتی در حال حاضر به صورت موقت قطع می‌باشد. ضمن پوزش از شما و قدردانی از همراهی و شکیبایی ارزشمندتان، می‌توانید مبلغ فاکتور را با اطمینان کامل به صورت «کارت به کارت» واریز نموده و تصویر فیش را در همین صفحه بارگذاری فرمایید تا سفارش شما بدون هیچ‌گونه تاخیری و در اولویت ویژه آماده و ارسال گردد.',
   baleBotEnabled: true,
-  baleBotButtonText: 'اتصال به ربات بله و پرداخت فاکتور (@onival_bot)',
+  baleBotButtonText: 'اتصال به ربات بله و پرداخت فاکتور (@Onivalbot)',
   gatewayEnabled: false,
   gatewayTitle: 'پرداخت آنلاین از طریق درگاه بانکی شاپرک',
   gatewayUrl: 'https://zarinp.al/onival',
@@ -603,7 +603,7 @@ export const PaymentSettingsView: React.FC<PaymentSettingsViewProps> = ({
                 type="text"
                 value={config.baleBotButtonText || ''}
                 onChange={e => handleField('baleBotButtonText', e.target.value)}
-                placeholder="اتصال به ربات بله و پرداخت فاکتور (@onival_bot)"
+                placeholder="اتصال به ربات بله و پرداخت فاکتور (@Onivalbot)"
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-800"
               />
             </div>

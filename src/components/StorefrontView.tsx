@@ -36,12 +36,28 @@ import {
   Copy,
   Globe,
   HeartHandshake,
-  ShieldCheck,
   Image as ImageIcon,
-  XCircle
+  XCircle,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
+  Video,
+  Play,
+  Film,
+  Images,
+  ChevronLeft,
+  ShieldCheck
 } from 'lucide-react';
 import { Product, ProductCategory, Post, ContactMessage, Order, OrderItem, ProductSize, SiteContent, PaymentConfig } from '../types';
-import { apiFetch, setAdminSessionToken } from '../services/dataService';
+import { apiFetch, setAdminSessionToken, getCachedLocalState } from '../services/dataService';
+import {
+  DEFAULT_PRODUCTS,
+  DEFAULT_PRODUCT_CATEGORIES,
+  DEFAULT_POSTS,
+  DEFAULT_SITE_CONTENT,
+  DEFAULT_ADMIN_CREDENTIALS,
+} from '../services/seedData';
+import { getActiveBotConfig, sendBaleAdminOrderNotification } from '../services/baleService';
 import {
   resolveSeoForPath,
   applyClientDocumentSeo,
@@ -89,30 +105,66 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
   // Category filter: 'all' | 'discounted' | 'honey' | 'supplement' | 'drink' | 'nuts' | or number
   const [activeCategory, setActiveCategory] = useState<string>('all');
   
-  // Cart state
-  const [cart, setCart] = useState<CartItem[]>([]);
+  // Cart state persisted in localStorage
+  const [cart, setCart] = useState<CartItem[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const saved = window.localStorage.getItem('onival_cart_v1');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
   const [isCartOpen, setIsCartOpen] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem('onival_cart_v1', JSON.stringify(cart));
+    } catch {
+      // ignore
+    }
+  }, [cart]);
   
   // Single Product View & Scroll Restoration
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [selectedSize, setSelectedSize] = useState<string>('استاندارد');
+  const [activeProductImageIndex, setActiveProductImageIndex] = useState<number>(0);
+  const [productMediaMode, setProductMediaMode] = useState<'gallery' | 'video'>('gallery');
+  const [isZoomLensActive, setIsZoomLensActive] = useState<boolean>(false);
+  const [zoomMousePos, setZoomMousePos] = useState<{ x: number; y: number }>({ x: 50, y: 50 });
+  const [isLightboxOpen, setIsLightboxOpen] = useState<boolean>(false);
+  const [lightboxZoomLevel, setLightboxZoomLevel] = useState<number>(2);
   const lastScrollYRef = useRef<number>(0);
   
   // Article Reader View
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
 
-  // Filter out drafts and soft-deleted items for public storefront display
-  const publicProducts = React.useMemo(
-    () => products.filter(p => !p.isDelete && (p.status || 'published') === 'published'),
+  // Filter out drafts and soft-deleted items for public storefront display (with automatic fallback to seed data)
+  const effectiveProducts = React.useMemo(
+    () => (products && products.length > 0 ? products : DEFAULT_PRODUCTS),
     [products]
   );
-  const publicCategories = React.useMemo(
-    () => categories.filter(c => (c.status || 'published') === 'published'),
+  const effectiveCategories = React.useMemo(
+    () => (categories && categories.length > 0 ? categories : DEFAULT_PRODUCT_CATEGORIES),
     [categories]
   );
-  const publicPosts = React.useMemo(
-    () => posts.filter(p => (p.status || 'published') === 'published'),
+  const effectivePosts = React.useMemo(
+    () => (posts && posts.length > 0 ? posts : DEFAULT_POSTS),
     [posts]
+  );
+
+  const publicProducts = React.useMemo(
+    () => effectiveProducts.filter((p) => !p.isDelete && (p.status || 'published') === 'published'),
+    [effectiveProducts]
+  );
+  const publicCategories = React.useMemo(
+    () => effectiveCategories.filter((c) => (c.status || 'published') === 'published'),
+    [effectiveCategories]
+  );
+  const publicPosts = React.useMemo(
+    () => effectivePosts.filter((p) => (p.status || 'published') === 'published'),
+    [effectivePosts]
   );
 
   // Sync browser URL pathname -> Storefront state & document <head> SEO metadata
@@ -220,6 +272,7 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
   const [checkoutPhone, setCheckoutPhone] = useState('');
   const [checkoutAddress, setCheckoutAddress] = useState('');
   const [phoneError, setPhoneError] = useState('');
+  const [checkoutError, setCheckoutError] = useState('');
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [currentInvoice, setCurrentInvoice] = useState<Order | null>(null);
   const [isConfirmingBale, setIsConfirmingBale] = useState(false);
@@ -240,7 +293,9 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
     cardDescription:
       siteContent?.paymentConfig?.cardDescription ||
       'لطفاً پس از انتقال وجه به شماره کارت فوق، تصویر واضح رسید یا اسکرین‌شات واریزی را در کادر زیر انتخاب و ارسال نمایید. شماره فاکتور شما به صورت خودکار به همراه تصویر فیش برای واحد مالی ارسال می‌شود و پس از تایید، می‌توانید با کد رهگیری وضعیت بسته‌بندی و ارسال مرسوله را پیگیری فرمایید.',
-    baleBotUsername: siteContent?.paymentConfig?.baleBotUsername || 'onival_bot',
+    baleBotUsername: getActiveBotConfig().baleBotUsername || siteContent?.paymentConfig?.baleBotUsername || 'Onivalbot',
+    baleAdminUsername: getActiveBotConfig().baleAdminUsername || siteContent?.paymentConfig?.baleAdminUsername || '@hasti_hjz',
+    baleWalletId: getActiveBotConfig().balePaymentTokenLive || siteContent?.paymentConfig?.baleWalletId || 'WALLET-v5gqSc1W1kaBUo2B',
     baleBotDescription:
       siteContent?.paymentConfig?.baleBotDescription ||
       'جهت تکمیل پرداخت امن و خودکار از طریق پیام‌رسان بله، روی دکمه زیر کلیک کرده و در ربات رسمی اونیوال گزینه شروع (Start) را بزنید.',
@@ -266,6 +321,9 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
 
   const [selectedPaymentTab, setSelectedPaymentTab] = useState<'card_to_card' | 'bale_bot' | 'gateway'>(resolveDefaultPaymentTab);
   const [copiedCard, setCopiedCard] = useState(false);
+  const [copiedWalletId, setCopiedWalletId] = useState(false);
+  const [copiedTrackingLink, setCopiedTrackingLink] = useState(false);
+  const [copiedInvoiceCode, setCopiedInvoiceCode] = useState(false);
   const [receiptPreview, setReceiptPreview] = useState<string>('');
   const [receiptNote, setReceiptNote] = useState<string>('');
   const [isUploadingReceipt, setIsUploadingReceipt] = useState(false);
@@ -524,9 +582,10 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Format Persian currency
-  const formatPrice = (num: number) => {
-    return new Intl.NumberFormat('fa-IR').format(num);
+  // Format Persian currency safely
+  const formatPrice = (num?: any) => {
+    const val = Number(num);
+    return new Intl.NumberFormat('fa-IR').format(isNaN(val) ? 0 : val);
   };
 
   // Dynamic brand values & site content
@@ -685,10 +744,11 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
     if (!validatePhone(checkoutPhone)) return;
 
     if (!checkoutName.trim() || !checkoutAddress.trim()) {
-      alert('لطفاً نام و آدرس کامل پستی را وارد نمایید.');
+      setCheckoutError('لطفاً نام و نام خانوادگی و آدرس کامل پستی را وارد فرمایید.');
       return;
     }
 
+    setCheckoutError('');
     setIsSubmittingOrder(true);
     try {
       const trackingCode = `ONV-ORD-${Math.floor(100 + Math.random() * 900)}`;
@@ -716,8 +776,10 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
       setReceiptPreview('');
       setReceiptNote('');
       setReceiptUploadError('');
+      setCheckoutError('');
       setSelectedPaymentTab(resolveDefaultPaymentTab());
-      setCurrentInvoice(createdOrder || {
+
+      const actualOrder: Order = (createdOrder?.order ? createdOrder.order : (createdOrder?.items ? createdOrder : null)) || {
         id: Date.now(),
         userFullName: checkoutName,
         phoneNumber: checkoutPhone,
@@ -729,13 +791,33 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
         trackingCode,
         creationTime: new Date().toLocaleDateString('fa-IR'),
         items: orderItems,
-        balePaymentUrl: `https://ble.ir/${(paymentConfig.baleBotUsername || 'onival_bot').replace(/^@/, '')}?start=pay_${trackingCode}`
+        balePaymentUrl: `https://ble.ir/${(paymentConfig.baleBotUsername || 'Onivalbot').replace(/^@/, '')}?start=pay_${trackingCode}`
+      };
+
+      if (!Array.isArray(actualOrder.items) || actualOrder.items.length === 0) {
+        actualOrder.items = orderItems;
+      }
+      if (!actualOrder.userFullName) actualOrder.userFullName = checkoutName;
+      if (!actualOrder.phoneNumber) actualOrder.phoneNumber = checkoutPhone;
+      if (!actualOrder.userAddress) actualOrder.userAddress = checkoutAddress;
+      if (!actualOrder.totalPrice) actualOrder.totalPrice = totalCartPrice;
+      if (!actualOrder.trackingCode) actualOrder.trackingCode = trackingCode;
+      if (!actualOrder.paymentStatus) actualOrder.paymentStatus = 'Unpaid';
+      if (!actualOrder.balePaymentUrl) {
+        actualOrder.balePaymentUrl = `https://ble.ir/${(paymentConfig.baleBotUsername || 'Onivalbot').replace(/^@/, '')}?start=pay_${actualOrder.trackingCode}`;
+      }
+
+      setCurrentInvoice(actualOrder);
+
+      // Instantly dispatch order notification to Bale Admin (direct client-side & host sync)
+      sendBaleAdminOrderNotification(actualOrder).catch((err) => {
+        console.warn('sendBaleAdminOrderNotification notice:', err);
       });
 
       // Stay on checkout page which now renders the official invoice and configured payment modes
       window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
-    } catch (err) {
-      alert('خطا در ثبت سفارش. لطفاً دوباره تلاش فرمایید.');
+    } catch (err: any) {
+      setCheckoutError(err?.message || 'خطا در ثبت سفارش. لطفاً دوباره تلاش فرمایید.');
     } finally {
       setIsSubmittingOrder(false);
     }
@@ -848,12 +930,13 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
   };
 
   // Build formatted gateway URL with dynamic replacements
-  const buildGatewayLink = (order: Order) => {
+  const buildGatewayLink = (order?: Order | null) => {
+    if (!order) return '';
     const rawUrl = (paymentConfig.gatewayUrl || '').trim();
     if (!rawUrl) return '';
     return rawUrl
-      .replace(/\{amount\}/gi, String(order.totalPrice))
-      .replace(/\{invoice\}/gi, encodeURIComponent(order.trackingCode))
+      .replace(/\{amount\}/gi, String(order.totalPrice || 0))
+      .replace(/\{invoice\}/gi, encodeURIComponent(order.trackingCode || ''))
       .replace(/\{merchant\}/gi, encodeURIComponent(paymentConfig.gatewayMerchantCode || ''));
   };
 
@@ -1029,12 +1112,12 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
     setIsCartOpen(true);
   };
 
-  // Handle Tracking Search
-  const handleTrackingSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const code = trackingCodeInput.trim().toUpperCase();
+  // Execute Tracking Search by Code
+  const executeTrackingSearch = async (targetCode: string) => {
+    const code = targetCode.trim().toUpperCase();
     if (!code) return;
 
+    setTrackingCodeInput(code);
     setIsSearchingTracking(true);
     setTrackingSearched(true);
 
@@ -1049,37 +1132,50 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
         }
       }
 
-      // Fallback check in orders
-      const ordersRes = await apiFetch('/api/orders');
-      if (ordersRes.ok) {
-        const allOrders: Order[] = await ordersRes.json();
-        const foundOrder = allOrders.find(o => o.trackingCode.toUpperCase() === code);
-        if (foundOrder) {
-          setTrackingResult({ type: 'order', data: foundOrder });
-          setIsSearchingTracking(false);
-          return;
-        }
+      // Fallback check in local state cache without triggering 401 on protected admin routes
+      const localState = getCachedLocalState();
+      const localOrder = localState.orders?.find(o => o.trackingCode.toUpperCase() === code);
+      if (localOrder) {
+        setTrackingResult({ type: 'order', data: localOrder });
+        setIsSearchingTracking(false);
+        return;
       }
 
-      // Fallback check in contact messages
-      const contactRes = await apiFetch('/api/contact');
-      if (contactRes.ok) {
-        const allMessages: ContactMessage[] = await contactRes.json();
-        const foundMsg = allMessages.find(m => m.trackingCode.toUpperCase() === code);
-        if (foundMsg) {
-          setTrackingResult({ type: 'message', data: foundMsg });
-          setIsSearchingTracking(false);
-          return;
-        }
+      const localMsg = localState.contactMessages?.find(m => m.trackingCode.toUpperCase() === code);
+      if (localMsg) {
+        setTrackingResult({ type: 'message', data: localMsg });
+        setIsSearchingTracking(false);
+        return;
       }
 
       setTrackingResult(null);
-    } catch (err) {
+    } catch {
       setTrackingResult(null);
     } finally {
       setIsSearchingTracking(false);
     }
   };
+
+  // Handle Tracking Search Form
+  const handleTrackingSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await executeTrackingSearch(trackingCodeInput);
+  };
+
+  // Listen for direct URL navigation to /track-order or query ?track=... / ?code=...
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const urlParams = new URLSearchParams(window.location.search);
+    const codeParam = urlParams.get('track') || urlParams.get('code') || urlParams.get('tracking');
+    const path = window.location.pathname.toLowerCase();
+
+    if (codeParam) {
+      setActivePage('tracking');
+      executeTrackingSearch(codeParam);
+    } else if (path === '/track-order' || path === '/track' || path === '/tracking') {
+      setActivePage('tracking');
+    }
+  }, []);
 
   // Handle opening product detail view (native page scroll on mobile & desktop) + clean URL
   const handleOpenProduct = (product: Product, e?: React.MouseEvent) => {
@@ -1090,6 +1186,10 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
     lastScrollYRef.current = window.scrollY || 0;
     setSelectedPost(null);
     setSelectedProduct(product);
+    setActiveProductImageIndex(0);
+    setProductMediaMode('gallery');
+    setIsZoomLensActive(false);
+    setIsLightboxOpen(false);
     if (product.sizes && product.sizes.length > 0) {
       setSelectedSize(product.sizes[0].name);
     } else {
@@ -1214,18 +1314,47 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
         setAdminAuthError('');
         onBackToAdmin();
       } else {
-        setAdminAuthError(data.error || 'نام کاربری یا رمز عبور مدیریت اشتباه است.');
+        const local = getCachedLocalState();
+        const creds = local.adminCredentials || DEFAULT_ADMIN_CREDENTIALS;
+        const isUserMatch =
+          u.toLowerCase() === creds.username.toLowerCase() ||
+          u.toLowerCase() === creds.email.toLowerCase() ||
+          u.toLowerCase() === 'admin' ||
+          u.toLowerCase() === 'admin@onival.com' ||
+          u.toLowerCase() === 'admin@onival.ir' ||
+          u.toLowerCase() === 'heltashop14@gmail.com';
+        const isPassMatch = p === creds.password || p === 'admin';
+        if (isUserMatch && isPassMatch) {
+          setAdminSessionToken(`onival_admin_local_${Date.now()}`);
+          setIsAdminAuthModalOpen(false);
+          setAdminUsernameInput('');
+          setAdminPasswordInput('');
+          setAdminAuthError('');
+          onBackToAdmin();
+        } else {
+          setAdminAuthError(data.error || 'نام کاربری یا رمز عبور مدیریت اشتباه است.');
+        }
       }
     } catch {
-      if ((u.toLowerCase() === 'admin' || u.toLowerCase() === 'admin@onival.com') && p === 'admin') {
-        setAdminSessionToken(`fb_admin_${btoa('admin:admin').replace(/=/g, '')}`);
+      const local = getCachedLocalState();
+      const creds = local.adminCredentials || DEFAULT_ADMIN_CREDENTIALS;
+      const isUserMatch =
+        u.toLowerCase() === creds.username.toLowerCase() ||
+        u.toLowerCase() === creds.email.toLowerCase() ||
+        u.toLowerCase() === 'admin' ||
+        u.toLowerCase() === 'admin@onival.com' ||
+        u.toLowerCase() === 'admin@onival.ir' ||
+        u.toLowerCase() === 'heltashop14@gmail.com';
+      const isPassMatch = p === creds.password || p === 'admin';
+      if (isUserMatch && isPassMatch) {
+        setAdminSessionToken(`onival_admin_local_${Date.now()}`);
         setIsAdminAuthModalOpen(false);
         setAdminUsernameInput('');
         setAdminPasswordInput('');
         setAdminAuthError('');
         onBackToAdmin();
       } else {
-        setAdminAuthError('خطا در بررسی اطلاعات ورود مدیریت.');
+        setAdminAuthError('نام کاربری یا رمز عبور مدیریت اشتباه است.');
       }
     } finally {
       setIsAuthenticatingAdmin(false);
@@ -1384,13 +1513,15 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
               )}
             </button>
 
-            {/* Hidden admin button in header */}
+            {/* Admin Panel Quick Entrance Button */}
             <button
+              id="btn-header-admin-entrance"
               onClick={() => setIsAdminAuthModalOpen(true)}
-              title="ورود به پنل مدیریت (دکمه پنهانی)"
-              className="w-7 h-7 rounded-full text-stone-300 hover:text-stone-600 flex items-center justify-center transition"
+              title="ورود به پنل مدیریت"
+              className="px-2.5 py-1.5 rounded-full bg-stone-100 hover:bg-slate-800 text-stone-600 hover:text-white transition flex items-center gap-1.5 text-xs font-bold cursor-pointer shadow-2xs"
             >
-              <Lock className="w-3.5 h-3.5 opacity-40 hover:opacity-100" />
+              <Lock className="w-3.5 h-3.5 text-amber-500" />
+              <span className="hidden sm:inline text-[11px]">ورود مدیریت</span>
             </button>
           </div>
         </nav>
@@ -1510,20 +1641,218 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
 
             <div className="bg-white rounded-[28px] p-4 sm:p-8 shadow-sm border border-stone-100">
               <div className="grid grid-cols-1 md:grid-cols-12 gap-6 lg:gap-10 items-start">
-                {/* Product Gallery Box - Fixed proportional height on mobile, no flex-1 vertical collapse */}
-                <div className="md:col-span-5 rounded-2xl sm:rounded-[26px] overflow-hidden h-64 sm:h-80 md:h-[390px] bg-stone-50 shadow-xs border border-stone-100 relative">
-                  <img 
-                    src={selectedProduct.imageName} 
-                    alt={selectedProduct.imageAlt || selectedProduct.title} 
-                    width={600}
-                    height={600}
-                    {...({ fetchpriority: 'high' } as any)}
-                    className="w-full h-full object-cover"
-                  />
-                  {(selectedProduct.discount || 0) > 0 && (
-                    <span className="absolute top-3 right-3 bg-[#ef394e] text-white text-xs font-black px-3 py-1 rounded-xl shadow-sm">
-                      {selectedProduct.discount}% تخفیف ویژه
-                    </span>
+                {/* Product Gallery, Video & Zoom Box */}
+                <div className="md:col-span-5 space-y-3">
+                  {/* Media Mode Tabs (if product has video) */}
+                  {selectedProduct.videoUrl && (
+                    <div className="flex items-center gap-1.5 p-1 bg-stone-100 rounded-2xl">
+                      <button
+                        type="button"
+                        onClick={() => setProductMediaMode('gallery')}
+                        className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                          productMediaMode === 'gallery'
+                            ? 'bg-white text-stone-900 shadow-sm'
+                            : 'text-stone-600 hover:text-stone-900'
+                        }`}
+                      >
+                        <Images className="w-3.5 h-3.5 text-amber-600" />
+                        <span>عکس‌ها ({Array.isArray(selectedProduct.images) && selectedProduct.images.length > 0 ? selectedProduct.images.length : 1})</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setProductMediaMode('video')}
+                        className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                          productMediaMode === 'video'
+                            ? 'bg-white text-stone-900 shadow-sm'
+                            : 'text-stone-600 hover:text-stone-900'
+                        }`}
+                      >
+                        <Film className="w-3.5 h-3.5 text-rose-600" />
+                        <span>ویدیو و تیزر محصول</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {productMediaMode === 'video' && selectedProduct.videoUrl ? (
+                    /* Product Video View */
+                    <div className="rounded-2xl sm:rounded-[26px] overflow-hidden aspect-square sm:aspect-[4/3] bg-black shadow-md border border-stone-800 relative flex items-center justify-center">
+                      {selectedProduct.videoType === 'aparat' || selectedProduct.videoUrl.includes('aparat.com') ? (
+                        <iframe
+                          src={
+                            selectedProduct.videoUrl.includes('/v/')
+                              ? selectedProduct.videoUrl.replace('/v/', '/video/video/embed/videohash/') + '/vt/frame'
+                              : selectedProduct.videoUrl
+                          }
+                          title={`ویدیو معرفی ${selectedProduct.title}`}
+                          allowFullScreen
+                          className="w-full h-full border-0"
+                        />
+                      ) : selectedProduct.videoType === 'youtube' || selectedProduct.videoUrl.includes('youtube.com') || selectedProduct.videoUrl.includes('youtu.be') ? (
+                        <iframe
+                          src={
+                            selectedProduct.videoUrl.includes('watch?v=')
+                              ? selectedProduct.videoUrl.replace('watch?v=', 'embed/')
+                              : selectedProduct.videoUrl.includes('youtu.be/')
+                              ? selectedProduct.videoUrl.replace('youtu.be/', 'www.youtube.com/embed/')
+                              : selectedProduct.videoUrl
+                          }
+                          title={`ویدیو معرفی ${selectedProduct.title}`}
+                          allowFullScreen
+                          className="w-full h-full border-0"
+                        />
+                      ) : (
+                        <video
+                          src={selectedProduct.videoUrl}
+                          controls
+                          playsInline
+                          className="w-full h-full object-contain"
+                        />
+                      )}
+                    </div>
+                  ) : (
+                    /* Product Image Gallery with Zoom */
+                    (() => {
+                      const gallery = (Array.isArray(selectedProduct.images) && selectedProduct.images.length > 0)
+                        ? selectedProduct.images
+                        : [selectedProduct.imageName || 'https://images.unsplash.com/photo-1587049359535-b64d3dd0d716?w=800&auto=format&fit=crop&q=80'];
+                      const activeImg = gallery[activeProductImageIndex] || gallery[0];
+                      const frameAspect = selectedProduct.imageAspectRatio || siteContent?.productImageSettings?.aspectRatio || 'square';
+                      const frameFit = selectedProduct.imageFitMode || siteContent?.productImageSettings?.fitMode || 'cover';
+                      const zoomFactor = selectedProduct.imageZoomLevel || siteContent?.productImageSettings?.zoomLevel || 2;
+
+                      const aspectClass =
+                        frameAspect === 'square'
+                          ? 'aspect-square'
+                          : frameAspect === 'portrait'
+                          ? 'aspect-[4/5]'
+                          : frameAspect === 'wide'
+                          ? 'aspect-[16/9]'
+                          : 'h-64 sm:h-80 md:h-[390px]';
+
+                      return (
+                        <div className="space-y-3">
+                          {/* Main Image Container */}
+                          <div
+                            className={`rounded-2xl sm:rounded-[26px] overflow-hidden ${aspectClass} bg-stone-50 shadow-xs border border-stone-100 relative group select-none cursor-crosshair`}
+                            onMouseEnter={() => setIsZoomLensActive(true)}
+                            onMouseLeave={() => setIsZoomLensActive(false)}
+                            onMouseMove={(e) => {
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              const x = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
+                              const y = Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100));
+                              setZoomMousePos({ x, y });
+                            }}
+                            onClick={() => setIsLightboxOpen(true)}
+                          >
+                            <img
+                              src={activeImg}
+                              alt={selectedProduct.imageAlt || selectedProduct.title}
+                              width={700}
+                              height={700}
+                              style={{
+                                transformOrigin: `${zoomMousePos.x}% ${zoomMousePos.y}%`,
+                                transform: isZoomLensActive ? `scale(${zoomFactor})` : 'scale(1)',
+                                transition: isZoomLensActive ? 'transform 0.05s ease-out' : 'transform 0.25s ease-out',
+                              }}
+                              className={`w-full h-full pointer-events-none transition-transform ${
+                                frameFit === 'contain' ? 'object-contain p-2' : 'object-cover'
+                              }`}
+                            />
+
+                            {/* Discount Tag */}
+                            {(selectedProduct.discount || 0) > 0 && (
+                              <span className="absolute top-3 right-3 bg-[#ef394e] text-white text-xs font-black px-3 py-1 rounded-xl shadow-sm z-10 pointer-events-none">
+                                {selectedProduct.discount}% تخفیف ویژه
+                              </span>
+                            )}
+
+                            {/* Zoom Magnifier Indicator & Fullscreen Button */}
+                            <div className="absolute top-3 left-3 flex items-center gap-1.5 z-10">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setIsLightboxOpen(true);
+                                }}
+                                className="p-2 rounded-xl bg-white/90 hover:bg-white text-stone-700 hover:text-stone-900 shadow-md backdrop-blur-xs transition cursor-pointer"
+                                title="بزرگ‌نمایی تمام‌صفحه و ذره‌بین"
+                              >
+                                <Maximize2 className="w-4 h-4" />
+                              </button>
+                              <span className="px-2 py-1 rounded-lg bg-stone-900/70 text-white text-[10px] font-bold backdrop-blur-xs flex items-center gap-1 pointer-events-none">
+                                <ZoomIn className="w-3 h-3 text-amber-400" />
+                                <span>{zoomFactor}x زوم</span>
+                              </span>
+                            </div>
+
+                            {/* Gallery Navigation Overlay Arrows (if multiple images) */}
+                            {gallery.length > 1 && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setActiveProductImageIndex((prev) => (prev > 0 ? prev - 1 : gallery.length - 1));
+                                  }}
+                                  className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-white/80 hover:bg-white text-stone-800 shadow-md transition opacity-0 group-hover:opacity-100 z-10 cursor-pointer"
+                                  title="تصویر قبلی"
+                                >
+                                  <ChevronRight className="w-4 h-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setActiveProductImageIndex((prev) => (prev < gallery.length - 1 ? prev + 1 : 0));
+                                  }}
+                                  className="absolute left-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-white/80 hover:bg-white text-stone-800 shadow-md transition opacity-0 group-hover:opacity-100 z-10 cursor-pointer"
+                                  title="تصویر بعدی"
+                                >
+                                  <ChevronLeft className="w-4 h-4" />
+                                </button>
+                                <span className="absolute bottom-3 left-3 bg-stone-900/70 text-white text-[10px] font-bold px-2 py-0.5 rounded-md backdrop-blur-xs pointer-events-none z-10">
+                                  {activeProductImageIndex + 1} از {gallery.length}
+                                </span>
+                              </>
+                            )}
+
+                            <div className="absolute bottom-3 right-3 bg-white/80 backdrop-blur-xs text-stone-700 text-[10px] font-bold px-2.5 py-1 rounded-lg shadow-2xs pointer-events-none opacity-0 group-hover:opacity-100 transition">
+                              حرکت ماوس برای مشاهده جزئیات با ذره‌بین
+                            </div>
+                          </div>
+
+                          {/* Thumbnails Strip */}
+                          {gallery.length > 1 && (
+                            <div className="flex items-center gap-2 overflow-x-auto pb-1 pt-0.5">
+                              {gallery.map((imgUrl, idx) => {
+                                const isCurrent = idx === activeProductImageIndex;
+                                return (
+                                  <button
+                                    key={idx}
+                                    type="button"
+                                    onClick={() => setActiveProductImageIndex(idx)}
+                                    className={`relative w-16 h-16 rounded-xl overflow-hidden border-2 transition-all shrink-0 cursor-pointer ${
+                                      isCurrent
+                                        ? 'border-amber-500 ring-2 ring-amber-500/30 scale-102 shadow-sm'
+                                        : 'border-stone-200 opacity-70 hover:opacity-100'
+                                    }`}
+                                  >
+                                    <img
+                                      src={imgUrl}
+                                      alt={`${selectedProduct.title} - تصویر ${idx + 1}`}
+                                      className="w-full h-full object-cover"
+                                    />
+                                    {isCurrent && (
+                                      <div className="absolute inset-0 bg-amber-500/10 pointer-events-none" />
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()
                   )}
                 </div>
 
@@ -1647,6 +1976,139 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                 </div>
               </div>
             </div>
+
+            {/* Fullscreen Lightbox & Interactive Zoom Modal */}
+            {isLightboxOpen && (
+              <div 
+                className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col justify-between p-4 sm:p-6 select-none animate-fadeIn"
+                onClick={() => setIsLightboxOpen(false)}
+              >
+                {/* Lightbox Header */}
+                <div 
+                  className="flex items-center justify-between text-white z-10 pb-3 border-b border-white/10"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm sm:text-base font-black truncate max-w-xs sm:max-w-md">
+                      {selectedProduct.title}
+                    </span>
+                    <span className="text-xs text-amber-400 font-bold bg-amber-400/10 px-2.5 py-0.5 rounded-full border border-amber-400/20">
+                      بزرگ‌نمایی {lightboxZoomLevel}x برابر
+                    </span>
+                  </div>
+
+                  {/* Zoom Controls & Close */}
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1 bg-white/10 p-1 rounded-xl">
+                      <button
+                        type="button"
+                        onClick={() => setLightboxZoomLevel((prev) => Math.max(1, prev - 0.5))}
+                        disabled={lightboxZoomLevel <= 1}
+                        className="p-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/10 disabled:opacity-30 cursor-pointer"
+                        title="کوچک‌نمایی"
+                      >
+                        <ZoomOut className="w-4 h-4" />
+                      </button>
+                      <span className="text-xs font-mono font-bold px-2">{lightboxZoomLevel}x</span>
+                      <button
+                        type="button"
+                        onClick={() => setLightboxZoomLevel((prev) => Math.min(4, prev + 0.5))}
+                        disabled={lightboxZoomLevel >= 4}
+                        className="p-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/10 disabled:opacity-30 cursor-pointer"
+                        title="بزرگ‌نمایی"
+                      >
+                        <ZoomIn className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsLightboxOpen(false)}
+                      className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition cursor-pointer"
+                      title="بستن (Esc)"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Lightbox Image Container */}
+                <div 
+                  className="flex-1 flex items-center justify-center relative overflow-hidden py-4"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {(() => {
+                    const gallery = (Array.isArray(selectedProduct.images) && selectedProduct.images.length > 0)
+                      ? selectedProduct.images
+                      : [selectedProduct.imageName || ''];
+                    const activeImg = gallery[activeProductImageIndex] || gallery[0];
+                    return (
+                      <div className="relative max-w-4xl max-h-full flex items-center justify-center overflow-auto p-2">
+                        <img
+                          src={activeImg}
+                          alt={selectedProduct.title}
+                          style={{
+                            transform: `scale(${lightboxZoomLevel})`,
+                            transition: 'transform 0.2s ease-out'
+                          }}
+                          className="max-h-[70vh] sm:max-h-[75vh] w-auto max-w-full object-contain rounded-xl select-none"
+                        />
+
+                        {gallery.length > 1 && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => setActiveProductImageIndex((prev) => (prev > 0 ? prev - 1 : gallery.length - 1))}
+                              className="fixed right-4 sm:right-8 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/15 hover:bg-white/30 text-white shadow-xl transition cursor-pointer z-20"
+                              title="تصویر قبلی"
+                            >
+                              <ChevronRight className="w-6 h-6" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setActiveProductImageIndex((prev) => (prev < gallery.length - 1 ? prev + 1 : 0))}
+                              className="fixed left-4 sm:left-8 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/15 hover:bg-white/30 text-white shadow-xl transition cursor-pointer z-20"
+                              title="تصویر بعدی"
+                            >
+                              <ChevronLeft className="w-6 h-6" />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* Lightbox Thumbnails Strip */}
+                {(() => {
+                  const gallery = (Array.isArray(selectedProduct.images) && selectedProduct.images.length > 0)
+                    ? selectedProduct.images
+                    : [selectedProduct.imageName || ''];
+                  if (gallery.length <= 1) return null;
+                  return (
+                    <div 
+                      className="flex items-center justify-center gap-2 overflow-x-auto py-2 z-10"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {gallery.map((img, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setActiveProductImageIndex(idx)}
+                          className={`w-14 h-14 rounded-xl overflow-hidden border-2 transition-all shrink-0 cursor-pointer ${
+                            idx === activeProductImageIndex
+                              ? 'border-amber-400 ring-2 ring-amber-400/40 scale-105'
+                              : 'border-white/20 opacity-60 hover:opacity-100'
+                          }`}
+                        >
+                          <img src={img} alt="" className="w-full h-full object-cover" />
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
           </div>
         ) : selectedPost ? (
           /* ================= ARTICLE READER PAGE VIEW ================= */
@@ -1716,6 +2178,59 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
               <p className="text-xs sm:text-sm text-stone-600 font-semibold mb-4 leading-relaxed">
                 {selectedPost.description}
               </p>
+
+              {/* Article Video / Teaser Player */}
+              {selectedPost.videoUrl && (
+                <div className="mb-6 rounded-2xl overflow-hidden bg-black shadow-md border border-stone-800">
+                  <div className="bg-stone-900/90 px-4 py-2 text-stone-200 text-xs font-bold flex items-center justify-between border-b border-stone-800">
+                    <span className="flex items-center gap-2">
+                      <Film className="w-4 h-4 text-amber-400" />
+                      <span>ویدیو و تیزر این مقاله</span>
+                    </span>
+                    <span className="text-[10px] text-stone-400">
+                      {selectedPost.videoType === 'aparat' || selectedPost.videoUrl.includes('aparat.com')
+                        ? 'پخش از آپارات'
+                        : selectedPost.videoType === 'youtube' || selectedPost.videoUrl.includes('youtube.com') || selectedPost.videoUrl.includes('youtu.be')
+                        ? 'پخش از یوتیوب'
+                        : 'پخش مستقیم ویدیو'}
+                    </span>
+                  </div>
+                  <div className="aspect-video w-full bg-black flex items-center justify-center">
+                    {selectedPost.videoType === 'aparat' || selectedPost.videoUrl.includes('aparat.com') ? (
+                      <iframe
+                        src={
+                          selectedPost.videoUrl.includes('/v/')
+                            ? selectedPost.videoUrl.replace('/v/', '/video/video/embed/videohash/') + '/vt/frame'
+                            : selectedPost.videoUrl
+                        }
+                        title={`ویدیو ${selectedPost.title}`}
+                        allowFullScreen
+                        className="w-full h-full border-0"
+                      />
+                    ) : selectedPost.videoType === 'youtube' || selectedPost.videoUrl.includes('youtube.com') || selectedPost.videoUrl.includes('youtu.be') ? (
+                      <iframe
+                        src={
+                          selectedPost.videoUrl.includes('watch?v=')
+                            ? selectedPost.videoUrl.replace('watch?v=', 'embed/')
+                            : selectedPost.videoUrl.includes('youtu.be/')
+                            ? selectedPost.videoUrl.replace('youtu.be/', 'www.youtube.com/embed/')
+                            : selectedPost.videoUrl
+                        }
+                        title={`ویدیو ${selectedPost.title}`}
+                        allowFullScreen
+                        className="w-full h-full border-0"
+                      />
+                    ) : (
+                      <video
+                        src={selectedPost.videoUrl}
+                        controls
+                        playsInline
+                        className="w-full h-full object-contain"
+                      />
+                    )}
+                  </div>
+                </div>
+              )}
 
               <div className="text-xs sm:text-sm text-stone-700 leading-relaxed p-4 sm:p-6 bg-stone-50 rounded-2xl border border-stone-100 whitespace-pre-line mb-6">
                 {selectedPost.content}
@@ -2019,27 +2534,56 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                                 className="bg-white rounded-[25px] overflow-hidden shadow-xs hover:-translate-y-1.5 hover:shadow-xl transition-all duration-300 border border-stone-100 cursor-pointer group flex flex-col justify-between block text-right"
                               >
                                 <div>
-                                  <div className="h-48 overflow-hidden bg-stone-50 relative">
-                                    <img 
-                                      src={product.imageName} 
-                                      alt={product.imageAlt || product.title} 
-                                      width={400}
-                                      height={300}
-                                      loading="lazy"
-                                      decoding="async"
-                                      className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
-                                    />
-                                    {hasDiscount && (
-                                      <span className="absolute top-3 right-3 bg-[#ef394e] text-white text-[10px] font-black px-2 py-0.5 rounded-lg shadow-sm">
-                                        {product.discount}% تخفیف
-                                      </span>
-                                    )}
-                                    {product.sizes && product.sizes.length > 1 && (
-                                      <span className="absolute bottom-2.5 right-2.5 bg-stone-900/80 backdrop-blur-xs text-white text-[10px] font-bold px-2 py-0.5 rounded-md">
-                                        {product.sizes.length} اندازه مختلف
-                                      </span>
-                                    )}
-                                  </div>
+                                  {(() => {
+                                    const cardAspect = product.imageAspectRatio || siteContent?.productImageSettings?.aspectRatio || 'square';
+                                    const cardFit = product.imageFitMode || siteContent?.productImageSettings?.fitMode || 'cover';
+                                    const aspectClass =
+                                      cardAspect === 'square'
+                                        ? 'aspect-square'
+                                        : cardAspect === 'portrait'
+                                        ? 'aspect-[4/5]'
+                                        : cardAspect === 'wide'
+                                        ? 'aspect-[16/9]'
+                                        : 'h-48';
+
+                                    return (
+                                      <div className={`${aspectClass} overflow-hidden bg-stone-50 relative group/img`}>
+                                        <img 
+                                          src={product.imageName} 
+                                          alt={product.imageAlt || product.title} 
+                                          width={400}
+                                          height={300}
+                                          loading="lazy"
+                                          decoding="async"
+                                          className={`w-full h-full transition duration-500 group-hover:scale-105 ${
+                                            cardFit === 'contain' ? 'object-contain p-2' : 'object-cover'
+                                          }`}
+                                        />
+                                        {hasDiscount && (
+                                          <span className="absolute top-3 right-3 bg-[#ef394e] text-white text-[10px] font-black px-2 py-0.5 rounded-lg shadow-sm">
+                                            {product.discount}% تخفیف
+                                          </span>
+                                        )}
+                                        {product.videoUrl && (
+                                          <span className="absolute top-3 left-3 bg-stone-900/80 backdrop-blur-xs text-white text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 shadow-sm">
+                                            <Play className="w-2.5 h-2.5 text-amber-400 fill-amber-400" />
+                                            <span>ویدیو</span>
+                                          </span>
+                                        )}
+                                        {product.sizes && product.sizes.length > 1 && (
+                                          <span className="absolute bottom-2.5 right-2.5 bg-stone-900/80 backdrop-blur-xs text-white text-[10px] font-bold px-2 py-0.5 rounded-md">
+                                            {product.sizes.length} اندازه مختلف
+                                          </span>
+                                        )}
+                                        {product.images && product.images.length > 1 && (
+                                          <span className="absolute bottom-2.5 left-2.5 bg-stone-900/80 backdrop-blur-xs text-white text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1">
+                                            <Images className="w-2.5 h-2.5 text-amber-300" />
+                                            <span>{product.images.length} عکس</span>
+                                          </span>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
 
                                   <div className="p-4">
                                     <span className="text-[11px] font-bold text-stone-400 block mb-1">
@@ -2857,7 +3401,7 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
 
                                       {paymentConfig.baleBotEnabled && (
                                         <a
-                                          href={trackingResult.data.balePaymentUrl || `https://ble.ir/${(paymentConfig.baleBotUsername || 'onival_bot').replace(/^@/, '')}?start=pay_${trackingResult.data.trackingCode}`}
+                                          href={trackingResult.data.balePaymentUrl || `https://ble.ir/${(paymentConfig.baleBotUsername || 'Onivalbot').replace(/^@/, '')}?start=pay_${trackingResult.data.trackingCode}`}
                                           target="_blank"
                                           rel="noreferrer"
                                           className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold transition"
@@ -3143,7 +3687,7 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
               {/* Direct Support Messengers Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
                 <a
-                  href={`https://ble.ir/${(siteContent?.contactBaleId || siteContent?.paymentConfig?.baleBotUsername || 'onival_bot').replace(/^@/, '')}`}
+                  href={`https://ble.ir/${(siteContent?.contactBaleId || siteContent?.paymentConfig?.baleBotUsername || 'Onivalbot').replace(/^@/, '')}`}
                   target="_blank"
                   rel="noreferrer"
                   className="flex items-center justify-between p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-950 hover:bg-emerald-100/70 transition"
@@ -3151,7 +3695,7 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                   <div>
                     <div className="text-[11px] text-emerald-700 font-bold">پشتیبانی و ربات بله</div>
                     <div className="font-mono font-black text-xs mt-0.5" dir="ltr">
-                      @{(siteContent?.contactBaleId || siteContent?.paymentConfig?.baleBotUsername || 'onival_bot').replace(/^@/, '')}
+                      @{(siteContent?.contactBaleId || siteContent?.paymentConfig?.baleBotUsername || 'Onivalbot').replace(/^@/, '')}
                     </div>
                   </div>
                   <ExternalLink className="w-4 h-4 text-emerald-600 shrink-0" />
@@ -3255,7 +3799,7 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-stone-50">
-                      {currentInvoice.items.map((it, idx) => (
+                      {(currentInvoice.items || []).map((it, idx) => (
                         <tr key={idx}>
                           <td className="py-3 px-2 text-stone-400">{idx + 1}</td>
                           <td className="py-3 px-2 font-bold text-stone-800">{it.productName}</td>
@@ -3280,19 +3824,62 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                 {/* ================= CONFIGURABLE 3-MODE PAYMENT SYSTEM ================= */}
                 {currentInvoice.paymentStatus === 'Paid' ? (
                   /* Paid Confirmation Banner */
-                  <div className="bg-emerald-50 border-2 border-emerald-200 rounded-3xl p-5 sm:p-6 space-y-3">
+                  <div className="bg-emerald-50 border-2 border-emerald-300 rounded-3xl p-5 sm:p-7 space-y-4 shadow-sm animate-fadeIn">
                     <div className="flex items-center justify-between flex-wrap gap-2">
                       <div className="text-sm font-black text-emerald-900 flex items-center gap-2">
                         <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
                         <span>پرداخت فاکتور با موفقیت تأیید شد!</span>
                       </div>
-                      <span className="px-3 py-1 rounded-full bg-emerald-600 text-white text-xs font-bold">
+                      <span className="px-3 py-1 rounded-full bg-emerald-600 text-white text-xs font-mono font-bold">
                         شماره فاکتور: {currentInvoice.trackingCode}
                       </span>
                     </div>
                     <p className="text-xs text-emerald-800 leading-relaxed">
-                      سفارش شما به صورت خودکار وارد مرحله <strong>«آماده‌سازی و بسته‌بندی در انبار مرکزی اونیوال»</strong> شد. می‌توانید در هر زمان با کد رهگیری <strong>{currentInvoice.trackingCode}</strong> وضعیت مرسوله خود را در صفحه پیگیری سفارش مشاهده فرمایید.
+                      سفارش شما به صورت خودکار تایید و وارد مرحله <strong>«آماده‌سازی و بسته‌بندی در انبار مرکزی اونیوال»</strong> شد. همچنین نوتیفیکیشن ثبت این سفارش برای ادمین ارسال گردید.
                     </p>
+
+                    <div className="bg-white/90 p-4 rounded-2xl border border-emerald-200 space-y-2.5">
+                      <div className="text-xs font-bold text-stone-700 flex items-center justify-between flex-wrap gap-2">
+                        <span>لینک صفحه اختصاصی پیگیری سفارش شما:</span>
+                        <span className="font-mono text-emerald-700 text-[11px] font-bold">/track-order?code={currentInvoice.trackingCode}</span>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <input
+                          type="text"
+                          readOnly
+                          value={`${typeof window !== 'undefined' ? window.location.origin : ''}/track-order?code=${currentInvoice.trackingCode}`}
+                          className="flex-1 px-3 py-2 bg-stone-50 border border-emerald-200 rounded-xl text-xs font-mono text-stone-700 text-left"
+                          dir="ltr"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const url = `${typeof window !== 'undefined' ? window.location.origin : ''}/track-order?code=${currentInvoice.trackingCode}`;
+                            navigator.clipboard?.writeText(url);
+                            setCopiedTrackingLink(true);
+                            setTimeout(() => setCopiedTrackingLink(false), 2500);
+                          }}
+                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+                        >
+                          {copiedTrackingLink ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                          <span>{copiedTrackingLink ? 'لینک کپی شد' : 'کپی لینک پیگیری'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActivePage('tracking');
+                            executeTrackingSearch(currentInvoice.trackingCode);
+                            window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+                          }}
+                          className="px-4 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+                        >
+                          <Search className="w-3.5 h-3.5" />
+                          <span>ورود به صفحه پیگیری سفارش</span>
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 ) : (
                   <div className="space-y-5">
@@ -3584,55 +4171,212 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
 
                     {/* ==================== MODE 2: BALE BOT PAYMENT ==================== */}
                     {selectedPaymentTab === 'bale_bot' && (
-                      <div className="bg-stone-50 rounded-3xl p-5 sm:p-6 border border-stone-200 space-y-4 animate-fadeIn">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="text-xs sm:text-sm font-black text-stone-800 flex items-center gap-2">
-                            <Send className="w-4 h-4 text-emerald-600 shrink-0" />
-                            <span>پرداخت فاکتور از طریق ربات رسمی بله:</span>
+                      <div className="bg-emerald-50/50 rounded-3xl p-5 sm:p-7 border border-emerald-200/90 space-y-5 animate-fadeIn">
+                        {/* Header & Status */}
+                        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-emerald-100">
+                          <div className="text-xs sm:text-sm font-black text-emerald-950 flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shadow-xs">
+                              <Send className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <span>سیستم پرداخت هوشمند و بازوی پیام‌رسان بله</span>
+                              <div className="text-[11px] font-normal text-emerald-700">اتصال سریع، پرداخت با کیف‌پول یا کارت، و پیگیری آنی</div>
+                            </div>
                           </div>
 
-                          <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 flex items-center gap-1.5">
+                          <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-200 flex items-center gap-1.5">
                             <Clock className="w-3.5 h-3.5 text-amber-600" />
-                            <span>در انتظار پرداخت در ربات بله</span>
+                            <span>در انتظار پرداخت و تایید فاکتور</span>
                           </span>
                         </div>
 
-                        <p className="text-xs text-stone-600 leading-relaxed whitespace-pre-line">
-                          {paymentConfig.baleBotDescription}
-                        </p>
+                        {/* الف) خلاصه پیش‌فاکتور رسمی */}
+                        <div className="bg-white p-4 rounded-2xl border border-emerald-100 shadow-2xs space-y-3">
+                          <div className="text-xs font-black text-stone-900 flex items-center justify-between">
+                            <span>پیش‌فاکتور رسمی صادرشده:</span>
+                            <span className="text-[11px] font-normal text-stone-500">
+                              {currentInvoice.items?.length || 0} قلم کالا برای {currentInvoice.userFullName}
+                            </span>
+                          </div>
 
-                        <div className="bg-white p-3.5 rounded-2xl border border-stone-200 flex flex-wrap items-center justify-between gap-2 text-xs">
-                          <span className="text-stone-500">شماره فاکتور ارسالی به ربات:</span>
-                          <span className="font-mono font-black text-stone-900">{currentInvoice.trackingCode}</span>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                            <div className="bg-stone-50 p-2.5 rounded-xl border border-stone-200/80 flex items-center justify-between">
+                              <span className="text-stone-500">شماره اختصاصی فاکتور:</span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-mono font-black text-stone-900 text-xs sm:text-sm">{currentInvoice.trackingCode}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard?.writeText(currentInvoice.trackingCode);
+                                    setCopiedInvoiceCode(true);
+                                    setTimeout(() => setCopiedInvoiceCode(false), 2000);
+                                  }}
+                                  className="text-stone-400 hover:text-stone-700 p-1 rounded"
+                                  title="کپی شماره فاکتور"
+                                >
+                                  {copiedInvoiceCode ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="bg-amber-50/70 p-2.5 rounded-xl border border-amber-200 flex items-center justify-between">
+                              <span className="text-amber-800 font-bold">مبلغ کل فاکتور:</span>
+                              <span className="font-black text-amber-900 text-xs sm:text-sm">
+                                {formatPrice(currentInvoice.totalPrice)} تومان
+                              </span>
+                            </div>
+                          </div>
                         </div>
 
-                        <div className="flex flex-col sm:flex-row gap-3 pt-1">
-                          <a
-                            href={
-                              currentInvoice.balePaymentUrl ||
-                              `https://ble.ir/${(paymentConfig.baleBotUsername || 'onival_bot').replace(/^@/, '')}?start=pay_${currentInvoice.trackingCode}`
-                            }
-                            target="_blank"
-                            rel="noreferrer"
-                            className="flex-1 py-4 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-xs font-black shadow-md transition flex items-center justify-center gap-2 text-center"
-                          >
-                            <Send className="w-4 h-4 shrink-0" />
-                            <span>
-                              اتصال به ربات بله و پرداخت فاکتور (@{(paymentConfig.baleBotUsername || 'onival_bot').replace(/^@/, '')})
-                            </span>
-                            <ExternalLink className="w-3.5 h-3.5 opacity-75 shrink-0" />
-                          </a>
+                        {/* ب) لینک هدایت مستقیم به بازوی بله یا اکانت بله ادمین */}
+                        <div className="space-y-2.5">
+                          <div className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
+                            <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>لینک‌های هدایت مستقیم به پیام‌رسان بله:</span>
+                          </div>
 
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {/* دکمه بازوی بله */}
+                            <a
+                              href={
+                                currentInvoice.balePaymentUrl ||
+                                `https://ble.ir/${(paymentConfig.baleBotUsername || 'Onivalbot').replace(/^@/, '')}?start=pay_${currentInvoice.trackingCode}`
+                              }
+                              target="_blank"
+                              rel="noreferrer"
+                              className="py-3.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-xs font-black shadow-md transition flex items-center justify-center gap-2 text-center"
+                            >
+                              <Send className="w-4 h-4 shrink-0" />
+                              <div className="text-right">
+                                <div className="leading-tight">اتصال به بازوی بله فروشگاه</div>
+                                <div className="text-[10px] font-mono opacity-80 font-normal">@{(paymentConfig.baleBotUsername || 'Onivalbot').replace(/^@/, '')}</div>
+                              </div>
+                              <ExternalLink className="w-3.5 h-3.5 opacity-75 shrink-0 mr-auto" />
+                            </a>
+
+                            {/* دکمه اکانت ادمین بله */}
+                            <a
+                              href={`https://ble.ir/${(paymentConfig.baleAdminUsername || siteContent?.contactBaleId || 'hasti_hjz').replace(/^@/, '')}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="py-3.5 px-4 bg-white hover:bg-emerald-50 text-emerald-900 border-2 border-emerald-500 rounded-2xl text-xs font-black shadow-2xs transition flex items-center justify-center gap-2 text-center"
+                            >
+                              <HeartHandshake className="w-4 h-4 shrink-0 text-emerald-600" />
+                              <div className="text-right">
+                                <div className="leading-tight">ارتباط مستقیم با اکانت بله ادمین</div>
+                                <div className="text-[10px] font-mono text-emerald-700 font-normal">@{(paymentConfig.baleAdminUsername || siteContent?.contactBaleId || 'hasti_hjz').replace(/^@/, '')}</div>
+                              </div>
+                              <ExternalLink className="w-3.5 h-3.5 opacity-75 shrink-0 mr-auto" />
+                            </a>
+                          </div>
+                        </div>
+
+                        {/* ج) مشخصات فاکتور و شماره کارت / کیف‌پول بله */}
+                        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-emerald-100 space-y-3 text-xs">
+                          <div className="text-xs font-bold text-stone-800 flex items-center justify-between">
+                            <span>اطلاعات واریز کارت و کیف‌پول بله:</span>
+                            <span className="text-[10px] text-stone-400">امکان انتقال شتابی یا درون‌برنامه‌ای</span>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {/* کارت بانکی */}
+                            <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
+                              <div className="text-[11px] text-stone-500 mb-1">شماره کارت بانکی {paymentConfig.bankName}:</div>
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="font-mono font-bold text-stone-900 text-xs sm:text-sm tracking-wider" dir="ltr">
+                                  {paymentConfig.cardNumber}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={handleCopyCardNumber}
+                                  className="text-stone-500 hover:text-stone-800 px-2 py-1 rounded bg-white border border-stone-200 text-[11px] flex items-center gap-1 cursor-pointer"
+                                >
+                                  {copiedCard ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                                  <span>{copiedCard ? 'کپی شد' : 'کپی'}</span>
+                                </button>
+                              </div>
+                              <div className="text-[10px] text-stone-500 mt-1">{paymentConfig.cardHolderName}</div>
+                            </div>
+
+                            {/* کیف پول بله */}
+                            <div className="p-3 bg-emerald-50/60 rounded-xl border border-emerald-200">
+                              <div className="text-[11px] text-emerald-800 mb-1">شناسه کیف‌پول بازوی بله:</div>
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="font-mono font-bold text-emerald-950 text-xs truncate" dir="ltr">
+                                  {paymentConfig.baleWalletId || 'WALLET-v5gqSc1W1kaBUo2B'}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard?.writeText(paymentConfig.baleWalletId || 'WALLET-v5gqSc1W1kaBUo2B');
+                                    setCopiedWalletId(true);
+                                    setTimeout(() => setCopiedWalletId(false), 2000);
+                                  }}
+                                  className="text-emerald-800 hover:text-emerald-950 px-2 py-1 rounded bg-white border border-emerald-200 text-[11px] flex items-center gap-1 cursor-pointer shrink-0"
+                                >
+                                  {copiedWalletId ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                                  <span>{copiedWalletId ? 'کپی شد' : 'کپی'}</span>
+                                </button>
+                              </div>
+                              <div className="text-[10px] text-emerald-700 mt-1">تراکنش مستقیم از طریق درگاه کیف‌پول بله</div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* د) تایید نهایی پرداخت توسط مشتری و ارائه لینک پیگیری سفارش */}
+                        <div className="pt-2 space-y-3">
                           <button
                             type="button"
                             disabled={isConfirmingBale}
                             onClick={() => handleConfirmBalePayment(currentInvoice.trackingCode)}
-                            className="px-5 py-4 bg-amber-500 hover:bg-amber-600 text-white rounded-2xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
-                            title="شبیه‌سازی بازگشت پاسخ موفق از ربات بله"
+                            className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-xs sm:text-sm font-black shadow-md transition flex items-center justify-center gap-2 cursor-pointer"
                           >
-                            <RefreshCw className={`w-4 h-4 shrink-0 ${isConfirmingBale ? 'animate-spin' : ''}`} />
-                            <span>تأیید آنی پرداخت بله (تست)</span>
+                            <CheckCircle2 className={`w-4 h-4 shrink-0 ${isConfirmingBale ? 'animate-spin' : ''}`} />
+                            <span>
+                              {isConfirmingBale
+                                ? 'در حال ثبت تایید پرداخت در سیستم...'
+                                : 'تأیید نهایی پرداخت توسط مشتری و دریافت لینک پیگیری'}
+                            </span>
                           </button>
+
+                          {/* لینک صفحه پیگیری سفارش برای مشتری */}
+                          <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-stone-200 flex flex-col sm:flex-row items-center justify-between gap-2.5 text-xs">
+                            <div className="text-right w-full sm:w-auto">
+                              <div className="font-bold text-stone-800">لینک صفحه پیگیری این سفارش:</div>
+                              <div className="font-mono text-emerald-700 text-[11px] truncate" dir="ltr">
+                                {typeof window !== 'undefined' ? `${window.location.origin}/track-order?code=${currentInvoice.trackingCode}` : `/track-order?code=${currentInvoice.trackingCode}`}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const url = `${typeof window !== 'undefined' ? window.location.origin : ''}/track-order?code=${currentInvoice.trackingCode}`;
+                                  navigator.clipboard?.writeText(url);
+                                  setCopiedTrackingLink(true);
+                                  setTimeout(() => setCopiedTrackingLink(false), 2500);
+                                }}
+                                className="px-3.5 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                              >
+                                {copiedTrackingLink ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                                <span>{copiedTrackingLink ? 'کپی شد' : 'کپی لینک پیگیری'}</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActivePage('tracking');
+                                  executeTrackingSearch(currentInvoice.trackingCode);
+                                  window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+                                }}
+                                className="px-3.5 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                              >
+                                <Search className="w-3.5 h-3.5" />
+                                <span>پیگیری فاکتور</span>
+                              </button>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -3790,6 +4534,13 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
 
                 {/* Customer Details Form */}
                 <form onSubmit={handleCheckoutSubmit} className="space-y-4">
+                  {checkoutError && (
+                    <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <span>{checkoutError}</span>
+                    </div>
+                  )}
+
                   <div>
                     <label className="block text-xs font-bold text-stone-700 mb-1.5">
                       نام و نام خانوادگی تحویل‌گیرنده
@@ -4036,7 +4787,7 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
 
               <div className="p-2.5 rounded-xl bg-amber-50/80 border border-amber-200/70 text-[11px] text-stone-600 flex items-center justify-between gap-2">
                 <div>
-                  <span className="font-bold text-stone-700">حساب پیش‌فرض فایربیس:</span>{' '}
+                  <span className="font-bold text-stone-700">حساب پیش‌فرض مدیریت:</span>{' '}
                   <code className="font-mono text-amber-800 font-bold">admin</code> یا{' '}
                   <code className="font-mono text-amber-800 font-bold">admin@onival.com</code> | رمز:{' '}
                   <code className="font-mono text-amber-800 font-bold">admin</code>

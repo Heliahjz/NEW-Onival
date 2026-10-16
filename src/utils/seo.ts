@@ -857,8 +857,8 @@ export function resolveSeoForPath(
     };
   }
 
-  // 8. UTILITY / PRIVATE / NOINDEX ROUTES: /tracking, /checkout, /admin
-  if (decodedPath === '/tracking') {
+  // 8. UTILITY / PRIVATE / NOINDEX ROUTES: /tracking, /track-order, /checkout, /admin
+  if (decodedPath === '/tracking' || decodedPath === '/track-order' || decodedPath === '/track') {
     const title = `پیگیری سفارش و استعلام وضعیت مرسوله | ${brandName}`;
     const description = `پیگیری لحظه‌ای وضعیت سفارش و نوبت مشاوره با کد رهگیری در فروشگاه ${brandName}.`;
     return {

@@ -20,7 +20,10 @@ import {
   runManualSeedDatabase,
   getCachedLocalState,
   getAdminSessionToken,
-  apiFetch
+  apiFetch,
+  getServerConnectionStatus,
+  testServerConnection,
+  subscribeServerConnectionStatus,
 } from '../services/dataService';
 
 interface HostDataManagementCardProps {
@@ -32,12 +35,39 @@ export const HostDataManagementCard: React.FC<HostDataManagementCardProps> = ({
 }) => {
   const [isSeeding, setIsSeeding] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'offline_fallback'>(() =>
+    getServerConnectionStatus()
+  );
+  const [isCheckingConn, setIsCheckingConn] = useState(false);
+  const [connMessage, setConnMessage] = useState<string>('');
   const [feedback, setFeedback] = useState<{
     type: 'success' | 'error' | null;
     message: string;
   }>({ type: null, message: '' });
   const [copiedEnv, setCopiedEnv] = useState(false);
   const [showGuide, setShowGuide] = useState(true);
+
+  React.useEffect(() => {
+    const unsub = subscribeServerConnectionStatus((st) => {
+      setConnectionStatus(st);
+    });
+    return () => unsub();
+  }, []);
+
+  const handleTestConnection = async () => {
+    setIsCheckingConn(true);
+    setConnMessage('');
+    try {
+      const res = await testServerConnection();
+      setConnectionStatus(res.connected ? 'connected' : 'offline_fallback');
+      setConnMessage(res.message);
+    } catch {
+      setConnectionStatus('offline_fallback');
+      setConnMessage('خطا در آزمایش اتصال به سرور.');
+    } finally {
+      setIsCheckingConn(false);
+    }
+  };
 
   // ۱. راه‌اندازی اولیه و بازنشانی محصولات پیش‌فرض روی سرور لینوکس
   const handleSeedDatabase = async (resetToFactory = false) => {
@@ -231,6 +261,59 @@ PANEL_BASE_URL=https://yourdomain.com`;
             <span>{feedback.message}</span>
           </div>
         )}
+
+        {/* وضعیت اتصال زنده به بک‌اند و دیتابیس کلاینت خودکفا */}
+        <div className={`p-4 rounded-2xl border flex flex-col md:flex-row md:items-center justify-between gap-4 ${
+          connectionStatus === 'connected'
+            ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
+            : 'bg-amber-50/70 border-amber-200 text-amber-900'
+        }`}>
+          <div className="flex items-start sm:items-center gap-3">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 text-white font-bold shadow-xs ${
+              connectionStatus === 'connected' ? 'bg-emerald-600' : 'bg-amber-600'
+            }`}>
+              {connectionStatus === 'connected' ? (
+                <CheckCircle2 className="w-5 h-5" />
+              ) : (
+                <HardDrive className="w-5 h-5" />
+              )}
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-black">
+                  {connectionStatus === 'connected'
+                    ? 'وضعیت اتصال: متصل مستقیم به سرور Node.js هاست (Live Backend)'
+                    : 'وضعیت اتصال: حالت خودکفا و ذخیره‌سازی محلی (Client-Side Local Storage Fallback)'}
+                </span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                  connectionStatus === 'connected' ? 'bg-emerald-200 text-emerald-800' : 'bg-amber-200 text-amber-800'
+                }`}>
+                  {connectionStatus === 'connected' ? 'آنلاین' : 'خودکفا / آماده به کار'}
+                </span>
+              </div>
+              <p className="text-[11px] opacity-80 mt-1 leading-relaxed">
+                {connectionStatus === 'connected'
+                  ? 'تمامی اطلاعات به صورت مستقیم با فایل سرور (server-data/onival-persistent-data.json) و همزمان با LocalStorage مرورگر همگام است.'
+                  : 'پروژه در حالت کاملاً Self-Contained اجرا می‌شود. حتی در صورتی که سرور Node.js در هاست استارت نخورده باشد، تمامی محصولات اولیه، بلاگ، دسته‌ها، سفارشات و پنل مدیریت به طور کامل از حافظه مستقل مرورگر تغذیه و ذخیره می‌شوند.'}
+              </p>
+              {connMessage && (
+                <div className="text-[11px] font-bold mt-1.5 text-slate-700 bg-white/70 px-2.5 py-1 rounded-lg inline-block border border-black/5">
+                  {connMessage}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            disabled={isCheckingConn}
+            onClick={handleTestConnection}
+            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-xs font-bold shrink-0 transition shadow-2xs cursor-pointer"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isCheckingConn ? 'animate-spin' : ''}`} />
+            <span>{isCheckingConn ? 'در حال بررسی...' : 'تست مجدد اتصال به سرور Node'}</span>
+          </button>
+        </div>
 
         {/* ۱. وضعیت ذخیره‌سازی محلی روی هاست و دکمه‌های عملیاتی */}
         <div className="p-4 sm:p-5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-4">

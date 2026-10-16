@@ -7,11 +7,13 @@ export type PublicationStatus = 'published' | 'draft';
 export type StockAvailability = 'InStock' | 'OutOfStock' | 'PreOrder';
 
 export interface SlugRedirect {
+  id?: string | number;
   fromPath: string;
   toPath: string;
   entityType: 'product' | 'category' | 'article' | 'article-category';
   entityId: number;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface Product {
@@ -36,6 +38,12 @@ export interface Product {
   brand?: string;
   imageName: string;
   imageAlt?: string;
+  images?: string[];
+  videoUrl?: string;
+  videoType?: 'direct' | 'aparat' | 'youtube';
+  imageAspectRatio?: 'square' | 'portrait' | 'wide' | 'auto';
+  imageFitMode?: 'cover' | 'contain';
+  imageZoomLevel?: number;
   description: string;
   content: string;
   isDelete?: boolean;
@@ -60,6 +68,7 @@ export interface ProductCategory {
   title: string;
   slug: string;
   parentId?: number | null;
+  parentTitle?: string;
   sortOrder?: number;
   description?: string;
   imageName?: string;
@@ -82,9 +91,12 @@ export interface Post {
   content: string;
   imageName: string;
   imageAlt?: string;
+  videoUrl?: string;
+  videoType?: 'direct' | 'aparat' | 'youtube';
   viewCount: number;
   authorName: string;
   creationTime: string;
+  isDelete?: boolean;
   publishedAt?: string;
   updatedAt?: string;
   status?: PublicationStatus;
@@ -157,14 +169,17 @@ export interface ConsultationConfig {
 export interface ContactMessage {
   id: number;
   fullName: string;
+  name?: string;
   phoneNumber?: string;
   trackingCode: string;
   message: string;
   adminResponse?: string;
+  adminReply?: string;
   isRead: boolean;
   isResponded: boolean;
   creationTime: string;
   respondedAt?: string;
+  replyTime?: string;
   isConsultation?: boolean;
   consultationDetails?: ConsultationDetails;
   orderId?: number;
@@ -202,6 +217,7 @@ export interface Order {
   receiptSubmittedAt?: string;
   receiptUploadedAt?: string;
   receiptAdminNote?: string;
+  receiptApproved?: boolean;
   trackingCode: string;
   creationTime: string;
   items: OrderItem[];
@@ -221,6 +237,8 @@ export interface PaymentConfig {
   gatewayOfflineNotice?: string;
   baleBotEnabled: boolean;
   baleBotUsername?: string;
+  baleAdminUsername?: string;
+  baleWalletId?: string;
   baleBotDescription?: string;
   baleBotButtonText?: string;
   gatewayEnabled: boolean;
@@ -235,6 +253,7 @@ export interface PaymentConfig {
 export interface BotActivityLog {
   id: number;
   time: string;
+  timestamp?: string | number;
   type: string;
   platform?: 'bale' | 'telegram' | 'system';
   text: string;
@@ -256,26 +275,44 @@ export interface TelegramConfig {
   baleEnabled?: boolean;
   baleBotToken?: string;
   baleAdminChatId?: string;
+  baleAdminUsername?: string;
   baleBotUsername?: string;
   baleBaseUrl?: string;
   baleWebhookUrl?: string;
+  balePaymentMode?: 'test' | 'live';
+  balePaymentTokenTest?: string;
+  balePaymentTokenLive?: string;
+  balePaymentToken?: string;
+  baleAutoSendInvoice?: boolean;
+  baleAutoNotifyAdminAllTransactions?: boolean;
+  baleAdminDirectApproval?: boolean;
 
   // Explicit Telegram Bot Settings
   telegramEnabled?: boolean;
+  telegramBotEnabled?: boolean;
   telegramBotToken?: string;
   telegramAdminChatId?: string;
   telegramBotUsername?: string;
   telegramBaseUrl?: string;
   telegramWebhookUrl?: string;
+  webhookSecretToken?: string;
 
   // Direct Support Channels & Floating Support Widget
+  baleSupportId?: string;
   baleSupportUsername?: string;
+  baleChannelId?: string;
+  telegramSupportId?: string;
   telegramSupportUsername?: string;
+  telegramChannelId?: string;
   whatsappNumber?: string;
+  instagramId?: string;
+  rubikaSupportId?: string;
   eitaaSupportId?: string;
   supportPhone?: string;
   supportEmail?: string;
   supportHours?: string;
+  workingHours?: string;
+  autoReplyEnabled?: boolean;
   floatingWidgetEnabled?: boolean;
   floatingWidgetTitle?: string;
   floatingWidgetWelcome?: string;
@@ -395,5 +432,12 @@ export interface SiteContent {
   footerCopyright: string;
   paymentConfig?: PaymentConfig;
   consultationConfig?: ConsultationConfig;
+  productImageSettings?: {
+    aspectRatio?: 'square' | 'portrait' | 'wide' | 'auto';
+    fitMode?: 'cover' | 'contain';
+    zoomEnabled?: boolean;
+    zoomLevel?: number;
+    borderRadius?: 'none' | 'normal' | 'large' | 'full';
+  };
   [key: string]: any;
 }
