@@ -83,6 +83,9 @@ export interface TestAdminWelcomeResult {
   usedChatId: string;
   hint?: string;
   latencyMs?: number;
+  forbiddenStartRequired?: boolean;
+  botUsername?: string;
+  botLink?: string;
 }
 
 /**
@@ -95,8 +98,8 @@ export async function sendBaleAdminWelcomeTest(options?: {
   baseUrl?: string;
 }): Promise<TestAdminWelcomeResult> {
   const currentConfig = getActiveBotConfig();
-  const token = (options?.botToken || currentConfig.botToken || currentConfig.baleBotToken || '').trim();
-  const chatId = (options?.chatId || currentConfig.adminChatId || currentConfig.baleAdminChatId || '').trim();
+  const token = (options?.botToken || currentConfig.botToken || currentConfig.baleBotToken || DEFAULT_TELEGRAM_CONFIG.botToken || '').trim();
+  const chatId = (options?.chatId || currentConfig.adminChatId || currentConfig.baleAdminChatId || DEFAULT_TELEGRAM_CONFIG.adminChatId || '69451465').trim();
   const baseUrl = (options?.baseUrl || currentConfig.baleBaseUrl || currentConfig.baseUrl || 'https://tapi.bale.ai').replace(/\/+$/, '');
 
   if (!token) {
@@ -159,17 +162,24 @@ export async function sendBaleAdminWelcomeTest(options?: {
       };
     } else if (apiRes.status === 401 || (data && !data.ok)) {
       const desc = data?.description || (apiRes.status === 401 ? 'Unauthorized (توکن نامعتبر)' : `خطای ${apiRes.status}`);
+      const isForbidden = apiRes.status === 403 || /Forbidden|can't initiate conversation/i.test(desc);
+      const botUser = (currentConfig.baleBotUsername || currentConfig.botUsername || 'Onivalbot').replace(/^@/, '');
       return {
         ok: false,
         delivered: false,
         status: apiRes.status,
         latencyMs,
+        forbiddenStartRequired: isForbidden,
+        botUsername: botUser,
+        botLink: `https://ble.ir/${botUser}`,
         description: desc,
-        message: `پاسخ وب‌سرویس بله: ${desc}`,
+        message: isForbidden ? 'خطای امنیتی ۴۰۳ بله: ربات نمی‌تواند شروع‌کننده مکالمه باشد.' : `پاسخ وب‌سرویس بله: ${desc}`,
         rawResponse: data,
         usedToken: token,
         usedChatId: chatId,
-        hint: apiRes.status === 401
+        hint: isForbidden
+          ? `مدیر گرامی، ربات‌های بله برای جلوگیری از مزاحمت تا زمانی که دکمه «شروع» (/start) را نزده باشید، پیام نمی‌فرستند. لطفاً روی لینک ble.ir/${botUser} کلیک نموده، Start را لمس کنید و سپس مجدداً تست را بزنید.`
+          : apiRes.status === 401
           ? 'توکن وارد شده معتبر نیست یا منقضی شده است. لطفاً توکن جدید را از @BotFather در بله کپی کرده و ذخیره نمایید.'
           : 'در صورت خطای chat not found، لطفاً ابتدا با اکانت خود به ربات در بله پیام /start ارسال کنید.'
       };
@@ -186,11 +196,15 @@ export async function sendBaleAdminWelcomeTest(options?: {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ botToken: token, chatId, baseUrl })
     });
-    if (res.ok) {
-      const data: TestAdminWelcomeResult = await res.json();
-      return data;
+    const data: any = await res.json().catch(() => null);
+    if (data && typeof data === 'object') {
+      return {
+        ...data,
+        usedToken: data.usedToken || token,
+        usedChatId: data.usedChatId || chatId,
+        botUsername: data.botUsername || (currentConfig.baleBotUsername || currentConfig.botUsername || 'Onivalbot').replace(/^@/, '')
+      };
     }
-    // If server also unreachable
   } catch (err: any) {
     console.warn('Server proxy fetch failed:', err);
   }
@@ -203,6 +217,7 @@ export async function sendBaleAdminWelcomeTest(options?: {
     message: 'خطا در برقراری ارتباط با وب‌سرویس بله',
     usedToken: token,
     usedChatId: chatId,
+    botUsername: (currentConfig.baleBotUsername || currentConfig.botUsername || 'Onivalbot').replace(/^@/, ''),
     hint: 'لطفاً از اتصال اینترنت، صحت توکن بله و چت‌آیدی ادمین اطمینان حاصل فرمایید.'
   };
 }

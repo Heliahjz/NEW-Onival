@@ -19,6 +19,7 @@ import {
   ToggleRight
 } from 'lucide-react';
 import { PaymentConfig, SiteContent } from '../types';
+import { getActiveBotConfig, saveActiveBotConfig } from '../services/baleService';
 
 interface PaymentSettingsViewProps {
   siteContent: SiteContent;
@@ -91,6 +92,23 @@ export const PaymentSettingsView: React.FC<PaymentSettingsViewProps> = ({
         ...siteContent,
         paymentConfig: config
       });
+
+      // Synchronize bot configuration across system (LocalStorage & Bot API)
+      try {
+        const currentBot = getActiveBotConfig();
+        const cleanBotName = String(config.baleBotUsername || currentBot.baleBotUsername || 'Onivalbot').replace(/^@/, '').trim();
+        const updatedBot = {
+          ...currentBot,
+          botUsername: cleanBotName,
+          baleBotUsername: cleanBotName,
+          baleAdminUsername: config.baleAdminUsername || currentBot.baleAdminUsername || '@hasti_hjz',
+          baleBotButtonText: config.baleBotButtonText || `اتصال به ربات بله و پرداخت فاکتور (@${cleanBotName})`
+        };
+        await saveActiveBotConfig(updatedBot);
+      } catch (botSyncErr) {
+        console.warn('Bot config sync warning:', botSyncErr);
+      }
+
       setShowSavedToast(true);
       setTimeout(() => setShowSavedToast(false), 4000);
     } catch (err) {
@@ -555,6 +573,23 @@ export const PaymentSettingsView: React.FC<PaymentSettingsViewProps> = ({
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs text-slate-700"
               />
             </div>
+
+            {/* Online Payment Simulator Mode */}
+            <div className="p-3.5 rounded-2xl bg-blue-50/80 border border-blue-200 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-xs font-black text-blue-900">شبیه‌ساز پرداخت موفق تست (ویژه قبل از دریافت مرچنت):</div>
+                <div className="text-[11px] text-blue-700">با فعال‌سازی این گزینه، خریدار و مدیر می‌توانند دکمه پرداخت آنلاین را حتی بدون اتصال واقعی به شاپرک تست کرده و نتیجه پرداخت موفق را مشاهده کنند.</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleField('gatewaySimulatorMode', !config.gatewaySimulatorMode)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-black transition cursor-pointer shrink-0 ${
+                  config.gatewaySimulatorMode !== false ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-700'
+                }`}
+              >
+                {config.gatewaySimulatorMode !== false ? 'شبیه‌ساز: فعال' : 'شبیه‌ساز: خاموش'}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -567,7 +602,7 @@ export const PaymentSettingsView: React.FC<PaymentSettingsViewProps> = ({
                 <span>۴. تنظیمات حالت دوم: پرداخت از طریق ربات بله</span>
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                تنظیم وضعیت نمایش و متن دکمه پرداخت از طریق ربات بله
+                تنظیم یوزرنیم ربات، آیدی ادمین و وضعیت نمایش دکمه پرداخت از طریق ربات بله
               </p>
             </div>
 
@@ -595,6 +630,36 @@ export const PaymentSettingsView: React.FC<PaymentSettingsViewProps> = ({
           </div>
 
           <div className="space-y-3.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  یوزرنیم ربات بله (بدون @):
+                </label>
+                <input
+                  type="text"
+                  dir="ltr"
+                  value={(config.baleBotUsername || '').replace(/^@/, '')}
+                  onChange={e => handleField('baleBotUsername', e.target.value.replace(/^@/, '').trim())}
+                  placeholder="Onivalbot"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs font-mono text-left text-slate-800"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  آیدی شخصی ادمین بله:
+                </label>
+                <input
+                  type="text"
+                  dir="ltr"
+                  value={config.baleAdminUsername || ''}
+                  onChange={e => handleField('baleAdminUsername', e.target.value.trim())}
+                  placeholder="@hasti_hjz"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs font-mono text-left text-slate-800"
+                />
+              </div>
+            </div>
+
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
                 عنوان دکمه اتصال به ربات بله در صفحه فاکتور:
@@ -603,7 +668,7 @@ export const PaymentSettingsView: React.FC<PaymentSettingsViewProps> = ({
                 type="text"
                 value={config.baleBotButtonText || ''}
                 onChange={e => handleField('baleBotButtonText', e.target.value)}
-                placeholder="اتصال به ربات بله و پرداخت فاکتور (@Onivalbot)"
+                placeholder="اتصال به ربات بله و پرداخت فاکتور"
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-800"
               />
             </div>

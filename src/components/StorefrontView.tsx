@@ -48,7 +48,7 @@ import {
   ChevronLeft,
   ShieldCheck
 } from 'lucide-react';
-import { Product, ProductCategory, Post, ContactMessage, Order, OrderItem, ProductSize, SiteContent, PaymentConfig } from '../types';
+import { Product, ProductCategory, Post, ContactMessage, Order, OrderItem, ProductSize, SiteContent, PaymentConfig, TelegramConfig } from '../types';
 import { apiFetch, setAdminSessionToken, getCachedLocalState } from '../services/dataService';
 import {
   DEFAULT_PRODUCTS,
@@ -70,6 +70,7 @@ interface StorefrontViewProps {
   categories: ProductCategory[];
   posts: Post[];
   messages: ContactMessage[];
+  botConfig?: TelegramConfig;
   siteContent?: SiteContent;
   onBackToAdmin: () => void;
   onPlaceOrder: (orderData: Partial<Order>) => Promise<any>;
@@ -92,14 +93,15 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
   categories,
   posts,
   messages,
+  botConfig,
   siteContent,
   onBackToAdmin,
   onPlaceOrder,
   onSubmitContact,
   onOrderUpdated,
 }) => {
-  // Navigation tabs
-  const [activePage, setActivePage] = useState<'home' | 'articles' | 'consultation' | 'tracking' | 'about' | 'contact' | 'checkout' | 'not_found'>('home');
+  // Navigation tabs - includes terms and refund for legal compliance (Torob, Emalls & eNamad)
+  const [activePage, setActivePage] = useState<'home' | 'articles' | 'consultation' | 'tracking' | 'about' | 'contact' | 'checkout' | 'terms' | 'refund' | 'not_found'>('home');
   const [notFoundPath, setNotFoundPath] = useState<string>('');
   
   // Category filter: 'all' | 'discounted' | 'honey' | 'supplement' | 'drink' | 'nuts' | or number
@@ -237,7 +239,9 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
         resolved.routeType === 'tracking' ||
         resolved.routeType === 'about' ||
         resolved.routeType === 'contact' ||
-        resolved.routeType === 'checkout'
+        resolved.routeType === 'checkout' ||
+        resolved.routeType === 'terms' ||
+        resolved.routeType === 'refund'
       ) {
         setActivePage(resolved.routeType);
         if (resolved.routeType === 'home') {
@@ -278,6 +282,31 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
   const [isConfirmingBale, setIsConfirmingBale] = useState(false);
   const [isConfirmingGateway, setIsConfirmingGateway] = useState(false);
 
+  // Reactive Bale / Telegram Bot Configuration (synced live with admin panel saves)
+  const [activeBotConfig, setActiveBotConfig] = useState<TelegramConfig>(() => botConfig || getActiveBotConfig());
+  useEffect(() => {
+    if (botConfig) setActiveBotConfig(botConfig);
+  }, [botConfig]);
+
+  useEffect(() => {
+    const handleBotConfigUpdated = (e: any) => {
+      if (e?.detail) {
+        setActiveBotConfig(prev => ({ ...prev, ...e.detail }));
+      }
+    };
+    window.addEventListener('onival_bot_config_updated', handleBotConfigUpdated);
+    return () => window.removeEventListener('onival_bot_config_updated', handleBotConfigUpdated);
+  }, []);
+
+  const activeBaleBotUsername = (
+    botConfig?.baleBotUsername ||
+    botConfig?.botUsername ||
+    siteContent?.paymentConfig?.baleBotUsername ||
+    activeBotConfig?.baleBotUsername ||
+    activeBotConfig?.botUsername ||
+    'Onivalbot'
+  ).replace(/^@/, '').trim();
+
   // Payment Configuration & Card-to-Card Receipt Upload State
   const paymentConfig: PaymentConfig = {
     defaultMethod: siteContent?.paymentConfig?.defaultMethod || 'card_to_card',
@@ -293,9 +322,9 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
     cardDescription:
       siteContent?.paymentConfig?.cardDescription ||
       'لطفاً پس از انتقال وجه به شماره کارت فوق، تصویر واضح رسید یا اسکرین‌شات واریزی را در کادر زیر انتخاب و ارسال نمایید. شماره فاکتور شما به صورت خودکار به همراه تصویر فیش برای واحد مالی ارسال می‌شود و پس از تایید، می‌توانید با کد رهگیری وضعیت بسته‌بندی و ارسال مرسوله را پیگیری فرمایید.',
-    baleBotUsername: getActiveBotConfig().baleBotUsername || siteContent?.paymentConfig?.baleBotUsername || 'Onivalbot',
-    baleAdminUsername: getActiveBotConfig().baleAdminUsername || siteContent?.paymentConfig?.baleAdminUsername || '@hasti_hjz',
-    baleWalletId: getActiveBotConfig().balePaymentTokenLive || siteContent?.paymentConfig?.baleWalletId || 'WALLET-v5gqSc1W1kaBUo2B',
+    baleBotUsername: activeBaleBotUsername,
+    baleAdminUsername: activeBotConfig.baleAdminUsername || siteContent?.paymentConfig?.baleAdminUsername || '@hasti_hjz',
+    baleWalletId: activeBotConfig.balePaymentTokenLive || siteContent?.paymentConfig?.baleWalletId || 'WALLET-v5gqSc1W1kaBUo2B',
     baleBotDescription:
       siteContent?.paymentConfig?.baleBotDescription ||
       'جهت تکمیل پرداخت امن و خودکار از طریق پیام‌رسان بله، روی دکمه زیر کلیک کرده و در ربات رسمی اونیوال گزینه شروع (Start) را بزنید.',
@@ -521,7 +550,7 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
   }, [isCartOpen, isAdminAuthModalOpen]);
 
   // Navigate to a storefront page and clear any open product/article detail view
-  const handleSelectPage = (page: 'home' | 'articles' | 'consultation' | 'tracking' | 'about' | 'contact' | 'checkout') => {
+  const handleSelectPage = (page: 'home' | 'articles' | 'consultation' | 'tracking' | 'about' | 'contact' | 'checkout' | 'terms' | 'refund') => {
     setSelectedProduct(null);
     setSelectedPost(null);
     setActivePage(page);
@@ -791,7 +820,7 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
         trackingCode,
         creationTime: new Date().toLocaleDateString('fa-IR'),
         items: orderItems,
-        balePaymentUrl: `https://ble.ir/${(paymentConfig.baleBotUsername || 'Onivalbot').replace(/^@/, '')}?start=pay_${trackingCode}`
+        balePaymentUrl: `https://ble.ir/${activeBaleBotUsername}?start=pay_${trackingCode}`
       };
 
       if (!Array.isArray(actualOrder.items) || actualOrder.items.length === 0) {
@@ -803,9 +832,7 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
       if (!actualOrder.totalPrice) actualOrder.totalPrice = totalCartPrice;
       if (!actualOrder.trackingCode) actualOrder.trackingCode = trackingCode;
       if (!actualOrder.paymentStatus) actualOrder.paymentStatus = 'Unpaid';
-      if (!actualOrder.balePaymentUrl) {
-        actualOrder.balePaymentUrl = `https://ble.ir/${(paymentConfig.baleBotUsername || 'Onivalbot').replace(/^@/, '')}?start=pay_${actualOrder.trackingCode}`;
-      }
+      actualOrder.balePaymentUrl = `https://ble.ir/${activeBaleBotUsername}?start=pay_${actualOrder.trackingCode}`;
 
       setCurrentInvoice(actualOrder);
 
@@ -3720,6 +3747,83 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
           </div>
         )}
 
+        {/* ================= PAGE 6.1: TERMS & CONDITIONS ================= */}
+        {activePage === 'terms' && (
+          <div className="max-w-3xl mx-auto bg-white rounded-3xl p-6 sm:p-10 shadow-xs border border-stone-100 space-y-6 animate-fadeIn">
+            <div className="border-b border-stone-100 pb-4">
+              <div className="flex items-center gap-2 text-xs text-amber-700 font-bold mb-2">
+                <FileText className="w-4 h-4 text-amber-600" />
+                <span>الزامات قانونی و شفافیت خرید اینترنتی</span>
+              </div>
+              <h1 className="text-xl sm:text-2xl font-black text-stone-900">
+                {siteContent?.termsTitle || `قوانین، مقررات و رویه خرید از فروشگاه ${brandName}`}
+              </h1>
+            </div>
+
+            <div className="text-xs sm:text-sm text-stone-700 leading-relaxed space-y-4 whitespace-pre-line font-sans">
+              {siteContent?.termsContent || `۱. شرایط عمومی خرید:
+ثبت سفارش در فروشگاه تخصصی ${brandName} در تمامی ساعات شبانه‌روز و ۷ روز هفته امکان‌پذیر است. سفارشات در اولین روز کاری پردازش و وارد نوبت آماده‌سازی می‌شوند.
+
+۲. اصالت کالا و برگه آزمایشگاهی:
+تمامی عسل‌ها و فرآورده‌های کندو همراه با برگه آزمایش تخصصی (ساکارز طبیعی، هیدروکسی متیل فورفورال مجاز و پرولین و دیاستاز استاندارد) ارسال می‌گردند.
+
+۳. امنیت پرداخت و صدور فاکتور:
+کلیه سفارشات دارای فاکتور رسمی سیستمی با کد رهگیری اختصاصی بوده و پرداخت از طریق درگاه‌های امن بانکی، کارت به کارت یا ربات رسمی بله صورت می‌گیرد.
+
+۴. حریم خصوصی و امنیت اطلاعات خریداران:
+اطلاعات شخصی، شماره تماس و نشانی پستی خریداران محترم صرفاً جهت تحویل کالا و اطلاع‌رسانی پیامکی استفاده شده و نزد فروشگاه محفوظ است.`}
+            </div>
+
+            <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200/80 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+              <span className="text-stone-600">سوالی در خصوص شرایط و قوانین خرید دارید؟</span>
+              <button
+                type="button"
+                onClick={() => handleSelectPage('contact')}
+                className="px-4 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-xl font-bold transition cursor-pointer"
+              >
+                ارتباط با پشتیبانی
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ================= PAGE 6.2: REFUND POLICY ================= */}
+        {activePage === 'refund' && (
+          <div className="max-w-3xl mx-auto bg-white rounded-3xl p-6 sm:p-10 shadow-xs border border-stone-100 space-y-6 animate-fadeIn">
+            <div className="border-b border-stone-100 pb-4">
+              <div className="flex items-center gap-2 text-xs text-emerald-700 font-bold mb-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                <span>ضمانت اصالت، سلامت و حقوق مصرف‌کننده</span>
+              </div>
+              <h1 className="text-xl sm:text-2xl font-black text-stone-900">
+                {siteContent?.refundTitle || `شرایط بازگشت کالا و رویه مرجوعی ۷ روزه ${brandName}`}
+              </h1>
+            </div>
+
+            <div className="text-xs sm:text-sm text-stone-700 leading-relaxed space-y-4 whitespace-pre-line font-sans">
+              {siteContent?.refundContent || `۱. ضمانت بازگشت ۷ روزه وجه:
+خریدار محترم حق دارد تا ۷ روز پس از تحویل مرسوله پستی، در صورت هرگونه عدم رضایت از اصالت عسل یا عدم انطباق با برگه آزمایش، کالا را مرجوع نماید.
+
+۲. تضمین سلامت فیزیکی حین ارسال:
+ظروف شیشه‌ای با ضربه‌گیرهای چندلایه حباب‌دار و کارتن‌های مقاوم پستی بسته‌بندی می‌شوند. در صورت بروز هرگونه شکستگی یا آسیب‌دیدگی در حین حمل‌ونقل توسط شرکت پست، محصول فوراً و به صورت کاملاً رایگان مجدداً ارسال می‌گردد.
+
+۳. فرآیند عودت وجه:
+پس از دریافت کالای مرجوعی توسط انبار، کارشناسان ما بسته را بررسی نموده و مبلغ پرداختی ظرف حداکثر ۲۴ الی ۴۸ ساعت کاری به شماره شبا یا شماره کارت خریدار مسترد می‌گردد.`}
+            </div>
+
+            <div className="p-4 rounded-2xl bg-emerald-50/70 border border-emerald-200/80 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+              <span className="text-emerald-950 font-bold">جهت ثبت درخواست مرجوعی یا پیگیری ضمانت، با واحد امور مشتریان در تماس باشید.</span>
+              <button
+                type="button"
+                onClick={() => handleSelectPage('contact')}
+                className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl font-bold transition cursor-pointer"
+              >
+                ثبت پیام مرجوعی
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* ================= PAGE 7: CHECKOUT & INVOICE FLOW ================= */}
         {activePage === 'checkout' && (
           <div className="max-w-3xl mx-auto space-y-6 animate-fadeIn">
@@ -4169,9 +4273,9 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                       </div>
                     )}
 
-                    {/* ==================== MODE 2: BALE BOT PAYMENT ==================== */}
+                    {/* ==================== MODE 2: BALE BOT PAYMENT (Clean, Uncluttered, Fast) ==================== */}
                     {selectedPaymentTab === 'bale_bot' && (
-                      <div className="bg-emerald-50/50 rounded-3xl p-5 sm:p-7 border border-emerald-200/90 space-y-5 animate-fadeIn">
+                      <div className="bg-emerald-50/50 rounded-3xl p-5 sm:p-7 border border-emerald-200/90 space-y-4 animate-fadeIn">
                         {/* Header & Status */}
                         <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-emerald-100">
                           <div className="text-xs sm:text-sm font-black text-emerald-950 flex items-center gap-2">
@@ -4179,29 +4283,22 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                               <Send className="w-4 h-4" />
                             </div>
                             <div>
-                              <span>سیستم پرداخت هوشمند و بازوی پیام‌رسان بله</span>
-                              <div className="text-[11px] font-normal text-emerald-700">اتصال سریع، پرداخت با کیف‌پول یا کارت، و پیگیری آنی</div>
+                              <span>پرداخت سریع با ربات بله</span>
+                              <div className="text-[11px] font-normal text-emerald-700">تکمیل آنی سفارش بدون نیاز به ارسال فیش</div>
                             </div>
                           </div>
 
                           <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-200 flex items-center gap-1.5">
                             <Clock className="w-3.5 h-3.5 text-amber-600" />
-                            <span>در انتظار پرداخت و تایید فاکتور</span>
+                            <span>در انتظار پرداخت</span>
                           </span>
                         </div>
 
-                        {/* الف) خلاصه پیش‌فاکتور رسمی */}
+                        {/* Invoice Summary */}
                         <div className="bg-white p-4 rounded-2xl border border-emerald-100 shadow-2xs space-y-3">
-                          <div className="text-xs font-black text-stone-900 flex items-center justify-between">
-                            <span>پیش‌فاکتور رسمی صادرشده:</span>
-                            <span className="text-[11px] font-normal text-stone-500">
-                              {currentInvoice.items?.length || 0} قلم کالا برای {currentInvoice.userFullName}
-                            </span>
-                          </div>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
-                            <div className="bg-stone-50 p-2.5 rounded-xl border border-stone-200/80 flex items-center justify-between">
-                              <span className="text-stone-500">شماره اختصاصی فاکتور:</span>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                            <div className="bg-stone-50 p-3 rounded-xl border border-stone-200/80 flex items-center justify-between">
+                              <span className="text-stone-500 font-bold">شماره فاکتور:</span>
                               <div className="flex items-center gap-1.5">
                                 <span className="font-mono font-black text-stone-900 text-xs sm:text-sm">{currentInvoice.trackingCode}</span>
                                 <button
@@ -4211,7 +4308,7 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                                     setCopiedInvoiceCode(true);
                                     setTimeout(() => setCopiedInvoiceCode(false), 2000);
                                   }}
-                                  className="text-stone-400 hover:text-stone-700 p-1 rounded"
+                                  className="text-stone-400 hover:text-emerald-700 p-1 rounded cursor-pointer"
                                   title="کپی شماره فاکتور"
                                 >
                                   {copiedInvoiceCode ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
@@ -4219,164 +4316,65 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                               </div>
                             </div>
 
-                            <div className="bg-amber-50/70 p-2.5 rounded-xl border border-amber-200 flex items-center justify-between">
-                              <span className="text-amber-800 font-bold">مبلغ کل فاکتور:</span>
-                              <span className="font-black text-amber-900 text-xs sm:text-sm">
+                            <div className="bg-emerald-50/70 p-3 rounded-xl border border-emerald-200 flex items-center justify-between">
+                              <span className="text-emerald-800 font-bold">مبلغ قابل پرداخت:</span>
+                              <span className="font-black text-emerald-950 text-xs sm:text-sm">
                                 {formatPrice(currentInvoice.totalPrice)} تومان
                               </span>
                             </div>
                           </div>
                         </div>
 
-                        {/* ب) لینک هدایت مستقیم به بازوی بله یا اکانت بله ادمین */}
-                        <div className="space-y-2.5">
-                          <div className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
-                            <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                            <span>لینک‌های هدایت مستقیم به پیام‌رسان بله:</span>
-                          </div>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {/* دکمه بازوی بله */}
-                            <a
-                              href={
-                                currentInvoice.balePaymentUrl ||
-                                `https://ble.ir/${(paymentConfig.baleBotUsername || 'Onivalbot').replace(/^@/, '')}?start=pay_${currentInvoice.trackingCode}`
-                              }
-                              target="_blank"
-                              rel="noreferrer"
-                              className="py-3.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-xs font-black shadow-md transition flex items-center justify-center gap-2 text-center"
-                            >
-                              <Send className="w-4 h-4 shrink-0" />
-                              <div className="text-right">
-                                <div className="leading-tight">اتصال به بازوی بله فروشگاه</div>
-                                <div className="text-[10px] font-mono opacity-80 font-normal">@{(paymentConfig.baleBotUsername || 'Onivalbot').replace(/^@/, '')}</div>
-                              </div>
-                              <ExternalLink className="w-3.5 h-3.5 opacity-75 shrink-0 mr-auto" />
-                            </a>
-
-                            {/* دکمه اکانت ادمین بله */}
-                            <a
-                              href={`https://ble.ir/${(paymentConfig.baleAdminUsername || siteContent?.contactBaleId || 'hasti_hjz').replace(/^@/, '')}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="py-3.5 px-4 bg-white hover:bg-emerald-50 text-emerald-900 border-2 border-emerald-500 rounded-2xl text-xs font-black shadow-2xs transition flex items-center justify-center gap-2 text-center"
-                            >
-                              <HeartHandshake className="w-4 h-4 shrink-0 text-emerald-600" />
-                              <div className="text-right">
-                                <div className="leading-tight">ارتباط مستقیم با اکانت بله ادمین</div>
-                                <div className="text-[10px] font-mono text-emerald-700 font-normal">@{(paymentConfig.baleAdminUsername || siteContent?.contactBaleId || 'hasti_hjz').replace(/^@/, '')}</div>
-                              </div>
-                              <ExternalLink className="w-3.5 h-3.5 opacity-75 shrink-0 mr-auto" />
-                            </a>
-                          </div>
+                        {/* Primary Action Button: Direct to active Bale Bot */}
+                        <div className="pt-1 space-y-2">
+                          <a
+                            href={`https://ble.ir/${activeBaleBotUsername}?start=pay_${currentInvoice.trackingCode}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="w-full py-4 px-6 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white rounded-2xl text-xs sm:text-sm font-black shadow-lg shadow-emerald-600/20 transition flex items-center justify-center gap-2.5 text-center cursor-pointer"
+                          >
+                            <Send className="w-4 h-4 shrink-0" />
+                            <span>ورود به ربات بله و پرداخت فاکتور (@{activeBaleBotUsername})</span>
+                            <ExternalLink className="w-4 h-4 opacity-75 shrink-0 mr-auto" />
+                          </a>
                         </div>
 
-                        {/* ج) مشخصات فاکتور و شماره کارت / کیف‌پول بله */}
-                        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-emerald-100 space-y-3 text-xs">
-                          <div className="text-xs font-bold text-stone-800 flex items-center justify-between">
-                            <span>اطلاعات واریز کارت و کیف‌پول بله:</span>
-                            <span className="text-[10px] text-stone-400">امکان انتقال شتابی یا درون‌برنامه‌ای</span>
+                        {/* Concise Process & Tracking Guidance */}
+                        <div className="bg-white/90 border border-emerald-200 rounded-2xl p-4 text-xs text-stone-700 space-y-2 leading-relaxed">
+                          <div className="font-bold text-emerald-900 flex items-center gap-1.5">
+                            <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <span>راهنمای پرداخت و پیگیری سفارش:</span>
                           </div>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {/* کارت بانکی */}
-                            <div className="p-3 bg-stone-50 rounded-xl border border-stone-200">
-                              <div className="text-[11px] text-stone-500 mb-1">شماره کارت بانکی {paymentConfig.bankName}:</div>
-                              <div className="flex items-center justify-between gap-1">
-                                <span className="font-mono font-bold text-stone-900 text-xs sm:text-sm tracking-wider" dir="ltr">
-                                  {paymentConfig.cardNumber}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={handleCopyCardNumber}
-                                  className="text-stone-500 hover:text-stone-800 px-2 py-1 rounded bg-white border border-stone-200 text-[11px] flex items-center gap-1 cursor-pointer"
-                                >
-                                  {copiedCard ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-                                  <span>{copiedCard ? 'کپی شد' : 'کپی'}</span>
-                                </button>
-                              </div>
-                              <div className="text-[10px] text-stone-500 mt-1">{paymentConfig.cardHolderName}</div>
-                            </div>
-
-                            {/* کیف پول بله */}
-                            <div className="p-3 bg-emerald-50/60 rounded-xl border border-emerald-200">
-                              <div className="text-[11px] text-emerald-800 mb-1">شناسه کیف‌پول بازوی بله:</div>
-                              <div className="flex items-center justify-between gap-1">
-                                <span className="font-mono font-bold text-emerald-950 text-xs truncate" dir="ltr">
-                                  {paymentConfig.baleWalletId || 'WALLET-v5gqSc1W1kaBUo2B'}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    navigator.clipboard?.writeText(paymentConfig.baleWalletId || 'WALLET-v5gqSc1W1kaBUo2B');
-                                    setCopiedWalletId(true);
-                                    setTimeout(() => setCopiedWalletId(false), 2000);
-                                  }}
-                                  className="text-emerald-800 hover:text-emerald-950 px-2 py-1 rounded bg-white border border-emerald-200 text-[11px] flex items-center gap-1 cursor-pointer shrink-0"
-                                >
-                                  {copiedWalletId ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-                                  <span>{copiedWalletId ? 'کپی شد' : 'کپی'}</span>
-                                </button>
-                              </div>
-                              <div className="text-[10px] text-emerald-700 mt-1">تراکنش مستقیم از طریق درگاه کیف‌پول بله</div>
-                            </div>
-                          </div>
+                          <p className="text-[11px] text-stone-600 leading-relaxed">
+                            پس از لمس دکمه بالا و پرداخت فاکتور در ربات بله، فرآیند خرید شما به صورت خودکار کامل شده و نیازی به ارسال مجدد فیش یا تایید دیگری ندارید. جهت پیگیری‌های بعدی در سایت، شماره فاکتور خود (<strong className="font-mono text-emerald-900">{currentInvoice.trackingCode}</strong>) را به خاطر بسپارید.
+                          </p>
                         </div>
 
-                        {/* د) تایید نهایی پرداخت توسط مشتری و ارائه لینک پیگیری سفارش */}
-                        <div className="pt-2 space-y-3">
+                        {/* Action buttons: Track or Back */}
+                        <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 pt-2 text-xs">
                           <button
                             type="button"
-                            disabled={isConfirmingBale}
-                            onClick={() => handleConfirmBalePayment(currentInvoice.trackingCode)}
-                            className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-xs sm:text-sm font-black shadow-md transition flex items-center justify-center gap-2 cursor-pointer"
+                            onClick={() => {
+                              setActivePage('tracking');
+                              executeTrackingSearch(currentInvoice.trackingCode);
+                              window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+                            }}
+                            className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
                           >
-                            <CheckCircle2 className={`w-4 h-4 shrink-0 ${isConfirmingBale ? 'animate-spin' : ''}`} />
-                            <span>
-                              {isConfirmingBale
-                                ? 'در حال ثبت تایید پرداخت در سیستم...'
-                                : 'تأیید نهایی پرداخت توسط مشتری و دریافت لینک پیگیری'}
-                            </span>
+                            <Search className="w-3.5 h-3.5" />
+                            <span>پیگیری وضعیت سفارش با شماره فاکتور</span>
                           </button>
 
-                          {/* لینک صفحه پیگیری سفارش برای مشتری */}
-                          <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-stone-200 flex flex-col sm:flex-row items-center justify-between gap-2.5 text-xs">
-                            <div className="text-right w-full sm:w-auto">
-                              <div className="font-bold text-stone-800">لینک صفحه پیگیری این سفارش:</div>
-                              <div className="font-mono text-emerald-700 text-[11px] truncate" dir="ltr">
-                                {typeof window !== 'undefined' ? `${window.location.origin}/track-order?code=${currentInvoice.trackingCode}` : `/track-order?code=${currentInvoice.trackingCode}`}
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const url = `${typeof window !== 'undefined' ? window.location.origin : ''}/track-order?code=${currentInvoice.trackingCode}`;
-                                  navigator.clipboard?.writeText(url);
-                                  setCopiedTrackingLink(true);
-                                  setTimeout(() => setCopiedTrackingLink(false), 2500);
-                                }}
-                                className="px-3.5 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
-                              >
-                                {copiedTrackingLink ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                                <span>{copiedTrackingLink ? 'کپی شد' : 'کپی لینک پیگیری'}</span>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setActivePage('tracking');
-                                  executeTrackingSearch(currentInvoice.trackingCode);
-                                  window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
-                                }}
-                                className="px-3.5 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
-                              >
-                                <Search className="w-3.5 h-3.5" />
-                                <span>پیگیری فاکتور</span>
-                              </button>
-                            </div>
-                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCurrentInvoice(null);
+                              setActivePage('home');
+                            }}
+                            className="w-full sm:w-auto text-stone-400 hover:text-stone-700 py-1.5 text-center font-medium cursor-pointer"
+                          >
+                            بستن و بازگشت به صفحه اصلی
+                          </button>
                         </div>
                       </div>
                     )}
@@ -4615,10 +4613,12 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
       </main>
 
       {/* ================= FOOTER ================= */}
+      {/* ================= FOOTER ================= */}
       <footer className="bg-stone-900 text-white pt-14 pb-24 md:pb-8 px-6 rounded-t-[40px] mt-20">
-        <div className="max-w-5xl mx-auto flex flex-wrap gap-10 justify-between items-start">
-          <div className="max-w-sm space-y-3">
-            <div className="flex items-center gap-2.5 font-black text-lg">
+        <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 justify-between items-start">
+          {/* Column 1: Brand Info & Contact */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2.5 font-black text-base sm:text-lg">
               {siteContent?.siteLogo ? (
                 <div
                   className={
@@ -4656,8 +4656,24 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
             <p className="text-xs text-stone-400 leading-relaxed">
               {brandDescription}
             </p>
+            {siteContent?.contactPhone && (
+              <div className="text-[11px] text-stone-400 pt-1">
+                <span className="text-stone-300 font-bold">تلفن پشتیبانی:</span> {siteContent.contactPhone}
+              </div>
+            )}
+            {siteContent?.contactWorkingHours && (
+              <div className="text-[11px] text-stone-400">
+                <span className="text-stone-300 font-bold">ساعات پاسخگویی:</span> {siteContent.contactWorkingHours}
+              </div>
+            )}
+            {siteContent?.contactAddress && (
+              <div className="text-[11px] text-stone-400">
+                <span className="text-stone-300 font-bold">نشانی:</span> {siteContent.contactAddress}
+              </div>
+            )}
           </div>
 
+          {/* Column 2: Quick Access */}
           <div>
             <h4 className="text-sm font-bold text-amber-400 mb-3">دسترسی سریع</h4>
             <ul className="space-y-2 text-xs text-stone-300">
@@ -4665,20 +4681,63 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
               <li><a href="/articles" onClick={(e) => { e.preventDefault(); handleSelectPage('articles'); }} className="hover:text-white cursor-pointer">{navigation.articles || 'مقالات علمی'}</a></li>
               <li><a href="/consultation" onClick={(e) => { e.preventDefault(); handleSelectPage('consultation'); }} className="hover:text-white cursor-pointer">{navigation.consultation || 'مشاوره تخصصی'}</a></li>
               <li><a href="/tracking" onClick={(e) => { e.preventDefault(); handleSelectPage('tracking'); }} className="hover:text-white cursor-pointer">{navigation.tracking || 'پیگیری سفارش'}</a></li>
+            </ul>
+          </div>
+
+          {/* Column 3: Legal & Trust Policies (Torob, Emalls & eNamad compliant) */}
+          <div>
+            <h4 className="text-sm font-bold text-amber-400 mb-3">قوانین و پشتیبانی</h4>
+            <ul className="space-y-2 text-xs text-stone-300">
               <li><a href="/about" onClick={(e) => { e.preventDefault(); handleSelectPage('about'); }} className="hover:text-white cursor-pointer">{navigation.about || 'درباره ما'}</a></li>
               <li><a href="/contact" onClick={(e) => { e.preventDefault(); handleSelectPage('contact'); }} className="hover:text-white cursor-pointer">{navigation.contact || 'تماس با ما'}</a></li>
+              <li><a href="/terms" onClick={(e) => { e.preventDefault(); handleSelectPage('terms'); }} className="hover:text-amber-300 text-amber-200/90 font-medium cursor-pointer">قوانین و مقررات خرید</a></li>
+              <li><a href="/refund" onClick={(e) => { e.preventDefault(); handleSelectPage('refund'); }} className="hover:text-amber-300 text-amber-200/90 font-medium cursor-pointer">شرایط بازگشت کالا (رویه مرجوعی)</a></li>
             </ul>
+          </div>
+
+          {/* Column 4: eNamad & Trust Badges */}
+          <div className="space-y-3">
+            <h4 className="text-sm font-bold text-amber-400 mb-3">نماد اعتماد و اعتبار</h4>
+            <div className="bg-stone-800/80 p-3.5 rounded-2xl border border-stone-700/80 space-y-2">
+              {siteContent?.enamadCode ? (
+                <div
+                  className="enamad-container flex items-center justify-center p-2 bg-white rounded-xl"
+                  dangerouslySetInnerHTML={{ __html: siteContent.enamadCode }}
+                />
+              ) : siteContent?.enamadStatus === 'hidden' ? null : (
+                <div className="text-center p-3 rounded-xl bg-stone-900 border border-stone-700 space-y-1.5">
+                  <div className="w-10 h-10 mx-auto rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                    <ShieldCheck className="w-5 h-5" />
+                  </div>
+                  <div className="text-xs font-black text-stone-200">نماد اعتماد الکترونیکی</div>
+                  <div className="text-[10px] text-stone-400 leading-tight">در مرحله استعلام و اخذ شناسه کسب‌وکار</div>
+                  <div className="inline-block mt-1 px-2 py-0.5 rounded-md bg-stone-800 text-[10px] text-amber-400 border border-stone-700 font-mono">
+                    eNamad Pending
+                  </div>
+                </div>
+              )}
+              <div className="text-[10px] text-stone-400 text-center leading-relaxed">
+                کلیه معاملات و سفارشات دارای فاکتور رسمی و ضمانت سلامت آزمایشگاهی است.
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Footer Bottom with Hidden Admin Access Button */}
-        <div className="max-w-5xl mx-auto border-t border-stone-800 mt-10 pt-6 flex flex-col sm:flex-row items-center justify-between text-xs text-stone-500 gap-3">
+        {/* Footnote text across all pages */}
+        {siteContent?.footerFootnote && (
+          <div className="max-w-5xl mx-auto border-t border-stone-800/80 mt-10 pt-5 text-center text-xs text-stone-400 leading-relaxed font-sans">
+            {siteContent.footerFootnote}
+          </div>
+        )}
+
+        {/* Footer Bottom with Editable Copyright & Hidden Admin Access Button */}
+        <div className="max-w-5xl mx-auto border-t border-stone-800 mt-4 pt-5 flex flex-col sm:flex-row items-center justify-between text-xs text-stone-500 gap-3">
           <div 
             onClick={handleCopyrightClick}
             className="cursor-pointer select-none hover:text-stone-400 transition flex items-center gap-1.5"
             title="کلیک برای ورود ادمین"
           >
-            <span>© ۲۰۲۶ {brandName} ({brandEnglishName}) • کلیه حقوق محفوظ است.</span>
+            <span>{siteContent?.footerCopyright || `© ۲۰۲۶ ${brandName} (${brandEnglishName}) • کلیه حقوق محفوظ است.`}</span>
             <span className="w-1.5 h-1.5 rounded-full bg-stone-700 hover:bg-amber-500 transition inline-block"></span>
           </div>
 

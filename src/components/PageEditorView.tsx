@@ -44,7 +44,8 @@ type EditorSubTab =
   | 'consultation'
   | 'tracking'
   | 'about'
-  | 'contact';
+  | 'contact'
+  | 'terms-refund';
 
 export const PageEditorView: React.FC<PageEditorViewProps> = ({
   initialContent,
@@ -235,7 +236,8 @@ export const PageEditorView: React.FC<PageEditorViewProps> = ({
     { id: 'consultation', label: 'صفحه مشاوره تخصصی', icon: HelpCircle },
     { id: 'tracking', label: 'صفحه پیگیری سفارش', icon: ShieldCheck },
     { id: 'about', label: 'صفحه درباره ما', icon: Info },
-    { id: 'contact', label: 'تماس با ما و فوتر', icon: Phone },
+    { id: 'contact', label: 'تماس با ما، فوتر و فوت‌نت', icon: Phone },
+    { id: 'terms-refund', label: 'قوانین و رویه مرجوعی (ترب/اینماد)', icon: FileText, badge: 'الزامی' },
   ];
 
   return (
@@ -1278,6 +1280,111 @@ export const PageEditorView: React.FC<PageEditorViewProps> = ({
                 value={content.footerCopyright}
                 onChange={e => handleFieldChange('footerCopyright', e.target.value)}
                 className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-xs text-slate-800 focus:bg-white focus:outline-amber-500 transition"
+              />
+            </div>
+
+            <div className="sm:col-span-2 p-4 rounded-2xl bg-amber-50/70 border border-amber-200/80 space-y-2">
+              <label className="block text-xs font-black text-amber-900 mb-1">
+                متن فوت‌نت (Footnote) پایین صفحه (پاورقی ثابت تمامی صفحات):
+              </label>
+              <textarea
+                rows={2}
+                value={content.footerFootnote || ''}
+                onChange={e => handleFieldChange('footerFootnote', e.target.value)}
+                placeholder="فروشگاه تخصصی فرآورده‌های ارگانیک کوهستان و کندو • تضمین برگه آزمایشگاهی و اصالت ۱۰۰٪..."
+                className="w-full px-4 py-2.5 rounded-xl border border-amber-300 bg-white text-xs text-slate-800 focus:outline-amber-500 transition leading-relaxed"
+              />
+              <span className="text-[11px] text-amber-800 block">
+                این متن در انتهای تمام صفحات سایت بالای کپی‌رایت و دکمه‌های فوتر به عنوان فوت‌نت ثابت به مخاطبان نمایش داده می‌شود.
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sub-tab 9: Terms & Conditions and Refund Policy */}
+      {activeSubTab === 'terms-refund' && (
+        <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-xs border border-slate-200/80 space-y-6 animate-fadeIn">
+          <div className="border-b border-slate-100 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-black text-slate-800 flex items-center gap-2">
+                <FileText className="w-5 h-5 text-amber-600" />
+                <span>ویرایش متن صفحات قوانین و مقررات و رویه مرجوعی کالا</span>
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                وجود این دو صفحه و شفافیت شرایط خرید برای تایید و اتصال در <strong>ترب</strong>، <strong>ایمالز</strong> و <strong>اینماد</strong> الزامی است.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <a
+                href="/terms"
+                target="_blank"
+                rel="noreferrer"
+                className="text-[11px] text-amber-700 bg-amber-50 hover:bg-amber-100 px-3 py-1.5 rounded-xl border border-amber-200 font-bold flex items-center gap-1"
+              >
+                <span>مشاهده صفحه قوانین</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+              <a
+                href="/refund"
+                target="_blank"
+                rel="noreferrer"
+                className="text-[11px] text-amber-700 bg-amber-50 hover:bg-amber-100 px-3 py-1.5 rounded-xl border border-amber-200 font-bold flex items-center gap-1"
+              >
+                <span>مشاهده صفحه مرجوعی</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            {/* Terms Section */}
+            <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                  <span>۱. متن صفحه قوانین و مقررات خرید (/terms):</span>
+                </label>
+                <span className="text-[10px] text-slate-400 font-mono">Route: /terms</span>
+              </div>
+              <input
+                type="text"
+                value={content.termsTitle || ''}
+                onChange={e => handleFieldChange('termsTitle', e.target.value)}
+                placeholder="عنوان صفحه قوانین (مثال: قوانین، مقررات و رویه خرید از فروشگاه اونیوال)"
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-800 focus:outline-amber-500 transition"
+              />
+              <textarea
+                rows={6}
+                value={content.termsContent || ''}
+                onChange={e => handleFieldChange('termsContent', e.target.value)}
+                placeholder="متن کامل بندهای قوانین، شرایط سفارش، اصالت و حریم خصوصی..."
+                className="w-full p-4 rounded-xl border border-slate-200 bg-white text-xs text-slate-800 focus:outline-amber-500 transition leading-relaxed font-sans"
+              />
+            </div>
+
+            {/* Refund Section */}
+            <div className="p-5 rounded-2xl bg-amber-50/50 border border-amber-200 space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-black text-amber-950 flex items-center gap-1.5">
+                  <RotateCcw className="w-4 h-4 text-amber-600" />
+                  <span>۲. متن صفحه شرایط بازگشت کالا و رویه مرجوعی (/refund):</span>
+                </label>
+                <span className="text-[10px] text-amber-800 font-mono">Route: /refund</span>
+              </div>
+              <input
+                type="text"
+                value={content.refundTitle || ''}
+                onChange={e => handleFieldChange('refundTitle', e.target.value)}
+                placeholder="عنوان صفحه مرجوعی (مثال: شرایط بازگشت کالا و رویه مرجوعی ۷ روزه)"
+                className="w-full px-4 py-2.5 rounded-xl border border-amber-200 bg-white text-xs font-bold text-slate-800 focus:outline-amber-500 transition"
+              />
+              <textarea
+                rows={6}
+                value={content.refundContent || ''}
+                onChange={e => handleFieldChange('refundContent', e.target.value)}
+                placeholder="توضیحات فرآیند عودت کالا، ضمانت اصالت، آزمایشگاه و واریز وجه مرجوعی..."
+                className="w-full p-4 rounded-xl border border-amber-200 bg-white text-xs text-slate-800 focus:outline-amber-500 transition leading-relaxed font-sans"
               />
             </div>
           </div>

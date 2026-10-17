@@ -16,6 +16,7 @@ import { PageEditorView } from './components/PageEditorView';
 import { PaymentSettingsView } from './components/PaymentSettingsView';
 import { ConsultationsAdminView } from './components/ConsultationsAdminView';
 import { SeoManagementView } from './components/SeoManagementView';
+import { SearchEnginesView } from './components/SearchEnginesView';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import {
   apiFetch,
@@ -466,6 +467,8 @@ export default function App() {
         return 'اصلاح صفحات، عناوین و چیدمان محتوا';
       case 'seo':
         return 'سئو تکنیکال، نقشه سایت، ریدایرکت ۳۰۱ و داده ساختاریافته (JSON-LD)';
+      case 'search-engines':
+        return 'اتصال به موتورهای جستجو و اینماد (ترب، ایمالز، اینماد)';
       case 'bot':
         return 'مرکز فرماندهی ربات‌های بله و تلگرام و درگاه‌های ارتباطی پشتیبانی';
       case 'account':
@@ -568,6 +571,7 @@ export default function App() {
           categories={productCategories}
           posts={posts}
           messages={messages}
+          botConfig={botConfig}
           siteContent={siteContent || undefined}
           onBackToAdmin={() => {
             if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/admin')) {
@@ -829,6 +833,16 @@ export default function App() {
                     siteContent={siteContent}
                     onSaveSiteContent={handleSaveSiteContent}
                     onNavigateTab={setActiveTab}
+                  />
+                )}
+
+                {activeTab === 'search-engines' && siteContent && (
+                  <SearchEnginesView
+                    siteContent={siteContent}
+                    products={products}
+                    onSaveSiteContent={handleSaveSiteContent}
+                    onNavigateTab={setActiveTab}
+                    onPreviewStorefront={switchToStorefront}
                   />
                 )}
 

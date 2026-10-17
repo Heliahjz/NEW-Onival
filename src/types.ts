@@ -247,6 +247,8 @@ export interface PaymentConfig {
   gatewayUrl: string;
   gatewayMerchantCode: string;
   gatewayDescription?: string;
+  gatewaySimulatorMode?: boolean;
+  gatewayProvider?: 'zarinpal' | 'zibal' | 'nextpay' | 'idpay' | 'custom';
   defaultMethod: 'card_to_card' | 'bale_bot' | 'gateway' | 'online_gateway';
 }
 
@@ -430,6 +432,16 @@ export interface SiteContent {
   contactWorkingHours: string;
   contactEmail: string;
   footerCopyright: string;
+  footerFootnote?: string;
+  enamadCode?: string;
+  enamadStatus?: 'active' | 'pending' | 'placeholder' | 'hidden';
+  samandehiCode?: string;
+  termsTitle?: string;
+  termsContent?: string;
+  refundTitle?: string;
+  refundContent?: string;
+  torobEnabled?: boolean;
+  emallsEnabled?: boolean;
   paymentConfig?: PaymentConfig;
   consultationConfig?: ConsultationConfig;
   productImageSettings?: {

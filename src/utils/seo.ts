@@ -857,6 +857,62 @@ export function resolveSeoForPath(
     };
   }
 
+  // 7.1 TERMS & CONDITIONS: /terms, /rules
+  if (decodedPath === '/terms' || decodedPath === '/rules') {
+    const title = `${data.siteContent?.termsTitle || `قوانین و مقررات خرید`} | فروشگاه ${brandName}`;
+    const description = `قوانین، مقررات، شرایط استفاده و نحوه ثبت و ارسال سفارشات در فروشگاه تخصصی ${brandName}.`;
+    return {
+      status: 200,
+      title,
+      description,
+      canonicalPath: '/terms',
+      canonicalUrl: `${origin}/terms`,
+      robots: 'index, follow',
+      ogType: 'website',
+      ogTitle: title,
+      ogDescription: description,
+      ogImage: defaultImage,
+      ogImageAlt: title,
+      jsonLd: [
+        buildOrganizationJsonLd(origin, data.siteContent),
+        buildBreadcrumbJsonLd(origin, [
+          { name: 'خانه', path: '/' },
+          { name: 'قوانین و مقررات', path: '/terms' },
+        ]),
+      ],
+      semanticHtml: `<main id="seo-ssr-content" class="sr-only"><h1>${escapeHtml(title)}</h1><p>${escapeHtml(description)}</p></main>`,
+      routeType: 'terms',
+    };
+  }
+
+  // 7.2 REFUND & RETURN POLICY: /refund, /return-policy
+  if (decodedPath === '/refund' || decodedPath === '/return-policy') {
+    const title = `${data.siteContent?.refundTitle || `شرایط بازگشت کالا و رویه مرجوعی`} | فروشگاه ${brandName}`;
+    const description = `رویه بازگشت کالا، شرایط مرجوعی ۷ روزه و ضمانت اصالت و سلامت فرآورده‌ها در فروشگاه ${brandName}.`;
+    return {
+      status: 200,
+      title,
+      description,
+      canonicalPath: '/refund',
+      canonicalUrl: `${origin}/refund`,
+      robots: 'index, follow',
+      ogType: 'website',
+      ogTitle: title,
+      ogDescription: description,
+      ogImage: defaultImage,
+      ogImageAlt: title,
+      jsonLd: [
+        buildOrganizationJsonLd(origin, data.siteContent),
+        buildBreadcrumbJsonLd(origin, [
+          { name: 'خانه', path: '/' },
+          { name: 'رویه مرجوعی و بازگشت کالا', path: '/refund' },
+        ]),
+      ],
+      semanticHtml: `<main id="seo-ssr-content" class="sr-only"><h1>${escapeHtml(title)}</h1><p>${escapeHtml(description)}</p></main>`,
+      routeType: 'refund',
+    };
+  }
+
   // 8. UTILITY / PRIVATE / NOINDEX ROUTES: /tracking, /track-order, /checkout, /admin
   if (decodedPath === '/tracking' || decodedPath === '/track-order' || decodedPath === '/track') {
     const title = `پیگیری سفارش و استعلام وضعیت مرسوله | ${brandName}`;
@@ -1029,6 +1085,18 @@ export function generateSitemapXml(
     changefreq: 'monthly',
     priority: '0.6',
   });
+  entries.push({
+    loc: `${cleanOrigin}/terms`,
+    lastmod: latestMod,
+    changefreq: 'monthly',
+    priority: '0.5',
+  });
+  entries.push({
+    loc: `${cleanOrigin}/refund`,
+    lastmod: latestMod,
+    changefreq: 'monthly',
+    priority: '0.5',
+  });
 
   // 2. Eligible Product Categories
   for (const cat of publishedCategories) {
@@ -1149,4 +1217,36 @@ export function applyClientDocumentSeo(seo: ResolvedPageSeo) {
     document.head.appendChild(jsonLdScript);
   }
   jsonLdScript.textContent = JSON.stringify(seo.jsonLd);
+
+  // 10. Torob & Emalls Standard Product Meta Tags
+  if (seo.matchedProduct) {
+    const prod = seo.matchedProduct;
+    const isOutOfStock = prod.isOutOfStock || Number(prod.stock ?? 1) <= 0;
+    const discount = Number(prod.discount ?? prod.discountPercent ?? 0) || 0;
+    const basePrice = prod.sizes && prod.sizes.length > 0 ? prod.sizes[0].price : (Number(prod.price) || 0);
+    const finalPrice = discount > 0 ? Math.round(basePrice * (100 - discount) / 100) : basePrice;
+    const torobPrice = isOutOfStock ? 0 : finalPrice;
+    const oldPrice = discount > 0 ? basePrice : finalPrice;
+    const availability = isOutOfStock ? 'outofstock' : 'instock';
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const fullImage = prod.imageName
+      ? (prod.imageName.startsWith('http') ? prod.imageName : `${origin}${prod.imageName.startsWith('/') ? '' : '/'}${prod.imageName}`)
+      : '';
+
+    setMeta('meta[name="product_id"]', 'name', 'product_id', String(prod.id));
+    setMeta('meta[name="product_name"]', 'name', 'product_name', prod.title);
+    setMeta('meta[name="product_price"]', 'name', 'product_price', String(torobPrice));
+    setMeta('meta[name="product_old_price"]', 'name', 'product_old_price', String(oldPrice));
+    setMeta('meta[name="availability"]', 'name', 'availability', availability);
+    if (fullImage) {
+      setMeta('meta[property="og:image"]', 'property', 'og:image', fullImage);
+    }
+  } else {
+    // Remove Torob product-specific tags when navigating to non-product pages
+    ['product_id', 'product_name', 'product_price', 'product_old_price', 'availability'].forEach((name) => {
+      const el = document.head.querySelector(`meta[name="${name}"]`);
+      if (el) el.remove();
+    });
+  }
 }
+

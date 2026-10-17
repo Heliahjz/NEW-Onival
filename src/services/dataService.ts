@@ -843,6 +843,18 @@ function handleLocalApiRoute(
     }
   }
 
+  if (cleanPath === '/api/bot/test-admin-welcome' && method === 'POST') {
+    return {
+      status: 503,
+      data: {
+        ok: false,
+        delivered: false,
+        message: 'عدم برقراری ارتباط با سرور هاست جهت ارسال پیام واقعی به بله',
+        description: 'لطفاً از فعال بودن سرور Node.js یا وضعیت اینترنت خود اطمینان حاصل فرمایید.'
+      }
+    };
+  }
+
   if (
     (cleanPath === '/api/bot/test-connection' ||
       cleanPath === '/api/bot/send-test-message' ||
@@ -852,23 +864,24 @@ function handleLocalApiRoute(
       cleanPath === '/api/bot/webhook-action') &&
     method === 'POST'
   ) {
+    const isSim = cleanPath.includes('simulate');
     const newLog: BotActivityLog = {
       id: Date.now(),
       time: new Date().toLocaleTimeString('fa-IR'),
       timestamp: new Date().toLocaleTimeString('fa-IR'),
       type: 'test_event',
       platform: 'bale',
-      text: 'عملیات آزمایشی در حالت ذخیره‌سازی محلی کلاینت با موفقیت ثبت گردید.',
-      status: 'success',
-      details: 'عملیات آزمایشی در حالت ذخیره‌سازی محلی کلاینت با موفقیت ثبت گردید.',
+      text: isSim ? 'شبیه‌سازی رویداد در محیط محلی انجام شد.' : 'تلاش برای تست در حالت آفلاین کلاینت ثبت شد.',
+      status: isSim ? 'success' : 'warning',
+      details: isSim ? 'شبیه‌سازی محلی کلاینت' : 'عدم دسترسی به وب‌سرویس واقعی در حالت آفلاین',
     };
     state.botActivityLogs = [newLog, ...(state.botActivityLogs || [])].slice(0, 50);
     writeLocalBackup(state);
     return {
       status: 200,
       data: {
-        ok: true,
-        message: 'پیام یا عملیات آزمایشی با موفقیت در لاگ محلی ثبت شد.',
+        ok: isSim,
+        message: isSim ? 'رویداد آزمایشی شبیه‌سازی شد.' : 'سرور در حالت آفلاین محلی است. لطفاً اتصال سرور هاست را بررسی نمایید.',
         logs: state.botActivityLogs,
       },
     };
@@ -987,9 +1000,9 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
   }
 
   try {
-    // افزودن تایم‌اوت هوشمند ۳ ثانیه‌ای جهت جلوگیری از قفل شدن فرانت‌اند در هاست‌های بدون Node.js
+    // تایم‌اوت ۱۵ ثانیه‌ای برای پاسخ‌های وب‌سرویس‌های خارجی نظیر بله و تلگرام
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3500);
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
     const serverResponse = await window.fetch(input, {
       ...enrichedInit,
@@ -999,14 +1012,15 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
 
     const contentType = serverResponse.headers.get('content-type') || '';
 
-    // اگر سرور فعال بود و دیتای JSON برگرداند
-    if (serverResponse.ok && contentType.includes('application/json')) {
+    // اگر سرور پاسخ داد و محتوا JSON بود (چه موفق ۲۰۰ و چه خطای معتبر ۴۰۰ یا ۴۰۱)، پاسخ واقعی سرور را برمی‌گردانیم
+    if (contentType.includes('application/json')) {
       setConnectionStatus('connected');
 
       // ذخیره توکن احراز هویت در صورت موفقیت
       if (
-        urlStr.startsWith('/api/admin/login') ||
-        urlStr.startsWith('/api/account/change-credentials')
+        serverResponse.ok &&
+        (urlStr.startsWith('/api/admin/login') ||
+          urlStr.startsWith('/api/account/change-credentials'))
       ) {
         try {
           const cloned = await serverResponse.clone().json();
@@ -1021,12 +1035,18 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
       return serverResponse;
     }
 
-    // اگر سرور پاسخ داد ولی ۴۰۴، ۵۰۰ یا صفحه HTML فرانت برگرداند (مورد شایع در هاست‌های سی‌پنل بدون نود جی‌اس فعال)
+    // اگر سرور فعال بود و پاسخ دیگری غیر از JSON داد (مثلا فایل یا باینری)
+    if (serverResponse.ok) {
+      setConnectionStatus('connected');
+      return serverResponse;
+    }
+
+    // اگر سرور پاسخ داد ولی صفحه HTML برگرداند (مورد شایع در هاست‌های بدون Node.js)
     console.warn(
       `[Onival Resilient Fallback] API endpoint ${urlStr} returned status ${serverResponse.status} (content-type: ${contentType}). Switching to self-contained client-side data engine.`
     );
   } catch (netErr) {
-    // خطای شبکه یا تایم‌اوت ناشی از نبود سرور بک‌اند
+    // خطای شبکه یا قطعی اینترنت
     console.warn(
       `[Onival Resilient Fallback] Network request to ${urlStr} failed. Activating instant LocalStorage fallback.`,
       netErr

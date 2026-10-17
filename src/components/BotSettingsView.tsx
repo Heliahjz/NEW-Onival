@@ -33,7 +33,8 @@ import {
   Play,
   Settings2,
   Server,
-  BookOpen
+  BookOpen,
+  AlertTriangle
 } from 'lucide-react';
 import { TelegramConfig, BotActivityLog, ContactMessage, Order, SiteContent } from '../types';
 import { apiFetch } from '../services/dataService';
@@ -293,16 +294,31 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
     setIsSendingWelcomeTest(true);
     setWelcomeTestResult(null);
     try {
+      const tokenToUse = String(formData.botToken || formData.baleBotToken || '').trim();
+      const chatIdToUse = String(formData.adminChatId || formData.baleAdminChatId || '').trim();
+      const baseUrlToUse = String(formData.baseUrl || formData.baleBaseUrl || 'https://tapi.bale.ai').trim();
+      const botUserToUse = String(formData.botUsername || formData.baleBotUsername || 'Onivalbot').replace(/^@/, '').trim();
+
+      const syncedForm = {
+        ...formData,
+        botToken: tokenToUse,
+        baleBotToken: tokenToUse,
+        adminChatId: chatIdToUse,
+        baleAdminChatId: chatIdToUse,
+        botUsername: botUserToUse,
+        baleBotUsername: botUserToUse,
+      };
+
       // 1. Immediately save current form data to LocalStorage so any new token or chatId typed is active
-      await saveActiveBotConfig(formData);
+      await saveActiveBotConfig(syncedForm);
       setLastSavedAt(new Date().toLocaleTimeString('fa-IR'));
       setHasUnsavedChanges(false);
 
       // 2. Dispatch real welcome test
       const res = await sendBaleAdminWelcomeTest({
-        botToken: formData.botToken,
-        chatId: formData.adminChatId,
-        baseUrl: formData.baseUrl,
+        botToken: tokenToUse,
+        chatId: chatIdToUse,
+        baseUrl: baseUrlToUse,
       });
       setWelcomeTestResult(res);
       if (res.ok) {
@@ -721,7 +737,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                       type={showBaleToken ? 'text' : 'password'}
                       dir="ltr"
                       value={formData.botToken}
-                      onChange={(e) => updateField({ botToken: e.target.value })}
+                      onChange={(e) => updateField({ botToken: e.target.value.trim(), baleBotToken: e.target.value.trim() })}
                       placeholder="1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34"
                       className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-xs font-mono text-left bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
                     />
@@ -745,7 +761,10 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                         type="text"
                         dir="ltr"
                         value={formData.botUsername || ''}
-                        onChange={(e) => updateField({ botUsername: e.target.value.replace('@', '') })}
+                        onChange={(e) => {
+                          const clean = e.target.value.replace('@', '').trim();
+                          updateField({ botUsername: clean, baleBotUsername: clean });
+                        }}
                         placeholder="Onivalbot"
                         className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-xs font-mono text-left focus:outline-hidden focus:border-emerald-500"
                       />
@@ -756,7 +775,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                         type="text"
                         dir="ltr"
                         value={formData.baleAdminUsername || ''}
-                        onChange={(e) => updateField({ baleAdminUsername: e.target.value })}
+                        onChange={(e) => updateField({ baleAdminUsername: e.target.value.trim() })}
                         placeholder="@hasti_hjz"
                         className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-xs font-mono text-left focus:outline-hidden focus:border-emerald-500"
                       />
@@ -771,7 +790,10 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                         type="text"
                         dir="ltr"
                         value={formData.adminChatId}
-                        onChange={(e) => updateField({ adminChatId: e.target.value })}
+                        onChange={(e) => {
+                          const val = e.target.value.trim();
+                          updateField({ adminChatId: val, baleAdminChatId: val });
+                        }}
                         placeholder="923387796"
                         className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-xs font-mono text-left focus:outline-hidden focus:border-emerald-500"
                       />
@@ -922,32 +944,97 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                     </div>
 
                     {/* Result details box */}
-                    {welcomeTestResult && (
-                      <div className={`p-3.5 rounded-xl border text-xs space-y-1.5 ${welcomeTestResult.ok ? 'bg-emerald-100/70 border-emerald-300 text-emerald-950' : 'bg-rose-50 border-rose-300 text-rose-950'}`}>
-                        <div className="flex items-center justify-between font-black pb-1 border-b border-current/15">
-                          <span className="flex items-center gap-1.5">
-                            {welcomeTestResult.ok ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <AlertCircle className="w-4 h-4 text-rose-600" />}
-                            <span>{welcomeTestResult.ok ? 'پیام با موفقیت به بله ادمین ارسال شد!' : 'عدم تحویل پیام به ادمین در بله'}</span>
-                          </span>
-                          <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-white border">
-                            {welcomeTestResult.status ? `HTTP ${welcomeTestResult.status}` : 'Direct Fetch'}
-                          </span>
-                        </div>
-                        <div>📢 <strong>نتیجه:</strong> {welcomeTestResult.message}</div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 font-mono text-[10px]">
-                          <div className="bg-white/80 p-1.5 rounded-lg border">🎯 چت‌آیدی مقصد: {welcomeTestResult.usedChatId || formData.adminChatId}</div>
-                          <div className="bg-white/80 p-1.5 rounded-lg border">🔑 توکن استفاده‌شده: {welcomeTestResult.usedToken ? `${welcomeTestResult.usedToken.slice(0, 15)}...` : 'خالی'}</div>
-                        </div>
-                        {welcomeTestResult.messageId && (
-                          <div className="text-emerald-800 font-bold">✅ شناسه پیام در بله (Message ID): {welcomeTestResult.messageId}</div>
-                        )}
-                        {welcomeTestResult.hint && (
-                          <div className="mt-2 p-2 rounded-lg bg-white border border-current/20 text-[11px] leading-relaxed text-slate-700">
-                            💡 <strong>راهنما:</strong> {welcomeTestResult.hint}
+                    {welcomeTestResult && (() => {
+                      const isRealSuccess = Boolean(welcomeTestResult.ok && (welcomeTestResult.delivered || welcomeTestResult.messageId));
+                      const isForbidden = Boolean(
+                        welcomeTestResult.forbiddenStartRequired ||
+                        welcomeTestResult.status === 403 ||
+                        /Forbidden|can't initiate conversation/i.test(welcomeTestResult.description || '') ||
+                        /Forbidden|can't initiate conversation/i.test(welcomeTestResult.message || '')
+                      );
+                      const displayToken = welcomeTestResult.usedToken || formData.botToken || formData.baleBotToken || '';
+
+                      return (
+                        <div className={`p-4 rounded-2xl border text-xs space-y-2 ${
+                          isRealSuccess
+                            ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
+                            : isForbidden
+                            ? 'bg-amber-50 border-amber-300 text-amber-950'
+                            : 'bg-rose-50 border-rose-300 text-rose-950'
+                        }`}>
+                          <div className="flex items-center justify-between font-black pb-2 border-b border-current/15">
+                            <span className="flex items-center gap-1.5">
+                              {isRealSuccess ? (
+                                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                              ) : isForbidden ? (
+                                <AlertTriangle className="w-4 h-4 text-amber-600" />
+                              ) : (
+                                <AlertCircle className="w-4 h-4 text-rose-600" />
+                              )}
+                              <span>
+                                {isRealSuccess
+                                  ? 'پیام با موفقیت به بله ادمین تحویل داده شد!'
+                                  : isForbidden
+                                  ? 'نیازمند لمس دکمه «شروع» در ربات توسط ادمین'
+                                  : 'عدم ارسال پیام به اکانت ادمین'}
+                              </span>
+                            </span>
+                            <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-white border">
+                              {welcomeTestResult.status ? `HTTP ${welcomeTestResult.status}` : 'API Response'}
+                            </span>
                           </div>
-                        )}
-                      </div>
-                    )}
+
+                          <div>📢 <strong>نتیجه:</strong> {welcomeTestResult.message}</div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 font-mono text-[10px]">
+                            <div className="bg-white/90 p-2 rounded-xl border border-current/10">
+                              🎯 چت‌آیدی مقصد: <span className="font-bold">{welcomeTestResult.usedChatId || formData.adminChatId || '69451465'}</span>
+                            </div>
+                            <div className="bg-white/90 p-2 rounded-xl border border-current/10 truncate">
+                              🔑 توکن استفاده‌شده: <span className="font-bold">{displayToken ? `${displayToken.slice(0, 18)}...` : 'خالی (وارد نشده)'}</span>
+                            </div>
+                          </div>
+
+                          {welcomeTestResult.messageId && (
+                            <div className="text-emerald-800 font-bold bg-white/80 p-2 rounded-xl border border-emerald-200">
+                              ✅ شناسه پیام در بله (Message ID): {welcomeTestResult.messageId}
+                            </div>
+                          )}
+
+                          {welcomeTestResult.hint && !isForbidden && (
+                            <div className="p-2.5 rounded-xl bg-white/80 border border-current/15 text-[11px] leading-relaxed">
+                              💡 <strong>راهنما:</strong> {welcomeTestResult.hint}
+                            </div>
+                          )}
+
+                          {isForbidden && (
+                            <div className="mt-2 p-3.5 rounded-xl bg-amber-100/90 border border-amber-300 text-amber-950 space-y-2.5">
+                              <div className="flex items-center gap-2 font-black text-xs text-amber-900">
+                                <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
+                                <span>خطای ۴۰۳ بله: ربات نمی‌تواند آغازگر مکالمه باشد</span>
+                              </div>
+                              <p className="text-[11px] leading-relaxed text-amber-900">
+                                پیام‌رسان بله برای جلوگیری از ارسال پیام‌های ناخواسته، اجازه نمی‌دهد ربات به کاربری پیام بفرستد مگر اینکه آن کاربر حداقل یک بار وارد ربات شده و دکمه <strong>«شروع» (Start)</strong> را زده باشد.
+                              </p>
+                              <div className="pt-1">
+                                <a
+                                  href={`https://ble.ir/${(welcomeTestResult.botUsername || formData.baleBotUsername || formData.botUsername || 'Onivalbot').replace('@', '')}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-md transition cursor-pointer"
+                                >
+                                  <ExternalLink className="w-4 h-4" />
+                                  <span>ورود مستقیم به ربات بله و زدن دکمه Start (@{(welcomeTestResult.botUsername || formData.baleBotUsername || formData.botUsername || 'Onivalbot').replace('@', '')})</span>
+                                </a>
+                              </div>
+                              <div className="text-[10px] text-amber-900 font-bold">
+                                👈 راهکار: روی دکمه سبز رنگ بالا کلیک کنید، در برنامه بله دکمه «شروع» را بزنید و سپس مجدداً این دکمه تست را فشار دهید تا پیام فوری به اکانت شما ارسال شود.
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* Quick Diagnostics Result Box */}

@@ -15,6 +15,7 @@ import {
   CreditCard,
   Sparkles,
   Globe,
+  Search,
   X
 } from 'lucide-react';
 
@@ -31,6 +32,7 @@ export type NavItem =
   | 'payment-settings'
   | 'page-editor'
   | 'seo'
+  | 'search-engines'
   | 'bot'
   | 'account';
 
@@ -119,6 +121,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: Globe, 
       badge: 'SEO', 
       badgeColor: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' 
+    },
+    { 
+      id: 'search-engines', 
+      label: 'اتصال به ترب، ایمالز و اینماد', 
+      icon: Search, 
+      badge: 'ترب / اینماد', 
+      badgeColor: 'bg-rose-500/20 text-rose-300 border border-rose-500/30' 
     },
     { id: 'bot', label: 'ربات بله/تلگرام و ارتباطات پشتیبانی', icon: Bot, badge: 'تست زنده', badgeColor: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' },
     { id: 'account', label: 'تنظیمات و امنیت', icon: KeyRound, badge: null },

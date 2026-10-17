@@ -618,14 +618,24 @@ if ($path === '/api/contact') {
     }
 }
 
-// Bot Config & Logs
+// ================= BOT CONFIG & LOGS =================
 if ($path === '/api/bot/config') {
     if ($method === 'GET') {
         echo json_encode(['config' => $db['telegramConfig'] ?? []]);
         exit;
     }
-    if ($method === 'PUT') {
+    if ($method === 'PUT' || $method === 'POST') {
         $db['telegramConfig'] = array_merge($db['telegramConfig'] ?? [], $body);
+        $baleUser = trim($body['baleBotUsername'] ?? $body['botUsername'] ?? '', '@');
+        if (!empty($baleUser)) {
+            $db['telegramConfig']['botUsername'] = $baleUser;
+            $db['telegramConfig']['baleBotUsername'] = $baleUser;
+            if (!isset($db['siteContent']['paymentConfig'])) {
+                $db['siteContent']['paymentConfig'] = [];
+            }
+            $db['siteContent']['paymentConfig']['baleBotUsername'] = $baleUser;
+            $db['siteContent']['paymentConfig']['baleBotButtonText'] = "اتصال به ربات بله و پرداخت فاکتور (@$baleUser)";
+        }
         saveDatabase($dataFile, $db);
         echo json_encode(['ok' => true, 'config' => $db['telegramConfig']]);
         exit;
@@ -637,6 +647,308 @@ if ($path === '/api/bot/logs' && $method === 'GET') {
     exit;
 }
 
-// Default generic 200 response
+// ================= REAL BALE BOT WELCOME TEST (/api/bot/test-admin-welcome) =================
+if (($path === '/api/bot/test-admin-welcome' || $path === '/api/bale/test-admin-welcome') && $method === 'POST') {
+    $token = trim($body['botToken'] ?? $db['telegramConfig']['baleBotToken'] ?? $db['telegramConfig']['botToken'] ?? '1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34');
+    $chatId = trim($body['chatId'] ?? $db['telegramConfig']['baleAdminChatId'] ?? $db['telegramConfig']['adminChatId'] ?? '69451465');
+    $baseUrl = rtrim($body['baseUrl'] ?? $db['telegramConfig']['baleBaseUrl'] ?? 'https://tapi.bale.ai', '/');
+    $botUsername = trim($db['telegramConfig']['baleBotUsername'] ?? $db['telegramConfig']['botUsername'] ?? 'Onivalbot', '@');
+
+    // Update config with the latest tested values so they stay saved on host
+    if (!empty($token)) {
+        $db['telegramConfig']['botToken'] = $token;
+        $db['telegramConfig']['baleBotToken'] = $token;
+    }
+    if (!empty($chatId)) {
+        $db['telegramConfig']['adminChatId'] = $chatId;
+        $db['telegramConfig']['baleAdminChatId'] = $chatId;
+    }
+    saveDatabase($dataFile, $db);
+
+    if (empty($token)) {
+        http_response_code(400);
+        echo json_encode([
+            'ok' => false,
+            'delivered' => false,
+            'status' => 400,
+            'usedToken' => '',
+            'usedChatId' => $chatId,
+            'message' => 'توکن ربات بله وارد نشده است.',
+            'description' => 'لطفاً توکن ربات دریافتی از @BotFather را در کادر تنظیمات وارد فرمایید.'
+        ]);
+        exit;
+    }
+
+    if (empty($chatId)) {
+        http_response_code(400);
+        echo json_encode([
+            'ok' => false,
+            'delivered' => false,
+            'status' => 400,
+            'usedToken' => $token,
+            'usedChatId' => '',
+            'message' => 'شناسه عددی چت ادمین (Chat ID) وارد نشده است.',
+            'description' => 'شناسه عددی چت ادمین در بله برای دریافت پیام الزامی است.'
+        ]);
+        exit;
+    }
+
+    $welcomeText = 'اتصال ربات به هاست با موفقیت انجام شد. شما به عنوان ادمین شناسایی شدید';
+    $sendUrl = "$baseUrl/bot$token/sendMessage";
+    $payload = json_encode(['chat_id' => $chatId, 'text' => $welcomeText], JSON_UNESCAPED_UNICODE);
+
+    $httpCode = 0;
+    $response = false;
+
+    if (function_exists('curl_init')) {
+        $ch = curl_init($sendUrl);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+    } else {
+        $opts = [
+            'http' => [
+                'method' => 'POST',
+                'header' => "Content-Type: application/json\r\n",
+                'content' => $payload,
+                'timeout' => 10,
+                'ignore_errors' => true
+            ]
+        ];
+        $context = stream_context_create($opts);
+        $response = @file_get_contents($sendUrl, false, $context);
+        if (isset($http_response_header) && preg_match('#HTTP/\S+\s+(\d+)#', $http_response_header[0], $m)) {
+            $httpCode = (int)$m[1];
+        }
+    }
+
+    $respData = $response ? @json_decode($response, true) : null;
+
+    if ($httpCode === 200 && !empty($respData['ok'])) {
+        echo json_encode([
+            'ok' => true,
+            'delivered' => true,
+            'status' => 200,
+            'messageId' => $respData['result']['message_id'] ?? null,
+            'message' => 'پیام با موفقیت به بله ادمین ارسال شد!',
+            'usedToken' => $token,
+            'usedChatId' => $chatId,
+            'botUsername' => $botUsername,
+            'rawResponse' => $respData
+        ]);
+        exit;
+    }
+
+    $desc = $respData['description'] ?? ($httpCode === 401 ? 'Unauthorized (توکن نامعتبر)' : "خطای HTTP $httpCode");
+    $isForbidden = ($httpCode === 403 || stripos($desc, 'Forbidden') !== false || stripos($desc, 'initiate') !== false);
+
+    echo json_encode([
+        'ok' => false,
+        'delivered' => false,
+        'status' => $httpCode ?: 400,
+        'forbiddenStartRequired' => $isForbidden,
+        'botUsername' => $botUsername,
+        'botLink' => "https://ble.ir/$botUsername",
+        'message' => $isForbidden
+            ? 'خطای امنیتی بله (Forbidden): ربات نمی‌تواند شروع‌کننده مکالمه با کاربر باشد.'
+            : "پاسخ وب‌سرویس بله: $desc",
+        'description' => $desc,
+        'hint' => $isForbidden
+            ? "مدیر گرامی، ربات‌های بله برای جلوگیری از مزاحمت تا زمانی که دکمه «شروع» (/start) را نزده باشید، اجازه ارسال پیام به چت خصوصی را ندارند. لطفاً روی لینک ble.ir/$botUsername کلیک نموده، Start را لمس کنید و سپس مجدداً تست را بزنید."
+            : ($httpCode === 401 ? 'توکن وارد شده معتبر نیست یا منقضی شده است. لطفاً توکن جدید را از @BotFather در بله کپی کرده و ذخیره نمایید.' : 'در صورت خطای chat not found، ابتدا با اکانت خود به ربات در بله پیام /start ارسال فرمایید.'),
+        'usedToken' => $token,
+        'usedChatId' => $chatId,
+        'rawResponse' => $respData
+    ]);
+    exit;
+}
+
+// ================= REAL BALE CONNECTION TEST (/api/bot/test-connection) =================
+if ($path === '/api/bot/test-connection' && $method === 'POST') {
+    $token = trim($body['botToken'] ?? $db['telegramConfig']['baleBotToken'] ?? $db['telegramConfig']['botToken'] ?? '');
+    $baseUrl = rtrim($body['baseUrl'] ?? $db['telegramConfig']['baleBaseUrl'] ?? 'https://tapi.bale.ai', '/');
+    if (empty($token)) {
+        http_response_code(400);
+        echo json_encode(['ok' => false, 'success' => false, 'message' => 'توکن ربات وارد نشده است.']);
+        exit;
+    }
+
+    $getMeUrl = "$baseUrl/bot$token/getMe";
+    $ch = curl_init($getMeUrl);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 8);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    $respData = $response ? @json_decode($response, true) : null;
+    if ($httpCode === 200 && !empty($respData['ok'])) {
+        $username = $respData['result']['username'] ?? $respData['result']['first_name'] ?? 'Bot';
+        echo json_encode([
+            'ok' => true,
+            'success' => true,
+            'mode' => 'live_api',
+            'botUser' => $username,
+            'message' => "ارتباط با سرور بله برقرار است. نام ربات: @$username",
+            'raw' => $respData
+        ]);
+        exit;
+    }
+
+    echo json_encode([
+        'ok' => false,
+        'success' => false,
+        'message' => 'عدم پاسخگویی وب‌سرویس بله یا نامعتبر بودن توکن.',
+        'raw' => $respData
+    ]);
+    exit;
+}
+
+// ================= BALE INVOICE TESTER (/api/bot/test-send-invoice) =================
+if ($path === '/api/bot/test-send-invoice' && $method === 'POST') {
+    $token = trim($db['telegramConfig']['baleBotToken'] ?? $db['telegramConfig']['botToken'] ?? '');
+    $chatId = trim($body['chatId'] ?? $db['telegramConfig']['baleAdminChatId'] ?? $db['telegramConfig']['adminChatId'] ?? '');
+    $walletToken = trim($body['providerToken'] ?? $db['telegramConfig']['balePaymentTokenLive'] ?? 'WALLET-v5gqSc1W1kaBUo2B');
+    $baseUrl = rtrim($db['telegramConfig']['baleBaseUrl'] ?? 'https://tapi.bale.ai', '/');
+
+    if (empty($token) || empty($chatId)) {
+        http_response_code(400);
+        echo json_encode(['ok' => false, 'message' => 'توکن یا چت‌آیدی ادمین تنظیم نشده است.']);
+        exit;
+    }
+
+    $invoiceData = [
+        'chat_id' => $chatId,
+        'title' => 'فاکتور تستی کیف پول بله - فروشگاه اونیوال',
+        'description' => 'تست چرخه پرداخت فاکتور در کیف پول بله',
+        'payload' => 'test_invoice_' . time(),
+        'provider_token' => $walletToken,
+        'prices' => json_encode([['label' => 'عسل کوهستان', 'amount' => 3500000]])
+    ];
+
+    $ch = curl_init("$baseUrl/bot$token/sendInvoice");
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($invoiceData));
+    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    $respData = $response ? @json_decode($response, true) : null;
+    echo json_encode([
+        'ok' => ($httpCode === 200 && !empty($respData['ok'])),
+        'walletToken' => $walletToken,
+        'message' => ($httpCode === 200 && !empty($respData['ok'])) ? 'فاکتور آزمایشی با موفقیت به بله شما ارسال شد.' : 'ارسال فاکتور به وب‌سرویس بله ثبت شد.',
+        'raw' => $respData
+    ]);
+    exit;
+}
+
+// ================= TOROB & EMALLS PRODUCTS FEED (/api/torob/products) =================
+if ($path === '/api/torob/products' || $path === '/api/emalls/products' || $path === '/torob/products') {
+    $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $origin = "$proto://$host";
+
+    $page = max(1, (int)($_GET['page'] ?? 1));
+    $pageSize = min(250, max(1, (int)($_GET['page_size'] ?? $_GET['per_page'] ?? 100)));
+
+    $published = array_values(array_filter($db['products'] ?? [], function($p) {
+        return empty($p['isDelete']) && ($p['status'] ?? 'published') === 'published';
+    }));
+
+    $totalCount = count($published);
+    $maxPages = ceil($totalCount / $pageSize) ?: 1;
+    $offset = ($page - 1) * $pageSize;
+    $paged = array_slice($published, $offset, $pageSize);
+
+    $torobItems = array_map(function($p) use ($origin) {
+        $isOutOfStock = !empty($p['isOutOfStock']) || (isset($p['stock']) && (int)$p['stock'] <= 0);
+        $discount = (int)($p['discount'] ?? 0);
+        $basePrice = (!empty($p['sizes']) && is_array($p['sizes']) && !empty($p['sizes'][0]['price']))
+            ? (int)$p['sizes'][0]['price']
+            : (int)($p['price'] ?? 0);
+        $finalPrice = $discount > 0 ? (int)round($basePrice * (100 - $discount) / 100) : $basePrice;
+
+        $img = $p['imageName'] ?? '';
+        $fullImage = (strpos($img, 'http') === 0) ? $img : "$origin/" . ltrim($img, '/');
+        $slug = $p['slug'] ?? ('product-' . $p['id']);
+        $pageUrl = "$origin/products/" . rawurlencode($slug);
+
+        return [
+            'page_unique' => (string)$p['id'],
+            'page_url' => $pageUrl,
+            'price' => $isOutOfStock ? 0 : $finalPrice,
+            'old_price' => $discount > 0 ? $basePrice : $finalPrice,
+            'availability' => $isOutOfStock ? 'outofstock' : 'instock',
+            'title' => $p['title'] ?? '',
+            'subtitle' => $p['categoryTitle'] ?? '',
+            'image_link' => $fullImage,
+            'image_links' => [$fullImage]
+        ];
+    }, $paged);
+
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode([
+        'count' => $totalCount,
+        'max_pages' => (int)$maxPages,
+        'current_page' => $page,
+        'products' => $torobItems
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// ================= DYNAMIC SITEMAP.XML (/sitemap.xml) =================
+if ($path === '/sitemap.xml') {
+    $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $origin = "$proto://$host";
+    $today = date('Y-m-d');
+
+    header('Content-Type: application/xml; charset=utf-8');
+    echo "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+    echo "<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n";
+
+    $coreUrls = [
+        ['loc' => "$origin/", 'p' => '1.0', 'c' => 'daily'],
+        ['loc' => "$origin/articles", 'p' => '0.8', 'c' => 'weekly'],
+        ['loc' => "$origin/consultation", 'p' => '0.8', 'c' => 'weekly'],
+        ['loc' => "$origin/about", 'p' => '0.6', 'c' => 'monthly'],
+        ['loc' => "$origin/contact", 'p' => '0.6', 'c' => 'monthly'],
+        ['loc' => "$origin/terms", 'p' => '0.5', 'c' => 'monthly'],
+        ['loc' => "$origin/refund", 'p' => '0.5', 'c' => 'monthly'],
+    ];
+
+    foreach ($coreUrls as $u) {
+        echo "  <url>\n    <loc>{$u['loc']}</loc>\n    <lastmod>$today</lastmod>\n    <changefreq>{$u['c']}</changefreq>\n    <priority>{$u['p']}</priority>\n  </url>\n";
+    }
+
+    foreach ($db['products'] ?? [] as $p) {
+        if (!empty($p['isDelete']) || ($p['status'] ?? 'published') !== 'published') continue;
+        $slug = rawurlencode($p['slug'] ?? ('product-' . $p['id']));
+        echo "  <url>\n    <loc>$origin/products/$slug</loc>\n    <lastmod>$today</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.9</priority>\n  </url>\n";
+    }
+
+    foreach ($db['posts'] ?? [] as $post) {
+        if (($post['status'] ?? 'published') !== 'published') continue;
+        $slug = rawurlencode($post['slug'] ?? ('article-' . $post['id']));
+        echo "  <url>\n    <loc>$origin/articles/$slug</loc>\n    <lastmod>$today</lastmod>\n    <changefreq>monthly</changefreq>\n    <priority>0.7</priority>\n  </url>\n";
+    }
+
+    echo "</urlset>";
+    exit;
+}
+
+// Default generic 200 response for any other route
 echo json_encode(['ok' => true, 'message' => 'عملیات در سرور هاست با موفقیت ثبت گردید.', 'engine' => 'Host-PHP']);
 exit;
