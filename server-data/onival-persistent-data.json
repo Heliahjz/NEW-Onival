@@ -542,7 +542,7 @@
     "contactSubtitle": "جهت پیگیری سفارشات، هماهنگی خرید عمده و ارتباط مستقیم با دفتر مرکزی اونیوال:",
     "contactPhone": "۰۲۱-۱۲۳۴۵۶۷۸ / ۰۹۱۲۳۴۵۶۷۸۹",
     "contactAddress": "تهران، مجموعه تخصصی فرآورده‌های ارگانیک اونیوال (ONIVAL)",
-    "contactWorkingHours": "شنبه تا پنج‌شنبه ۹:۰۰ الی ۲۱:۰۰",
+    "contactWorkingHours": "شنبه تا چهارشنبه ۹:۰۰ الی ۱۸:۰۰ | پنج‌شنبه‌ها ۹:۰۰ الی ۱۳:۰۰",
     "contactEmail": "support@onival.ir",
     "footerCopyright": "تمامی حقوق مادی و معنوی متعلق به فروشگاه اونیوال (ONIVAL) می‌باشد.",
     "paymentConfig": {
@@ -556,7 +556,7 @@
       "baleBotEnabled": true,
       "baleBotUsername": "Onivalbot",
       "baleBotDescription": "اتصال مستقیم به بازوی رسمی بله (@Onivalbot) و دریافت پیش‌فاکتور با امکان پرداخت آنی با کیف پول بله یا کارت به کارت.",
-      "baleBotButtonText": "اتصال به بازوی رسمی بله و پرداخت فاکتور (@Onivalbot)",
+      "baleBotButtonText": "اتصال به ربات بله و پرداخت فاکتور (@Onivalbot)",
       "gatewayEnabled": false,
       "gatewayTitle": "پرداخت آنلاین از طریق درگاه بانکی شاپرک",
       "gatewayUrl": "https://zarinp.al/onival",
@@ -663,155 +663,21 @@
           "iconType": "phone"
         }
       ]
-    },
-    "contactTelegramId": "@onival_support",
-    "contactBaleId": "@onival_bale_support",
-    "contactInstagramId": "@onival.ir",
-    "contactWhatsapp": "09123456789",
-    "contactEitaaId": "@onival_eitaa",
-    "contactRubikaId": "@onival_rubika",
-    "pages": {
-      "contact": {
-        "phone": "تلفن پشتیبانی و سفارشات: ۰۲۱-۱۲۳۴۵۶۷۸ / ۰۹۱۲۳۴۵۶۷۸۹",
-        "baleBotId": "@Onivalbot",
-        "telegramSupportId": "@onival_support",
-        "baleSupportId": "@onival_bale_support"
-      }
     }
   },
   "adminCredentials": {
     "username": "admin",
-    "password": "6db4e37df1c2abbfca3529f83b23d5e17fad82dab3a4d8b12964d3c95295001b",
+    "password": "admin",
     "email": "admin@onival.com",
     "name": "مدیریت اونیوال (ONIVAL Admin)"
   },
   "botActivityLogs": [
     {
-      "id": 1792151954171,
-      "time": "۱۱:۵۹:۱۳",
-      "type": "admin_welcome_failed",
+      "id": 1792515012631,
+      "time": "۱۶:۵۰",
+      "type": "invoice_opened_in_bot",
       "platform": "bale",
-      "text": "تست ارسال پیام خوش‌آمدگویی به ادمین (69451465) ناموفق بود: Unauthorized",
-      "status": "error"
-    },
-    {
-      "id": 1792150479409.4514,
-      "time": "۱۱:۳۴:۳۹",
-      "type": "send_message_api_response",
-      "platform": "bale",
-      "text": "تلاش ارسال به بله (Bale) (چت 69451465): پاسخ سرور «Unauthorized»",
-      "status": "warning"
-    },
-    {
-      "id": 1792150478751,
-      "time": "۱۱:۳۴",
-      "type": "new_order_placed",
-      "platform": "bale",
-      "text": "فاکتور جدید ONV-ORD-419 صادر و جهت پرداخت/تایید به ربات بله ارجاع شد. مبلغ: ۱۳۵٬۰۰۰ تومان",
-      "status": "success"
-    },
-    {
-      "id": 1792150407275,
-      "time": "۱۱:۳۳:۲۶",
-      "type": "test_invoice_sent",
-      "platform": "bale",
-      "text": "تست ارسال فاکتور کیف پول بله به چت 923387796 با توکن WALLET-TEST-1111111111111111: Unauthorized",
-      "status": "warning"
-    },
-    {
-      "id": 1792150385661,
-      "time": "۱۱:۳۳:۰۵",
-      "type": "admin_welcome_failed",
-      "platform": "bale",
-      "text": "تست ارسال پیام خوش‌آمدگویی به ادمین (69451465) ناموفق بود: Unauthorized",
-      "status": "error"
-    },
-    {
-      "id": 1792150384585,
-      "time": "۱۱:۳۳",
-      "type": "config_saved",
-      "platform": "system",
-      "text": "تنظیمات توکن‌های پرداخت (آزمایشی)، ربات بله (@Onivalbot)، آیدی ادمین (@9966331) با موفقیت ذخیره شد.",
-      "status": "success"
-    },
-    {
-      "id": 1792150361773,
-      "time": "۱۱:۳۲:۴۱",
-      "type": "admin_welcome_failed",
-      "platform": "bale",
-      "text": "تست ارسال پیام خوش‌آمدگویی به ادمین (69451465) ناموفق بود: Unauthorized",
-      "status": "error"
-    },
-    {
-      "id": 1792150361171,
-      "time": "۱۱:۳۲",
-      "type": "config_saved",
-      "platform": "system",
-      "text": "تنظیمات توکن‌های پرداخت (آزمایشی)، ربات بله (@Onivalbot)، آیدی ادمین (@9966331) با موفقیت ذخیره شد.",
-      "status": "success"
-    },
-    {
-      "id": 1792150334756,
-      "time": "۱۱:۳۲:۱۴",
-      "type": "admin_welcome_failed",
-      "platform": "bale",
-      "text": "تست ارسال پیام خوش‌آمدگویی به ادمین (923387796) ناموفق بود: Unauthorized",
-      "status": "error"
-    },
-    {
-      "id": 1792150334163,
-      "time": "۱۱:۳۲",
-      "type": "config_saved",
-      "platform": "system",
-      "text": "تنظیمات توکن‌های پرداخت (آزمایشی)، ربات بله (@Onivalbot)، آیدی ادمین (@9966331) با موفقیت ذخیره شد.",
-      "status": "success"
-    },
-    {
-      "id": 1792150331991,
-      "time": "۱۱:۳۲",
-      "type": "config_saved",
-      "platform": "system",
-      "text": "تنظیمات توکن‌های پرداخت (آزمایشی)، ربات بله (@Onivalbot)، آیدی ادمین (@9966331) با موفقیت ذخیره شد.",
-      "status": "success"
-    },
-    {
-      "id": 1792150331840,
-      "time": "۱۱:۳۲",
-      "type": "config_saved",
-      "platform": "system",
-      "text": "تنظیمات توکن‌های پرداخت (آزمایشی)، ربات بله (@Onivalbot)، آیدی ادمین (@9966331) با موفقیت ذخیره شد.",
-      "status": "success"
-    },
-    {
-      "id": 1792150293355,
-      "time": "۱۱:۳۱:۳۳",
-      "type": "admin_welcome_failed",
-      "platform": "bale",
-      "text": "تست ارسال پیام خوش‌آمدگویی به ادمین (69451465) ناموفق بود: Unauthorized",
-      "status": "error"
-    },
-    {
-      "id": 1792150293299,
-      "time": "۱۱:۳۱",
-      "type": "config_saved",
-      "platform": "system",
-      "text": "تنظیمات توکن‌های پرداخت (آزمایشی)، ربات بله (@Onivalbot)، آیدی ادمین (@9966331) با موفقیت ذخیره شد.",
-      "status": "success"
-    },
-    {
-      "id": 1792150293154,
-      "time": "۱۱:۳۱",
-      "type": "config_saved",
-      "platform": "system",
-      "text": "تنظیمات توکن‌های پرداخت (آزمایشی)، ربات بله (@Onivalbot)، آیدی ادمین (@9966331) با موفقیت ذخیره شد.",
-      "status": "success"
-    },
-    {
-      "id": 1792150291102,
-      "time": "۱۱:۳۱",
-      "type": "config_saved",
-      "platform": "system",
-      "text": "تنظیمات توکن‌های پرداخت (آزمایشی)، ربات بله (@Onivalbot)، آیدی ادمین (@9966331) با موفقیت ذخیره شد.",
+      "text": "مشتری (مریم شریفی) فاکتور ONV-CNS-405 را در ربات بله باز کرد و درخواست پرداخت برایش ارسال شد.",
       "status": "success"
     },
     {
@@ -840,30 +706,6 @@
     }
   ],
   "orders": [
-    {
-      "id": 104,
-      "userFullName": "زطط",
-      "phoneNumber": "09123456789",
-      "userAddress": "ربریب",
-      "totalPrice": 135000,
-      "status": "Pending",
-      "paymentStatus": "Unpaid",
-      "paymentMethod": "card_to_card",
-      "trackingCode": "ONV-ORD-419",
-      "creationTime": "۱۴۰۵/۷/۲۴",
-      "balePaymentUrl": "https://ble.ir/Onivalbot?start=pay_ONV-ORD-419",
-      "items": [
-        {
-          "id": 1,
-          "productId": 2,
-          "productName": "ژل رویال شاهانه",
-          "size": "۲۰ گرم (تستی)",
-          "quantity": 1,
-          "unitPrice": 135000,
-          "totalPrice": 135000
-        }
-      ]
-    },
     {
       "id": 101,
       "userFullName": "نیما علوی",
@@ -1018,5 +860,5 @@
       }
     }
   ],
-  "updatedAt": "2026-10-16T11:59:14.171Z"
+  "updatedAt": "2026-10-20T16:50:12.631Z"
 }

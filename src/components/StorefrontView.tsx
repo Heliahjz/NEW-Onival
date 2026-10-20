@@ -353,6 +353,7 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
   const [copiedWalletId, setCopiedWalletId] = useState(false);
   const [copiedTrackingLink, setCopiedTrackingLink] = useState(false);
   const [copiedInvoiceCode, setCopiedInvoiceCode] = useState(false);
+  const [copiedPayCmd, setCopiedPayCmd] = useState(false);
   const [receiptPreview, setReceiptPreview] = useState<string>('');
   const [receiptNote, setReceiptNote] = useState<string>('');
   const [isUploadingReceipt, setIsUploadingReceipt] = useState(false);
@@ -820,7 +821,7 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
         trackingCode,
         creationTime: new Date().toLocaleDateString('fa-IR'),
         items: orderItems,
-        balePaymentUrl: `https://ble.ir/${activeBaleBotUsername}?start=pay_${trackingCode}`
+        balePaymentUrl: `https://ble.ir/${activeBaleBotUsername}?start=pay_${trackingCode.replace(/-/g, '_')}`
       };
 
       if (!Array.isArray(actualOrder.items) || actualOrder.items.length === 0) {
@@ -832,7 +833,7 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
       if (!actualOrder.totalPrice) actualOrder.totalPrice = totalCartPrice;
       if (!actualOrder.trackingCode) actualOrder.trackingCode = trackingCode;
       if (!actualOrder.paymentStatus) actualOrder.paymentStatus = 'Unpaid';
-      actualOrder.balePaymentUrl = `https://ble.ir/${activeBaleBotUsername}?start=pay_${actualOrder.trackingCode}`;
+      actualOrder.balePaymentUrl = `https://ble.ir/${activeBaleBotUsername}?start=pay_${actualOrder.trackingCode.replace(/-/g, '_')}`;
 
       setCurrentInvoice(actualOrder);
 
@@ -4326,27 +4327,43 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                         </div>
 
                         {/* Primary Action Button: Direct to active Bale Bot */}
+                        {/* Primary Action Button: Direct to active Bale Bot */}
                         <div className="pt-1 space-y-2">
                           <a
-                            href={`https://ble.ir/${activeBaleBotUsername}?start=pay_${currentInvoice.trackingCode}`}
+                            href={`https://ble.ir/${(activeBaleBotUsername || 'Onivalbot').replace(/^@/, '')}?start=pay_${currentInvoice.trackingCode.replace(/-/g, '_')}`}
                             target="_blank"
                             rel="noreferrer"
                             className="w-full py-4 px-6 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white rounded-2xl text-xs sm:text-sm font-black shadow-lg shadow-emerald-600/20 transition flex items-center justify-center gap-2.5 text-center cursor-pointer"
                           >
                             <Send className="w-4 h-4 shrink-0" />
-                            <span>ورود به ربات بله و پرداخت فاکتور (@{activeBaleBotUsername})</span>
+                            <span>ورود به ربات بله و پرداخت فاکتور (@{(activeBaleBotUsername || 'Onivalbot').replace(/^@/, '')})</span>
                             <ExternalLink className="w-4 h-4 opacity-75 shrink-0 mr-auto" />
                           </a>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard?.writeText(`/start pay_${currentInvoice.trackingCode.replace(/-/g, '_')}`);
+                              setCopiedPayCmd(true);
+                              setTimeout(() => setCopiedPayCmd(false), 2500);
+                            }}
+                            className="w-full py-2.5 px-4 bg-emerald-50 hover:bg-emerald-100/70 border border-emerald-300 text-emerald-900 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer"
+                          >
+                            {copiedPayCmd ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4 text-emerald-700" />}
+                            <span>{copiedPayCmd ? 'دستور پرداخت کپی شد! در بله ارسال فرمایید' : `کپی متن دستور پرداخت: /start pay_${currentInvoice.trackingCode.replace(/-/g, '_')}`}</span>
+                          </button>
                         </div>
 
                         {/* Concise Process & Tracking Guidance */}
                         <div className="bg-white/90 border border-emerald-200 rounded-2xl p-4 text-xs text-stone-700 space-y-2 leading-relaxed">
                           <div className="font-bold text-emerald-900 flex items-center gap-1.5">
                             <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-                            <span>راهنمای پرداخت و پیگیری سفارش:</span>
+                            <span>راهنمای گام به گام پرداخت در ربات بله:</span>
                           </div>
                           <p className="text-[11px] text-stone-600 leading-relaxed">
-                            پس از لمس دکمه بالا و پرداخت فاکتور در ربات بله، فرآیند خرید شما به صورت خودکار کامل شده و نیازی به ارسال مجدد فیش یا تایید دیگری ندارید. جهت پیگیری‌های بعدی در سایت، شماره فاکتور خود (<strong className="font-mono text-emerald-900">{currentInvoice.trackingCode}</strong>) را به خاطر بسپارید.
+                            ۱. با لمس دکمه سبز رنگ بالا وارد ربات بله شوید.<br />
+                            ۲. دکمه «شروع» یا عبارت «شروع» را ارسال نمایید تا پیش‌فاکتور رسمی و دکمه پرداخت آنلاین بله فوراً صادر شود.<br />
+                            ۳. پس از پرداخت، سفارش شما به طور خودکار به وضعیت «در حال آماده‌سازی و ارسال» تغییر می‌یابد. شماره فاکتور شما (<strong className="font-mono text-emerald-900">{currentInvoice.trackingCode}</strong>) برای پیگیری لحظه‌ای در وب‌سایت اونیوال کافی است.
                           </p>
                         </div>
 

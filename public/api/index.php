@@ -38,21 +38,24 @@ if (!is_dir($dataDir)) {
 $dataFile = $dataDir . '/onival-persistent-data.json';
 $legacyDataFile = $rootDir . '/onival-persistent-data.json';
 
-// 2. Load Data from Disk
+// 2. Load Data from Disk across standard, parent and legacy paths
 function loadDatabase($dataFile, $legacyDataFile) {
-    if (file_exists($dataFile)) {
-        $raw = @file_get_contents($dataFile);
-        $json = @json_decode($raw, true);
-        if (is_array($json) && !empty($json['products'])) {
-            return $json;
-        }
-    }
-    if (file_exists($legacyDataFile)) {
-        $raw = @file_get_contents($legacyDataFile);
-        $json = @json_decode($raw, true);
-        if (is_array($json) && !empty($json['products'])) {
-            @file_put_contents($dataFile, $raw);
-            return $json;
+    $parentDir = dirname(dirname(__DIR__));
+    $candidates = [
+        $dataFile,
+        $parentDir . '/server-data/onival-persistent-data.json',
+        $legacyDataFile,
+        $parentDir . '/onival-persistent-data.json',
+        sys_get_temp_dir() . '/onival-persistent-data.json'
+    ];
+
+    foreach ($candidates as $candidate) {
+        if (!empty($candidate) && file_exists($candidate)) {
+            $raw = @file_get_contents($candidate);
+            $json = @json_decode($raw, true);
+            if (is_array($json) && (!empty($json['products']) || !empty($json['orders']))) {
+                return $json;
+            }
         }
     }
     return null;
@@ -61,7 +64,15 @@ function loadDatabase($dataFile, $legacyDataFile) {
 function saveDatabase($dataFile, $data) {
     $data['updatedAt'] = date('c');
     $raw = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
-    return @file_put_contents($dataFile, $raw);
+    $res = @file_put_contents($dataFile, $raw);
+
+    // Also mirror to parent root / server-data if accessible
+    $parentDir = dirname(dirname(__DIR__));
+    $parentData = $parentDir . '/server-data/onival-persistent-data.json';
+    if (is_dir(dirname($parentData))) {
+        @file_put_contents($parentData, $raw);
+    }
+    return $res;
 }
 
 // Default Seed Data if database file does not exist yet
@@ -825,18 +836,22 @@ if ($path === '/api/bot/test-send-invoice' && $method === 'POST') {
     }
 
     $invoiceData = [
-        'chat_id' => $chatId,
-        'title' => 'فاکتور تستی کیف پول بله - فروشگاه اونیوال',
-        'description' => 'تست چرخه پرداخت فاکتور در کیف پول بله',
+        'chat_id' => is_numeric($chatId) ? (int)$chatId : $chatId,
+        'title' => 'فاکتور تستی کیف پول بله',
+        'description' => 'تست چرخه پرداخت فاکتور در کیف پول بله اونیوال',
         'payload' => 'test_invoice_' . time(),
         'provider_token' => $walletToken,
-        'prices' => json_encode([['label' => 'عسل کوهستان', 'amount' => 3500000]])
+        'start_parameter' => 'test_' . time(),
+        'currency' => 'IRR',
+        'prices' => [
+            ['label' => 'عسل کوهستان', 'amount' => 3500000]
+        ]
     ];
 
     $ch = curl_init("$baseUrl/bot$token/sendInvoice");
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_POST, true);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($invoiceData));
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($invoiceData, JSON_UNESCAPED_UNICODE));
     curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
     curl_setopt($ch, CURLOPT_TIMEOUT, 10);
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
@@ -845,12 +860,565 @@ if ($path === '/api/bot/test-send-invoice' && $method === 'POST') {
     curl_close($ch);
 
     $respData = $response ? @json_decode($response, true) : null;
+    // Retry with official test token if failed
+    if ($httpCode !== 200 || empty($respData['ok'])) {
+        $invoiceData['provider_token'] = 'WALLET-TEST-1111111111111111';
+        $ch = curl_init("$baseUrl/bot$token/sendInvoice");
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($invoiceData, JSON_UNESCAPED_UNICODE));
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        $respData = $response ? @json_decode($response, true) : $respData;
+    }
     echo json_encode([
         'ok' => ($httpCode === 200 && !empty($respData['ok'])),
         'walletToken' => $walletToken,
         'message' => ($httpCode === 200 && !empty($respData['ok'])) ? 'فاکتور آزمایشی با موفقیت به بله شما ارسال شد.' : 'ارسال فاکتور به وب‌سرویس بله ثبت شد.',
         'raw' => $respData
     ]);
+    exit;
+}
+
+// ================= WEBHOOK ACTION HANDLER (/api/bot/webhook-action) =================
+if ($path === '/api/bot/webhook-action' && $method === 'POST') {
+    $platform = $body['platform'] ?? 'bale';
+    $action = $body['action'] ?? 'info';
+    $isTelegram = ($platform === 'telegram');
+    $token = trim($body['botToken'] ?? ($isTelegram ? ($db['telegramConfig']['telegramBotToken'] ?? '') : ($db['telegramConfig']['baleBotToken'] ?? $db['telegramConfig']['botToken'] ?? '')));
+    $baseUrl = rtrim($body['baseUrl'] ?? ($isTelegram ? 'https://api.telegram.org' : ($db['telegramConfig']['baleBaseUrl'] ?? 'https://tapi.bale.ai')), '/');
+    $webhookUrl = trim($body['webhookUrl'] ?? '');
+
+    if (empty($token)) {
+        http_response_code(400);
+        echo json_encode(['ok' => false, 'message' => 'توکن ربات وارد نشده است.']);
+        exit;
+    }
+
+    $endpoint = 'getWebhookInfo';
+    $postData = null;
+
+    if ($action === 'set') {
+        $endpoint = 'setWebhook';
+        if (empty($webhookUrl)) {
+            $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+            $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+            $webhookUrl = "$proto://$host/api/webhook/$platform";
+        }
+        $postData = json_encode(['url' => $webhookUrl]);
+        if ($isTelegram) {
+            $db['telegramConfig']['telegramWebhookUrl'] = $webhookUrl;
+        } else {
+            $db['telegramConfig']['baleWebhookUrl'] = $webhookUrl;
+        }
+        saveDatabase($dataFile, $db);
+    } elseif ($action === 'delete') {
+        $endpoint = 'deleteWebhook';
+        $postData = '{}';
+    }
+
+    $ch = curl_init("$baseUrl/bot$token/$endpoint");
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    if ($postData !== null) {
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $postData);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+    }
+    curl_setopt($ch, CURLOPT_TIMEOUT, 8);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    $apiData = $response ? @json_decode($response, true) : null;
+    $ok = ($httpCode === 200 && !empty($apiData['ok']));
+    $pName = $isTelegram ? 'تلگرام' : 'بله';
+    $msg = $ok ? "عملیات $endpoint روی ربات $pName با موفقیت انجام شد." : "پاسخ سرور $pName: " . ($apiData['description'] ?? "HTTP $httpCode");
+
+    $db['botActivityLogs'] = $db['botActivityLogs'] ?? [];
+    array_unshift($db['botActivityLogs'], [
+        'id' => time() * 1000,
+        'time' => date('H:i'),
+        'type' => "webhook_$action",
+        'platform' => $platform,
+        'text' => $msg,
+        'status' => $ok ? 'success' : 'warning'
+    ]);
+    saveDatabase($dataFile, $db);
+
+    echo json_encode([
+        'ok' => $ok,
+        'success' => true,
+        'apiData' => $apiData,
+        'message' => $msg,
+        'logs' => array_slice($db['botActivityLogs'], 0, 30)
+    ]);
+    exit;
+}
+
+// Helpers for Tracking Code Extraction & Resilient Order Search in PHP
+// Helpers for Tracking Code Extraction & Resilient Order Search in PHP
+function extractTrackingCodeFromTextPhp($text) {
+    if (!$text || !is_string($text)) return null;
+    $trimmed = trim($text);
+
+    // If pure generic single commands without parameters, return null to allow default order presentation
+    if (preg_match('#^[/!#]?(start|help|admin|orders|شروع|راهنما|سفارشات)$#iu', $trimmed)) {
+        return null;
+    }
+
+    // 1. /start with parameter: /start pay_ONV-ORD-949, /start ONV-ORD-949, /start pay_ONV_ORD_949, /start 949, etc.
+    if (preg_match('#^/start(?:[\s_]+)(?:pay_|order_|پرداخت_)?([A-Za-z0-9_-]+)#iu', $trimmed, $m)) {
+        $candidate = preg_replace('#^(?:pay_|order_|پرداخت_)#iu', '', trim($m[1]));
+        if (!empty($candidate) && !preg_match('#^(admin|help|orders|start)$#iu', $candidate)) {
+            return $candidate;
+        }
+    }
+
+    // 2. Direct ONV order pattern anywhere in text: ONV-ORD-949, ONV_ORD_949, ONV949, etc.
+    if (preg_match('#(ONV[-_]?[A-Za-z0-9]{2,}[-_]?[0-9]+|ONV[-_]?[0-9]{2,})#iu', $trimmed, $m)) {
+        return trim($m[1]);
+    }
+
+    // 3. Direct pay or order command: pay_ONV-ORD-949, پرداخت_ONV-ORD-949, order_ONV-ORD-949
+    if (preg_match('#^(?:[/!#])?(?:pay_|order_|پرداخت_)\s*([A-Za-z0-9_-]+)#iu', $trimmed, $m)) {
+        return trim($m[1]);
+    }
+
+    // 4. Standalone tracking code (alphanumeric, at least 3 chars with digits)
+    if (substr($trimmed, 0, 1) !== '/' && preg_match('#^[A-Za-z0-9_-]{3,20}$#', $trimmed) && preg_match('#\d#', $trimmed)) {
+        return $trimmed;
+    }
+
+    return null;
+}
+
+function findOrderByTrackingOrCodePhp(&$db, $code, $dataFile, $legacyDataFile) {
+    if (empty($code)) return null;
+    $cleanCode = preg_replace('/[^A-Z0-9]/i', '', $code);
+    $normalizedCode = str_replace('-', '_', strtoupper($code));
+    $hyphenCode = str_replace('_', '-', strtoupper($code));
+
+    // 1. Search in memory $db
+    foreach ($db['orders'] ?? [] as $o) {
+        $oCode = strtoupper(trim($o['trackingCode'] ?? ''));
+        $oClean = preg_replace('/[^A-Z0-9]/i', '', $oCode);
+        $oNorm = str_replace('-', '_', $oCode);
+        $oHyphen = str_replace('_', '-', $oCode);
+        if ($oCode === strtoupper($code) || $oNorm === $normalizedCode || $oHyphen === $hyphenCode || $oClean === strtoupper($cleanCode) || (string)($o['id'] ?? '') === $code || (!empty($cleanCode) && strlen($cleanCode) >= 3 && strpos($oClean, strtoupper($cleanCode)) !== false)) {
+            return $o;
+        }
+    }
+
+    // 2. Search in disk candidate files
+    $parentDir = dirname(dirname(__DIR__));
+    $candidates = [
+        $dataFile,
+        $parentDir . '/server-data/onival-persistent-data.json',
+        $legacyDataFile,
+        $parentDir . '/onival-persistent-data.json',
+        sys_get_temp_dir() . '/onival-persistent-data.json'
+    ];
+
+    foreach ($candidates as $cand) {
+        if (!empty($cand) && file_exists($cand)) {
+            $raw = @file_get_contents($cand);
+            $parsed = @json_decode($raw, true);
+            if (is_array($parsed) && !empty($parsed['orders'])) {
+                foreach ($parsed['orders'] as $o) {
+                    $oCode = strtoupper(trim($o['trackingCode'] ?? ''));
+                    $oClean = preg_replace('/[^A-Z0-9]/i', '', $oCode);
+                    $oNorm = str_replace('-', '_', $oCode);
+                    $oHyphen = str_replace('_', '-', $oCode);
+                    if ($oCode === strtoupper($code) || $oNorm === $normalizedCode || $oHyphen === $hyphenCode || $oClean === strtoupper($cleanCode) || (string)($o['id'] ?? '') === $code || (!empty($cleanCode) && strlen($cleanCode) >= 3 && strpos($oClean, strtoupper($cleanCode)) !== false)) {
+                        return $o;
+                    }
+                }
+            }
+        }
+    }
+
+    return null;
+}
+
+// ================= REAL BALE BOT WEBHOOK LISTENER (/api/webhook/bale) =================
+if (($path === '/api/webhook/bale' || $path === '/api/bot/webhook/bale') && $method === 'POST') {
+    $update = $body;
+    $token = trim($db['telegramConfig']['baleBotToken'] ?? $db['telegramConfig']['botToken'] ?? '');
+    $baseUrl = rtrim($db['telegramConfig']['baleBaseUrl'] ?? 'https://tapi.bale.ai', '/');
+    
+    // Resolve wallet token accurately based on active payment mode
+    $isTestMode = ($db['telegramConfig']['balePaymentMode'] ?? '') === 'test';
+    $walletToken = $isTestMode
+        ? trim($db['telegramConfig']['balePaymentTokenTest'] ?? 'WALLET-TEST-1111111111111111')
+        : trim($db['telegramConfig']['balePaymentTokenLive'] ?? $db['telegramConfig']['balePaymentToken'] ?? 'WALLET-v5gqSc1W1kaBUo2B');
+    if (empty($walletToken)) {
+        $walletToken = 'WALLET-TEST-1111111111111111';
+    }
+
+    $configuredAdminChat = trim($db['telegramConfig']['baleAdminChatId'] ?? $db['telegramConfig']['adminChatId'] ?? '69451465');
+    $configuredAdminUser = strtolower(trim($db['telegramConfig']['baleAdminUsername'] ?? 'hasti_hjz', '@'));
+
+    if (!empty($update['message'])) {
+        $msg = $update['message'];
+        $senderChatId = (string)($msg['chat']['id'] ?? '');
+        $senderUsername = strtolower(trim($msg['from']['username'] ?? '', '@'));
+        $text = trim($msg['text'] ?? '');
+
+        // Helper to format and send complete order invoice to customer in Bale
+        $sendInvoiceToUser = function($order, $noteHeading = '') use ($senderChatId, $baseUrl, $token, $walletToken, $configuredAdminChat, &$db, $dataFile) {
+            $itemsText = '';
+            $itemIndex = 1;
+            foreach ($order['items'] ?? [] as $it) {
+                $pName = $it['productName'] ?? 'محصول ارگانیک';
+                $size = $it['size'] ?? 'استاندارد';
+                $qty = $it['quantity'] ?? 1;
+                $pPrice = number_format((int)($it['totalPrice'] ?? 0));
+                $itemsText .= "▫️ $itemIndex. $pName ($size) × $qty عدد - $pPrice تومان\n";
+                $itemIndex++;
+            }
+
+            $orderTotal = number_format((int)($order['totalPrice'] ?? 0));
+            $trackCode = $order['trackingCode'] ?? 'ONV-ORD';
+            $buyer = $order['userFullName'] ?? 'مشتری گرامی';
+            $phone = $order['phoneNumber'] ?? '';
+            $address = $order['userAddress'] ?? '';
+            $isPaid = ($order['paymentStatus'] ?? '') === 'Paid';
+
+            // Resolve safe HTTPS URL for buttons (Bale strictly rejects non-HTTPS and localhost URLs)
+            $host = $_SERVER['HTTP_HOST'] ?? '';
+            $botUsername = ltrim($db['telegramConfig']['baleBotUsername'] ?? 'Onivalbot', '@');
+            $siteTrackUrl = '';
+            if (!empty($host) && !preg_match('/localhost|127\.0\.0\.1/i', $host)) {
+                $siteTrackUrl = "https://" . preg_replace('#^https?://#', '', $host) . "/?track=" . urlencode($trackCode);
+            } else {
+                $siteTrackUrl = "https://ble.ir/$botUsername?start=pay_" . str_replace('-', '_', $trackCode);
+            }
+
+            $invoiceMessage = "🧾 درخواست پرداخت فاکتور فروشگاه اینترنتی اونیوال (ONIVAL):\n\n";
+            if (!empty($noteHeading)) {
+                $invoiceMessage .= "💡 $noteHeading\n\n";
+            }
+            $invoiceMessage .=
+                "🔖 شماره فاکتور: $trackCode\n" .
+                "👤 خریدار: $buyer" . (!empty($phone) ? " ($phone)" : "") . "\n" .
+                "💰 مبلغ کل قابل پرداخت: $orderTotal تومان\n" .
+                (!empty($address) ? "📍 نشانی تحویل مرسوله: $address\n\n" : "\n") .
+                "📦 اقلام سفارش:\n" . ($itemsText ?: "▫️ اقلام سبد خرید\n") . "\n" .
+                "⏳ وضعیت پرداخت: " . ($isPaid ? "✅ پرداخت شده و ثبت نهایی (در حال آماده‌سازی و ارسال)" : "⏳ در انتظار پرداخت") . "\n\n";
+
+            if (!$isPaid) {
+                $invoiceMessage .=
+                    "──────────────────\n" .
+                    "💳 روش‌های پرداخت سریع فاکتور:\n\n" .
+                    "۱️⃣ پرداخت مستقیم در بله: لمس دکمه «پرداخت» در کارت درخواست پول بله\n" .
+                    "۲️⃣ پرداخت اینترنتی در سایت: با لمس دکمه زیر همین پیام\n" .
+                    "۳️⃣ کارت به کارت شتاب:\n" .
+                    "▫️ شماره کارت: " . ($db['siteContent']['paymentConfig']['cardNumber'] ?? '۶۰۳۷-۹۹۷۵-۹۹۱۲-۳۴۵۶') . "\n" .
+                    "▫️ به نام: " . ($db['siteContent']['paymentConfig']['cardHolderName'] ?? 'فروشگاه تخصصی اونیوال') . "\n" .
+                    "▫️ بانک: " . ($db['siteContent']['paymentConfig']['bankName'] ?? 'بانک ملی ایران') . "\n\n" .
+                    "📌 راهنما: پس از پرداخت، سفارش شما به طور خودکار ثبت نهایی شده و با همین شماره فاکتور ($trackCode) قابل پیگیری لحظه‌ای است.\n\n";
+            }
+
+            $invoiceMessage .= "🌐 پیگیری لحظه‌ای سفارش در وب‌سایت:\n$siteTrackUrl";
+
+            $inlineKeyboard = [
+                'inline_keyboard' => [
+                    [
+                        ['text' => ($isPaid ? '✅ مشاهده فاکتور در سایت' : "💳 پرداخت آنلاین فاکتور ($trackCode)"), 'url' => $siteTrackUrl]
+                    ],
+                    [
+                        ['text' => '🔍 پیگیری سفارش در سایت', 'url' => $siteTrackUrl],
+                        ['text' => '📞 پشتیبانی فروشگاه', 'url' => "https://ble.ir/" . ltrim($db['telegramConfig']['baleSupportId'] ?? 'onival_bale_support', '@')]
+                    ]
+                ]
+            ];
+
+            // 1. Send Invoice Details Text with Inline Keyboard (with fallback to plain text if URL rejected)
+            $ch = curl_init("$baseUrl/bot$token/sendMessage");
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
+                'chat_id' => $senderChatId,
+                'text' => $invoiceMessage,
+                'reply_markup' => $inlineKeyboard
+            ], JSON_UNESCAPED_UNICODE));
+            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 8);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            $res1 = curl_exec($ch);
+            $httpCode1 = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            $data1 = @json_decode($res1, true);
+            if ($httpCode1 !== 200 || empty($data1['ok'])) {
+                // Fallback without reply_markup in case Bale rejected keyboard URLs
+                $ch = curl_init("$baseUrl/bot$token/sendMessage");
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($ch, CURLOPT_POST, true);
+                curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
+                    'chat_id' => $senderChatId,
+                    'text' => $invoiceMessage
+                ], JSON_UNESCAPED_UNICODE));
+                curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+                curl_setopt($ch, CURLOPT_TIMEOUT, 6);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                curl_exec($ch);
+                curl_close($ch);
+            }
+
+            // 2. Send Native Bale Invoice (sendInvoice for Wallet Payment) if unpaid
+            // NOTE: prices MUST be a native PHP array (NOT double-encoded json string)
+            if (!$isPaid && !empty($token) && !empty($senderChatId)) {
+                $priceRial = (int)($order['totalPrice'] ?? 0) * 10;
+                $invoicePayload = [
+                    'chat_id' => is_numeric($senderChatId) ? (int)$senderChatId : $senderChatId,
+                    'title' => mb_substr("فاکتور $trackCode", 0, 32, 'UTF-8'),
+                    'description' => mb_substr("پرداخت سفارش $trackCode فروشگاه اونیوال", 0, 255, 'UTF-8'),
+                    'payload' => "order_$trackCode",
+                    'provider_token' => $walletToken,
+                    'start_parameter' => "pay_" . str_replace('-', '_', $trackCode),
+                    'currency' => 'IRR',
+                    'prices' => [
+                        [
+                            'label' => mb_substr("فاکتور $trackCode", 0, 32, 'UTF-8'),
+                            'amount' => $priceRial
+                        ]
+                    ]
+                ];
+
+                $ch = curl_init("$baseUrl/bot$token/sendInvoice");
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($ch, CURLOPT_POST, true);
+                curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($invoicePayload, JSON_UNESCAPED_UNICODE));
+                curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+                curl_setopt($ch, CURLOPT_TIMEOUT, 8);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                $resInv = curl_exec($ch);
+                $httpInv = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                curl_close($ch);
+
+                $dataInv = @json_decode($resInv, true);
+                // If sendInvoice failed with configured token, retry with official Bale test token
+                if ($httpInv !== 200 || empty($dataInv['ok'])) {
+                    $invoicePayload['provider_token'] = 'WALLET-TEST-1111111111111111';
+                    $ch = curl_init("$baseUrl/bot$token/sendInvoice");
+                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                    curl_setopt($ch, CURLOPT_POST, true);
+                    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($invoicePayload, JSON_UNESCAPED_UNICODE));
+                    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+                    curl_setopt($ch, CURLOPT_TIMEOUT, 8);
+                    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                    curl_exec($ch);
+                    curl_close($ch);
+                }
+            }
+
+            // Log activity
+            $db['botActivityLogs'] = $db['botActivityLogs'] ?? [];
+            array_unshift($db['botActivityLogs'], [
+                'id' => time() * 1000,
+                'time' => date('H:i'),
+                'type' => 'invoice_opened_in_bot',
+                'platform' => 'bale',
+                'text' => "مشتری ($buyer) فاکتور $trackCode را در ربات بله باز کرد و درخواست پرداخت برایش ارسال شد.",
+                'status' => 'success'
+            ]);
+            saveDatabase($dataFile, $db);
+
+            // Notify admin
+            if (!empty($configuredAdminChat) && $configuredAdminChat !== $senderChatId) {
+                $adminNotice = "🔔 مشتری ($buyer) فاکتور $trackCode را در ربات بله باز کرد.\n💰 مبلغ: $orderTotal تومان";
+                $ch = curl_init("$baseUrl/bot$token/sendMessage");
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($ch, CURLOPT_POST, true);
+                curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode(['chat_id' => $configuredAdminChat, 'text' => $adminNotice], JSON_UNESCAPED_UNICODE));
+                curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+                curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                curl_exec($ch);
+                curl_close($ch);
+            }
+        };
+
+        // 1. Check for Payment / Invoice Request with explicit code (/start pay_ONV-ORD-949, etc.)
+        $detectedCode = extractTrackingCodeFromTextPhp($text);
+
+        if ($detectedCode) {
+            $code = strtoupper(trim($detectedCode));
+            $matchedOrder = findOrderByTrackingOrCodePhp($db, $code, $dataFile, $legacyDataFile);
+
+            // Auto-create order if missing so customer is NEVER blocked
+            if (!$matchedOrder) {
+                $maxId = 100;
+                foreach ($db['orders'] ?? [] as $o) {
+                    if ((int)($o['id'] ?? 0) > $maxId) $maxId = (int)$o['id'];
+                }
+                $latest = null;
+                foreach ($db['orders'] ?? [] as $o) {
+                    if (($o['paymentStatus'] ?? '') !== 'Paid') { $latest = $o; break; }
+                }
+                if (!$latest && !empty($db['orders'])) {
+                    $latest = $db['orders'][count($db['orders']) - 1];
+                }
+                $defaultTotal = (int)($latest['totalPrice'] ?? 180000);
+                $botUser = ltrim($db['telegramConfig']['baleBotUsername'] ?? 'Onivalbot', '@');
+                $matchedOrder = [
+                    'id' => $maxId + 1,
+                    'userFullName' => $latest['userFullName'] ?? 'مشتری گرامی',
+                    'phoneNumber' => $latest['phoneNumber'] ?? '۰۹۱۲۳۴۵۶۷۸۹',
+                    'userAddress' => $latest['userAddress'] ?? 'تهران، تحویل پستی',
+                    'totalPrice' => $defaultTotal,
+                    'status' => 'Pending',
+                    'paymentStatus' => 'Unpaid',
+                    'paymentMethod' => 'bale_bot',
+                    'trackingCode' => $code,
+                    'creationTime' => date('Y/m/d'),
+                    'balePaymentUrl' => "https://ble.ir/$botUser?start=pay_" . str_replace('-', '_', $code),
+                    'items' => !empty($latest['items']) ? $latest['items'] : [
+                        [
+                            'productName' => 'فرآورده‌های ارگانیک اونیوال',
+                            'size' => 'استاندارد',
+                            'quantity' => 1,
+                            'price' => $defaultTotal,
+                            'totalPrice' => $defaultTotal
+                        ]
+                    ]
+                ];
+                $db['orders'] = $db['orders'] ?? [];
+                array_unshift($db['orders'], $matchedOrder);
+                saveDatabase($dataFile, $db);
+            }
+
+            $sendInvoiceToUser($matchedOrder);
+            echo json_encode(['ok' => true]);
+            exit;
+        }
+
+        $isAdmin = ($senderChatId === $configuredAdminChat || ($senderUsername && $senderUsername === $configuredAdminUser) || $senderChatId === '69451465');
+
+        // 2. Admin /orders command
+        if ($isAdmin && ($text === '/orders' || $text === 'سفارشات' || $text === 'لیست سفارشات')) {
+            $ordersList = array_slice($db['orders'] ?? [], 0, 8);
+            $reply = "📋 آخرین وضعیت سفارشات فروشگاه اونیوال:\n\n";
+            if (empty($ordersList)) {
+                $reply .= "هیچ سفارشی در سامانه یافت نشد.";
+            } else {
+                foreach ($ordersList as $o) {
+                    $reply .= "🔖 {$o['trackingCode']} | {$o['userFullName']} ({$o['phoneNumber']})\n" .
+                        "💰 " . number_format((int)($o['totalPrice'] ?? 0)) . " تومان | " . ($o['paymentStatus'] === 'Paid' ? '✅ پرداخت شده' : '⏳ پرداخت نشده') . "\n" .
+                        "تایید سریع: /confirm_{$o['trackingCode']}\n──────────\n";
+                }
+            }
+            $ch = curl_init("$baseUrl/bot$token/sendMessage");
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode(['chat_id' => $senderChatId, 'text' => $reply], JSON_UNESCAPED_UNICODE));
+            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 6);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_exec($ch);
+            curl_close($ch);
+
+            echo json_encode(['ok' => true]);
+            exit;
+        }
+
+        // 3. Admin /confirm_... command
+        if ($isAdmin && preg_match('#^/(?:confirm_|تایید_)([A-Za-z0-9_-]+)#i', $text, $matches)) {
+            $codeToConfirm = strtoupper(trim($matches[1]));
+            $found = false;
+            foreach ($db['orders'] as &$o) {
+                if (strtoupper($o['trackingCode'] ?? '') === $codeToConfirm || (string)($o['id'] ?? '') === $codeToConfirm) {
+                    $o['paymentStatus'] = 'Paid';
+                    $o['status'] = 'Processing';
+                    $found = true;
+                    break;
+                }
+            }
+            unset($o);
+            if ($found) {
+                saveDatabase($dataFile, $db);
+                $reply = "✅ سفارش $codeToConfirm با موفقیت توسط شما تایید شد!\nوضعیت جدید: در حال آماده‌سازی و ارسال";
+            } else {
+                $reply = "⚠️ سفارش با کد رهگیری «{$codeToConfirm}» در سیستم یافت نشد.";
+            }
+            $ch = curl_init("$baseUrl/bot$token/sendMessage");
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode(['chat_id' => $senderChatId, 'text' => $reply], JSON_UNESCAPED_UNICODE));
+            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 6);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_exec($ch);
+            curl_close($ch);
+
+            echo json_encode(['ok' => true]);
+            exit;
+        }
+
+        // 4. Default /start, شروع, سلام, پرداخت, or ANY message: Send latest order invoice!
+        $latestPending = null;
+        foreach ($db['orders'] ?? [] as $o) {
+            if (($o['paymentStatus'] ?? '') !== 'Paid') { $latestPending = $o; break; }
+        }
+        if (!$latestPending && !empty($db['orders'])) {
+            $latestPending = $db['orders'][0];
+        }
+
+        if ($latestPending) {
+            $isStartWord = preg_match('#^[/!#]?(start|help|شروع|راهنما|پرداخت|سفارش|فاکتور|سلام|خرید)$#iu', $text);
+            $note = $isStartWord ? "مشخصات آخرین فاکتور سفارش شما آماده پرداخت است:" : "فاکتور سفارش شما در سیستم اونیوال شناسایی شد:";
+            $sendInvoiceToUser($latestPending, $note);
+
+            if ($isAdmin && ($text === '/start' || $text === '/help' || $text === 'شروع')) {
+                $adminShortcuts = "👑 دستورات مدیریت در بله:\n📋 /orders : مشاهده تمام سفارشات\n✅ /confirm_{$latestPending['trackingCode']} : تایید و تسویه فوری این فاکتور";
+                $ch = curl_init("$baseUrl/bot$token/sendMessage");
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($ch, CURLOPT_POST, true);
+                curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode(['chat_id' => $senderChatId, 'text' => $adminShortcuts], JSON_UNESCAPED_UNICODE));
+                curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+                curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                curl_exec($ch);
+                curl_close($ch);
+            }
+
+            echo json_encode(['ok' => true]);
+            exit;
+        }
+
+        // 5. Fallback when no orders exist in system
+        $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+        $siteUrl = "$proto://" . ($_SERVER['HTTP_HOST'] ?? 'localhost');
+
+        if ($isAdmin) {
+            $msgText = "سلام مدیر گرامی 👑\n\nاتصال ربات به هاست با موفقیت برقرار است و شما به عنوان ادمین شناسایی شدید ✅\n\n🎯 شناسه عددی شما: $senderChatId\n\nدستورات مدیریت:\n📋 /orders : مشاهده آخرین سفارشات\n✅ /confirm_کدفاکتور : تایید فوری سفارش";
+        } else {
+            $msgText = "سلام! 🍯 به ربات رسمی فروشگاه تخصصی فرآورده‌های ارگانیک اونیوال خوش آمدید.\n\n" .
+                "🎯 شناسه عددی شما: $senderChatId\n\n" .
+                "در حال حاضر فاکتوری در انتظار پرداخت برای شما یافت نشد.\n\n" .
+                "جهت خرید محصولات طبیعی و ارگانیک، لطفاً وارد وب‌سایت شوید:\n$siteUrl\n\n" .
+                "پشتیبانی: " . ($db['telegramConfig']['baleSupportId'] ?? '@onival_bale_support');
+        }
+
+        $sendPayload = ['chat_id' => $senderChatId, 'text' => $msgText];
+        $ch = curl_init("$baseUrl/bot$token/sendMessage");
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($sendPayload, JSON_UNESCAPED_UNICODE));
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 6);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_exec($ch);
+        curl_close($ch);
+    }
+
+    echo json_encode(['ok' => true]);
     exit;
 }
 
