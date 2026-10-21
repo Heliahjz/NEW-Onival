@@ -384,8 +384,16 @@
   ],
   "slugRedirects": [],
   "telegramConfig": {
-    "botToken": "1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34",
+    "customerBotToken": "1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34",
+    "customerBotUsername": "Onivalbot",
+    "customerBotEnabled": true,
+    "customerBotWebhookUrl": "",
+    "adminBotToken": "1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34",
+    "adminBotUsername": "OnivalAdminBot",
     "adminChatId": "69451465",
+    "adminBotEnabled": true,
+    "adminBotWebhookUrl": "",
+    "botToken": "1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34",
     "botUsername": "Onivalbot",
     "baseUrl": "https://tapi.bale.ai",
     "panelBaseUrl": "http://localhost:3000",
@@ -673,12 +681,526 @@
   },
   "botActivityLogs": [
     {
-      "id": 1792515012631,
-      "time": "۱۶:۵۰",
+      "id": 1792573365202,
+      "time": "۰۹:۰۲",
+      "type": "default_command_track",
+      "platform": "bale",
+      "text": "دستور پیش‌فرض «پیگیری سفارش» برای کاربر (69451465) پردازش و راهنمای پیگیری ارسال شد.",
+      "status": "success",
+      "rawPayload": {
+        "command": "پیگیری سفارش",
+        "chatId": "69451465"
+      },
+      "rawResponse": {
+        "ok": false,
+        "status": 401,
+        "error": "توکن ربات نامعتبر است (401 Unauthorized)"
+      }
+    },
+    {
+      "id": 1792573365094,
+      "time": "۰۹:۰۲",
+      "type": "default_command_contact",
+      "platform": "bale",
+      "text": "دستور پیش‌فرض «تماس با ما و پشتیبانی» توسط کاربر (69451465) دریافت شد و مشخصات تماس ارسال گردید.",
+      "status": "success",
+      "rawPayload": {
+        "command": "تماس با ما",
+        "chatId": "69451465",
+        "username": "onival_tester"
+      },
+      "rawResponse": {
+        "ok": false,
+        "status": 401,
+        "error": "توکن ربات نامعتبر است (401 Unauthorized)"
+      }
+    },
+    {
+      "id": 1792573365001,
+      "time": "۰۹:۰۲",
+      "type": "default_command_shop",
+      "platform": "bale",
+      "text": "دستور پیش‌فرض «فروشگاه اونیوال» توسط کاربر (69451465) دریافت شد و لینک ویترین و محصولات ارسال گردید.",
+      "status": "success",
+      "rawPayload": {
+        "command": "فروشگاه",
+        "chatId": "69451465",
+        "username": "onival_tester"
+      },
+      "rawResponse": {
+        "ok": false,
+        "status": 401,
+        "error": "توکن ربات نامعتبر است (401 Unauthorized)"
+      }
+    },
+    {
+      "id": 1792573364905,
+      "time": "۰۹:۰۲",
       "type": "invoice_opened_in_bot",
       "platform": "bale",
-      "text": "مشتری (مریم شریفی) فاکتور ONV-CNS-405 را در ربات بله باز کرد و درخواست پرداخت برایش ارسال شد.",
-      "status": "success"
+      "text": "فاکتور سفارش ONV_ORD_915 با موفقیت شناسایی شد و اقلام آن (1 قلم کالا به مبلغ کل ۱۵۰٬۰۰۰ تومان) از دیتابیس خوانده و درخواست پرداخت برای کاربر در بله صادر گردید.",
+      "status": "warning",
+      "details": "چت‌آیدی کاربر: 69451465 | وضعیت ارسال پیام فاکتور: خطا | وضعیت درخواست پول بله: Unauthorized",
+      "rawPayload": {
+        "chatId": "69451465",
+        "trackingCode": "ONV_ORD_915",
+        "totalPrice": 150000,
+        "itemsCount": 1,
+        "userFullName": "مریم شریفی",
+        "phoneNumber": "09124455667",
+        "paymentStatus": "Unpaid"
+      },
+      "rawResponse": {
+        "messageDelivery": {
+          "ok": false,
+          "status": 401,
+          "error": "توکن ربات نامعتبر است (401 Unauthorized)"
+        },
+        "invoiceDelivery": {
+          "ok": false,
+          "status": 401,
+          "data": {
+            "ok": false,
+            "error_code": 401,
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "orderInfo": {
+        "id": 104,
+        "trackingCode": "ONV_ORD_915",
+        "userFullName": "مریم شریفی",
+        "totalPrice": 150000,
+        "paymentStatus": "Unpaid",
+        "items": [
+          {
+            "id": 1,
+            "productId": 9002,
+            "productName": "رزرو مشاوره تخصصی: دوز مصرف و دوره درمانی ژل رویال و گرده گل",
+            "size": "فردا | نوبت عصر (۱۶:۰۰ الی ۱۹:۰۰) - پیام‌رسان بله",
+            "quantity": 1,
+            "unitPrice": 150000,
+            "totalPrice": 150000
+          }
+        ]
+      }
+    },
+    {
+      "id": 1792573364723,
+      "time": "۰۹:۰۲",
+      "type": "invoice_opened_in_bot",
+      "platform": "bale",
+      "text": "فاکتور سفارش ONV_ORD_915 با موفقیت شناسایی شد و اقلام آن (1 قلم کالا به مبلغ کل ۱۵۰٬۰۰۰ تومان) از دیتابیس خوانده و درخواست پرداخت برای کاربر در بله صادر گردید.",
+      "status": "warning",
+      "details": "چت‌آیدی کاربر: 69451465 | وضعیت ارسال پیام فاکتور: خطا | وضعیت درخواست پول بله: Unauthorized",
+      "rawPayload": {
+        "chatId": "69451465",
+        "trackingCode": "ONV_ORD_915",
+        "totalPrice": 150000,
+        "itemsCount": 1,
+        "userFullName": "مریم شریفی",
+        "phoneNumber": "09124455667",
+        "paymentStatus": "Unpaid"
+      },
+      "rawResponse": {
+        "messageDelivery": {
+          "ok": false,
+          "status": 401,
+          "error": "توکن ربات نامعتبر است (401 Unauthorized)"
+        },
+        "invoiceDelivery": {
+          "ok": false,
+          "status": 401,
+          "data": {
+            "ok": false,
+            "error_code": 401,
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "orderInfo": {
+        "id": 104,
+        "trackingCode": "ONV_ORD_915",
+        "userFullName": "مریم شریفی",
+        "totalPrice": 150000,
+        "paymentStatus": "Unpaid",
+        "items": [
+          {
+            "id": 1,
+            "productId": 9002,
+            "productName": "رزرو مشاوره تخصصی: دوز مصرف و دوره درمانی ژل رویال و گرده گل",
+            "size": "فردا | نوبت عصر (۱۶:۰۰ الی ۱۹:۰۰) - پیام‌رسان بله",
+            "quantity": 1,
+            "unitPrice": 150000,
+            "totalPrice": 150000
+          }
+        ]
+      }
+    },
+    {
+      "id": 1792573364529,
+      "time": "۰۹:۰۲",
+      "type": "invoice_opened_in_bot",
+      "platform": "bale",
+      "text": "فاکتور سفارش ONV_ORD_915 با موفقیت شناسایی شد و اقلام آن (1 قلم کالا به مبلغ کل ۱۵۰٬۰۰۰ تومان) از دیتابیس خوانده و درخواست پرداخت برای کاربر در بله صادر گردید.",
+      "status": "warning",
+      "details": "چت‌آیدی کاربر: 69451465 | وضعیت ارسال پیام فاکتور: خطا | وضعیت درخواست پول بله: Unauthorized",
+      "rawPayload": {
+        "chatId": "69451465",
+        "trackingCode": "ONV_ORD_915",
+        "totalPrice": 150000,
+        "itemsCount": 1,
+        "userFullName": "مریم شریفی",
+        "phoneNumber": "09124455667",
+        "paymentStatus": "Unpaid"
+      },
+      "rawResponse": {
+        "messageDelivery": {
+          "ok": false,
+          "status": 401,
+          "error": "توکن ربات نامعتبر است (401 Unauthorized)"
+        },
+        "invoiceDelivery": {
+          "ok": false,
+          "status": 401,
+          "data": {
+            "ok": false,
+            "error_code": 401,
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "orderInfo": {
+        "id": 104,
+        "trackingCode": "ONV_ORD_915",
+        "userFullName": "مریم شریفی",
+        "totalPrice": 150000,
+        "paymentStatus": "Unpaid",
+        "items": [
+          {
+            "id": 1,
+            "productId": 9002,
+            "productName": "رزرو مشاوره تخصصی: دوز مصرف و دوره درمانی ژل رویال و گرده گل",
+            "size": "فردا | نوبت عصر (۱۶:۰۰ الی ۱۹:۰۰) - پیام‌رسان بله",
+            "quantity": 1,
+            "unitPrice": 150000,
+            "totalPrice": 150000
+          }
+        ]
+      }
+    },
+    {
+      "id": 1792573364342,
+      "time": "۰۹:۰۲",
+      "type": "invoice_opened_in_bot",
+      "platform": "bale",
+      "text": "فاکتور سفارش ONV_ORD_915 با موفقیت شناسایی شد و اقلام آن (1 قلم کالا به مبلغ کل ۱۵۰٬۰۰۰ تومان) از دیتابیس خوانده و درخواست پرداخت برای کاربر در بله صادر گردید.",
+      "status": "warning",
+      "details": "چت‌آیدی کاربر: 69451465 | وضعیت ارسال پیام فاکتور: خطا | وضعیت درخواست پول بله: Unauthorized",
+      "rawPayload": {
+        "chatId": "69451465",
+        "trackingCode": "ONV_ORD_915",
+        "totalPrice": 150000,
+        "itemsCount": 1,
+        "userFullName": "مریم شریفی",
+        "phoneNumber": "09124455667",
+        "paymentStatus": "Unpaid"
+      },
+      "rawResponse": {
+        "messageDelivery": {
+          "ok": false,
+          "status": 401,
+          "error": "توکن ربات نامعتبر است (401 Unauthorized)"
+        },
+        "invoiceDelivery": {
+          "ok": false,
+          "status": 401,
+          "data": {
+            "ok": false,
+            "error_code": 401,
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "orderInfo": {
+        "id": 104,
+        "trackingCode": "ONV_ORD_915",
+        "userFullName": "مریم شریفی",
+        "totalPrice": 150000,
+        "paymentStatus": "Unpaid",
+        "items": [
+          {
+            "id": 1,
+            "productId": 9002,
+            "productName": "رزرو مشاوره تخصصی: دوز مصرف و دوره درمانی ژل رویال و گرده گل",
+            "size": "فردا | نوبت عصر (۱۶:۰۰ الی ۱۹:۰۰) - پیام‌رسان بله",
+            "quantity": 1,
+            "unitPrice": 150000,
+            "totalPrice": 150000
+          }
+        ]
+      }
+    },
+    {
+      "id": 1792573364144,
+      "time": "۰۹:۰۲",
+      "type": "invoice_opened_in_bot",
+      "platform": "bale",
+      "text": "فاکتور سفارش ONV_ORD_915 با موفقیت شناسایی شد و اقلام آن (1 قلم کالا به مبلغ کل ۱۵۰٬۰۰۰ تومان) از دیتابیس خوانده و درخواست پرداخت برای کاربر در بله صادر گردید.",
+      "status": "warning",
+      "details": "چت‌آیدی کاربر: 69451465 | وضعیت ارسال پیام فاکتور: خطا | وضعیت درخواست پول بله: Unauthorized",
+      "rawPayload": {
+        "chatId": "69451465",
+        "trackingCode": "ONV_ORD_915",
+        "totalPrice": 150000,
+        "itemsCount": 1,
+        "userFullName": "مریم شریفی",
+        "phoneNumber": "09124455667",
+        "paymentStatus": "Unpaid"
+      },
+      "rawResponse": {
+        "messageDelivery": {
+          "ok": false,
+          "status": 401,
+          "error": "توکن ربات نامعتبر است (401 Unauthorized)"
+        },
+        "invoiceDelivery": {
+          "ok": false,
+          "status": 401,
+          "data": {
+            "ok": false,
+            "error_code": 401,
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "orderInfo": {
+        "id": 104,
+        "trackingCode": "ONV_ORD_915",
+        "userFullName": "مریم شریفی",
+        "totalPrice": 150000,
+        "paymentStatus": "Unpaid",
+        "items": [
+          {
+            "id": 1,
+            "productId": 9002,
+            "productName": "رزرو مشاوره تخصصی: دوز مصرف و دوره درمانی ژل رویال و گرده گل",
+            "size": "فردا | نوبت عصر (۱۶:۰۰ الی ۱۹:۰۰) - پیام‌رسان بله",
+            "quantity": 1,
+            "unitPrice": 150000,
+            "totalPrice": 150000
+          }
+        ]
+      }
+    },
+    {
+      "id": 1792573345089,
+      "time": "۰۹:۰۲",
+      "type": "default_command_track",
+      "platform": "bale",
+      "text": "دستور پیش‌فرض «پیگیری سفارش» برای کاربر (69451465) پردازش و راهنمای پیگیری ارسال شد.",
+      "status": "success",
+      "rawPayload": {
+        "command": "پیگیری سفارش",
+        "chatId": "69451465"
+      },
+      "rawResponse": {
+        "ok": false,
+        "status": 401,
+        "error": "توکن ربات نامعتبر است (401 Unauthorized)"
+      }
+    },
+    {
+      "id": 1792573344994,
+      "time": "۰۹:۰۲",
+      "type": "default_command_contact",
+      "platform": "bale",
+      "text": "دستور پیش‌فرض «تماس با ما و پشتیبانی» توسط کاربر (69451465) دریافت شد و مشخصات تماس ارسال گردید.",
+      "status": "success",
+      "rawPayload": {
+        "command": "تماس با ما",
+        "chatId": "69451465",
+        "username": "onival_tester"
+      },
+      "rawResponse": {
+        "ok": false,
+        "status": 401,
+        "error": "توکن ربات نامعتبر است (401 Unauthorized)"
+      }
+    },
+    {
+      "id": 1792573344897,
+      "time": "۰۹:۰۲",
+      "type": "default_command_shop",
+      "platform": "bale",
+      "text": "دستور پیش‌فرض «فروشگاه اونیوال» توسط کاربر (69451465) دریافت شد و لینک ویترین و محصولات ارسال گردید.",
+      "status": "success",
+      "rawPayload": {
+        "command": "فروشگاه",
+        "chatId": "69451465",
+        "username": "onival_tester"
+      },
+      "rawResponse": {
+        "ok": false,
+        "status": 401,
+        "error": "توکن ربات نامعتبر است (401 Unauthorized)"
+      }
+    },
+    {
+      "id": 1792573344802,
+      "time": "۰۹:۰۲",
+      "type": "invoice_opened_in_bot",
+      "platform": "bale",
+      "text": "فاکتور سفارش ONV_ORD_915 با موفقیت شناسایی شد و اقلام آن (1 قلم کالا به مبلغ کل ۱۵۰٬۰۰۰ تومان) از دیتابیس خوانده و درخواست پرداخت برای کاربر در بله صادر گردید.",
+      "status": "warning",
+      "details": "چت‌آیدی کاربر: 69451465 | وضعیت ارسال پیام فاکتور: خطا | وضعیت درخواست پول بله: Unauthorized",
+      "rawPayload": {
+        "chatId": "69451465",
+        "trackingCode": "ONV_ORD_915",
+        "totalPrice": 150000,
+        "itemsCount": 1,
+        "userFullName": "مریم شریفی",
+        "phoneNumber": "09124455667",
+        "paymentStatus": "Unpaid"
+      },
+      "rawResponse": {
+        "messageDelivery": {
+          "ok": false,
+          "status": 401,
+          "error": "توکن ربات نامعتبر است (401 Unauthorized)"
+        },
+        "invoiceDelivery": {
+          "ok": false,
+          "status": 401,
+          "data": {
+            "ok": false,
+            "error_code": 401,
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "orderInfo": {
+        "id": 104,
+        "trackingCode": "ONV_ORD_915",
+        "userFullName": "مریم شریفی",
+        "totalPrice": 150000,
+        "paymentStatus": "Unpaid",
+        "items": [
+          {
+            "id": 1,
+            "productId": 9002,
+            "productName": "رزرو مشاوره تخصصی: دوز مصرف و دوره درمانی ژل رویال و گرده گل",
+            "size": "فردا | نوبت عصر (۱۶:۰۰ الی ۱۹:۰۰) - پیام‌رسان بله",
+            "quantity": 1,
+            "unitPrice": 150000,
+            "totalPrice": 150000
+          }
+        ]
+      }
+    },
+    {
+      "id": 1792573344619,
+      "time": "۰۹:۰۲",
+      "type": "invoice_opened_in_bot",
+      "platform": "bale",
+      "text": "فاکتور سفارش ONV_ORD_915 با موفقیت شناسایی شد و اقلام آن (1 قلم کالا به مبلغ کل ۱۵۰٬۰۰۰ تومان) از دیتابیس خوانده و درخواست پرداخت برای کاربر در بله صادر گردید.",
+      "status": "warning",
+      "details": "چت‌آیدی کاربر: 69451465 | وضعیت ارسال پیام فاکتور: خطا | وضعیت درخواست پول بله: Unauthorized",
+      "rawPayload": {
+        "chatId": "69451465",
+        "trackingCode": "ONV_ORD_915",
+        "totalPrice": 150000,
+        "itemsCount": 1,
+        "userFullName": "مریم شریفی",
+        "phoneNumber": "09124455667",
+        "paymentStatus": "Unpaid"
+      },
+      "rawResponse": {
+        "messageDelivery": {
+          "ok": false,
+          "status": 401,
+          "error": "توکن ربات نامعتبر است (401 Unauthorized)"
+        },
+        "invoiceDelivery": {
+          "ok": false,
+          "status": 401,
+          "data": {
+            "ok": false,
+            "error_code": 401,
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "orderInfo": {
+        "id": 104,
+        "trackingCode": "ONV_ORD_915",
+        "userFullName": "مریم شریفی",
+        "totalPrice": 150000,
+        "paymentStatus": "Unpaid",
+        "items": [
+          {
+            "id": 1,
+            "productId": 9002,
+            "productName": "رزرو مشاوره تخصصی: دوز مصرف و دوره درمانی ژل رویال و گرده گل",
+            "size": "فردا | نوبت عصر (۱۶:۰۰ الی ۱۹:۰۰) - پیام‌رسان بله",
+            "quantity": 1,
+            "unitPrice": 150000,
+            "totalPrice": 150000
+          }
+        ]
+      }
+    },
+    {
+      "id": 1792573344432,
+      "time": "۰۹:۰۲",
+      "type": "invoice_opened_in_bot",
+      "platform": "bale",
+      "text": "فاکتور سفارش ONV_ORD_915 با موفقیت شناسایی شد و اقلام آن (1 قلم کالا به مبلغ کل ۱۵۰٬۰۰۰ تومان) از دیتابیس خوانده و درخواست پرداخت برای کاربر در بله صادر گردید.",
+      "status": "warning",
+      "details": "چت‌آیدی کاربر: 69451465 | وضعیت ارسال پیام فاکتور: خطا | وضعیت درخواست پول بله: Unauthorized",
+      "rawPayload": {
+        "chatId": "69451465",
+        "trackingCode": "ONV_ORD_915",
+        "totalPrice": 150000,
+        "itemsCount": 1,
+        "userFullName": "مریم شریفی",
+        "phoneNumber": "09124455667",
+        "paymentStatus": "Unpaid"
+      },
+      "rawResponse": {
+        "messageDelivery": {
+          "ok": false,
+          "status": 401,
+          "error": "توکن ربات نامعتبر است (401 Unauthorized)"
+        },
+        "invoiceDelivery": {
+          "ok": false,
+          "status": 401,
+          "data": {
+            "ok": false,
+            "error_code": 401,
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "orderInfo": {
+        "id": 104,
+        "trackingCode": "ONV_ORD_915",
+        "userFullName": "مریم شریفی",
+        "totalPrice": 150000,
+        "paymentStatus": "Unpaid",
+        "items": [
+          {
+            "id": 1,
+            "productId": 9002,
+            "productName": "رزرو مشاوره تخصصی: دوز مصرف و دوره درمانی ژل رویال و گرده گل",
+            "size": "فردا | نوبت عصر (۱۶:۰۰ الی ۱۹:۰۰) - پیام‌رسان بله",
+            "quantity": 1,
+            "unitPrice": 150000,
+            "totalPrice": 150000
+          }
+        ]
+      }
     },
     {
       "id": 1,
@@ -706,6 +1228,30 @@
     }
   ],
   "orders": [
+    {
+      "id": 104,
+      "userFullName": "مریم شریفی",
+      "phoneNumber": "09124455667",
+      "userAddress": "مشاوره آنلاین در پیام‌رسان بله (Bale) | آیدی/شماره: @maryam_sh | زمان: فردا - نوبت عصر (۱۶:۰۰ الی ۱۹:۰۰)",
+      "totalPrice": 150000,
+      "status": "Pending",
+      "paymentStatus": "Unpaid",
+      "paymentMethod": "bale_bot",
+      "trackingCode": "ONV_ORD_915",
+      "creationTime": "۱۴۰۵/۷/۲۹",
+      "balePaymentUrl": "https://ble.ir/Onivalbot?start=pay_ONV_ORD_915",
+      "items": [
+        {
+          "id": 1,
+          "productId": 9002,
+          "productName": "رزرو مشاوره تخصصی: دوز مصرف و دوره درمانی ژل رویال و گرده گل",
+          "size": "فردا | نوبت عصر (۱۶:۰۰ الی ۱۹:۰۰) - پیام‌رسان بله",
+          "quantity": 1,
+          "unitPrice": 150000,
+          "totalPrice": 150000
+        }
+      ]
+    },
     {
       "id": 101,
       "userFullName": "نیما علوی",
@@ -860,5 +1406,5 @@
       }
     }
   ],
-  "updatedAt": "2026-10-20T16:50:12.631Z"
+  "updatedAt": "2026-10-21T09:02:45.202Z"
 }

@@ -34,11 +34,13 @@ import {
   Settings2,
   Server,
   BookOpen,
-  AlertTriangle
+  AlertTriangle,
+  ShoppingBag
 } from 'lucide-react';
 import { TelegramConfig, BotActivityLog, ContactMessage, Order, SiteContent } from '../types';
 import { apiFetch } from '../services/dataService';
 import { sendBaleAdminWelcomeTest, saveActiveBotConfig, TestAdminWelcomeResult, LOCAL_STORAGE_BOT_CONFIG_KEY } from '../services/baleService';
+import { BotTechnicalLogBox } from './BotTechnicalLogBox';
 
 interface BotSettingsViewProps {
   config: TelegramConfig;
@@ -90,8 +92,16 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
     } catch {}
 
     return {
+      // Two-Bot Dedicated Architecture:
+      customerBotToken: cached.customerBotToken || config.customerBotToken || cached.baleBotToken || config.baleBotToken || cached.botToken || config.botToken || '1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34',
+      customerBotUsername: cached.customerBotUsername || config.customerBotUsername || cached.baleBotUsername || config.baleBotUsername || cached.botUsername || config.botUsername || 'Onivalbot',
+      customerBotEnabled: cached.customerBotEnabled ?? config.customerBotEnabled ?? true,
+      adminBotToken: cached.adminBotToken || config.adminBotToken || cached.baleBotToken || config.baleBotToken || cached.botToken || config.botToken || '1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34',
+      adminBotUsername: cached.adminBotUsername || config.adminBotUsername || 'OnivalAdminBot',
+      adminChatId: cached.adminChatId || config.adminChatId || cached.baleAdminChatId || config.baleAdminChatId || '69451465',
+      adminBotEnabled: cached.adminBotEnabled ?? config.adminBotEnabled ?? true,
+
       botToken: cached.botToken || config.botToken || '1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34',
-      adminChatId: cached.adminChatId || config.adminChatId || '923387796',
       botUsername: cached.botUsername || config.botUsername || 'Onivalbot',
       baleAdminUsername: cached.baleAdminUsername || config.baleAdminUsername || '@hasti_hjz',
       balePaymentMode: cached.balePaymentMode || config.balePaymentMode || 'live',
@@ -258,6 +268,58 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
       showToast(`خطا در اجرای چرخه شبیه‌ساز: ${err.message}`, 'error');
     } finally {
       setIsSimulatingBaleCycle(false);
+    }
+  };
+
+  const [showCustomerBotToken, setShowCustomerBotToken] = useState(false);
+  const [showAdminBotToken, setShowAdminBotToken] = useState(false);
+  const [isTestingCustomerBot, setIsTestingCustomerBot] = useState(false);
+  const [customerBotTestResult, setCustomerBotTestResult] = useState<any | null>(null);
+  const [isTestingAdminBot, setIsTestingAdminBot] = useState(false);
+  const [adminBotTestResult, setAdminBotTestResult] = useState<any | null>(null);
+
+  const handleTestCustomerBot = async () => {
+    setIsTestingCustomerBot(true);
+    setCustomerBotTestResult(null);
+    try {
+      const res = await apiFetch('/api/bot/test-customer-bot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: formData.customerBotToken || formData.baleBotToken || formData.botToken
+        })
+      });
+      const data = await res.json();
+      setCustomerBotTestResult(data);
+      if (onRefreshData) await onRefreshData();
+      showToast(data.message || 'وضعیت ربات مشتری استعلام شد.', data.ok ? 'success' : 'error');
+    } catch (err: any) {
+      showToast(`خطا در بررسی ربات مشتری: ${err.message}`, 'error');
+    } finally {
+      setIsTestingCustomerBot(false);
+    }
+  };
+
+  const handleTestAdminBot = async () => {
+    setIsTestingAdminBot(true);
+    setAdminBotTestResult(null);
+    try {
+      const res = await apiFetch('/api/bot/test-admin-bot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: formData.adminBotToken || formData.baleBotToken || formData.botToken,
+          chatId: formData.adminChatId || formData.baleAdminChatId
+        })
+      });
+      const data = await res.json();
+      setAdminBotTestResult(data);
+      if (onRefreshData) await onRefreshData();
+      showToast(data.message || 'پیام تست به اکانت ادمین ارسال شد.', data.ok ? 'success' : 'error');
+    } catch (err: any) {
+      showToast(`خطا در ارسال پیام به ادمین: ${err.message}`, 'error');
+    } finally {
+      setIsTestingAdminBot(false);
     }
   };
 
@@ -681,134 +743,103 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
       {/* TAB 1: BOTS CONFIGURATION (BALE & TELEGRAM TOKENS) */}
       {activeSubTab === 'bots-config' && (
         <form onSubmit={handleSaveAll} className="space-y-6">
+          {/* TWO-BOT DEDICATED ARCHITECTURE (Customer Bot & Admin Bot) */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Bale Bot Configuration Card */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden flex flex-col justify-between">
+            {/* Card 1: ربات ۱: ربات اختصاصی پرداخت و ارتباط با مشتریان (Customer & Payment Bot) */}
+            <div className="bg-white rounded-2xl border-2 border-emerald-400/80 shadow-md overflow-hidden flex flex-col justify-between">
               <div>
-                <div className="p-5 bg-gradient-to-l from-emerald-50/80 to-white border-b border-slate-100 flex items-center justify-between">
+                <div className="p-5 bg-gradient-to-l from-emerald-100/90 via-emerald-50 to-white border-b border-emerald-100 flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shadow-sm">
-                      <Bot className="w-5 h-5" />
+                    <div className="w-11 h-11 rounded-2xl bg-emerald-600 text-white flex items-center justify-center font-bold shadow-md shadow-emerald-600/30">
+                      <ShoppingBag className="w-6 h-6" />
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <h3 className="text-sm font-black text-slate-800">پیکربندی بازوی بله (@{(formData.botUsername || 'Onivalbot').replace('@', '')}) و پرداخت کیف پول</h3>
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">تراکنش مستقیم</span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-700 text-white shadow-xs">ربات ۱</span>
+                        <h3 className="text-sm font-black text-slate-900">ربات مشتری و پرداخت (@{(formData.customerBotUsername || formData.botUsername || 'Onivalbot').replace('@', '')})</h3>
                       </div>
-                      <p className="text-[11px] text-slate-500">پرداخت کیف پول بله، صدور فاکتور مشتری و اعلان آنی تراکنش‌ها به اکانت ادمین ({(formData.baleAdminUsername || '@hasti_hjz')})</p>
+                      <p className="text-[11px] text-emerald-800 font-medium">ساید مشتری: صدور پیش‌فاکتور، دکمه پرداخت مستقیم کیف پول بله، دکمه‌های فروشگاه و پشتیبانی</p>
                     </div>
                   </div>
-                  <label className="inline-flex items-center gap-2 cursor-pointer">
-                    <span className="text-xs font-bold text-slate-700">{formData.active ? 'فعال' : 'غیرفعال'}</span>
+                  <label className="inline-flex items-center gap-2 cursor-pointer bg-white px-3 py-1.5 rounded-xl border border-emerald-200 shadow-2xs">
+                    <span className="text-xs font-black text-slate-800">{formData.customerBotEnabled !== false ? 'فعال' : 'غیرفعال'}</span>
                     <input
                       type="checkbox"
-                      checked={formData.active}
-                      onChange={(e) => updateField({ active: e.target.checked })}
+                      checked={formData.customerBotEnabled !== false}
+                      onChange={(e) => updateField({ customerBotEnabled: e.target.checked, active: e.target.checked })}
                       className="w-4 h-4 accent-emerald-600 rounded cursor-pointer"
                     />
                   </label>
                 </div>
 
                 <div className="p-5 space-y-4">
-                  {/* Bale Bot Token */}
+                  {/* Notice: Customer sees only this */}
+                  <div className="bg-emerald-50/70 border border-emerald-200/90 rounded-xl p-3 text-xs text-emerald-950 flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>مشتریان در وب‌سایت فقط نام و آدرس این ربات را می‌بینند (<strong className="font-mono text-emerald-900">ble.ir/{(formData.customerBotUsername || formData.botUsername || 'Onivalbot').replace('@', '')}</strong>) و فاکتورها در این ربات صادر و تسویه می‌شوند.</span>
+                  </div>
+
+                  {/* Customer Bot Token */}
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
-                      <label className="text-xs font-bold text-slate-700">توکن بازوی بله (Bale Bot Token - از @BotFather)</label>
+                      <label className="text-xs font-bold text-slate-700">توکن بازوی مشتری (از @BotFather در بله)</label>
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => setShowBaleToken(!showBaleToken)}
+                          onClick={() => setShowCustomerBotToken(!showCustomerBotToken)}
                           className="text-[11px] text-slate-500 hover:text-slate-800 flex items-center gap-1"
                         >
-                          {showBaleToken ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                          <span>{showBaleToken ? 'مخفی' : 'نمایش'}</span>
+                          {showCustomerBotToken ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          <span>{showCustomerBotToken ? 'مخفی' : 'نمایش'}</span>
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleCopy(formData.botToken, 'baleToken')}
+                          onClick={() => handleCopy(formData.customerBotToken || formData.botToken, 'customerBotToken')}
                           className="text-[11px] text-emerald-600 hover:text-emerald-700 flex items-center gap-1 font-semibold"
                         >
-                          {copiedKey === 'baleToken' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                          <span>{copiedKey === 'baleToken' ? 'کپی شد' : 'کپی'}</span>
+                          {copiedKey === 'customerBotToken' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                          <span>{copiedKey === 'customerBotToken' ? 'کپی شد' : 'کپی'}</span>
                         </button>
                       </div>
                     </div>
                     <input
-                      type={showBaleToken ? 'text' : 'password'}
+                      type={showCustomerBotToken ? 'text' : 'password'}
                       dir="ltr"
-                      value={formData.botToken}
-                      onChange={(e) => updateField({ botToken: e.target.value.trim(), baleBotToken: e.target.value.trim() })}
+                      value={formData.customerBotToken || formData.botToken}
+                      onChange={(e) => {
+                        const val = e.target.value.trim();
+                        updateField({ customerBotToken: val, botToken: val, baleBotToken: val });
+                      }}
                       placeholder="1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34"
                       className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-xs font-mono text-left bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
                     />
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <div className="flex items-center justify-between mb-1.5">
-                        <label className="text-xs font-bold text-slate-700">یوزرنیم ربات بله</label>
-                        <a
-                          href={`https://ble.ir/${(formData.botUsername || 'Onivalbot').replace('@', '')}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-[11px] text-emerald-600 hover:underline flex items-center gap-0.5"
-                        >
-                          <span>ble.ir/{formData.botUsername || 'Onivalbot'}</span>
-                          <ExternalLink className="w-2.5 h-2.5" />
-                        </a>
-                      </div>
-                      <input
-                        type="text"
-                        dir="ltr"
-                        value={formData.botUsername || ''}
-                        onChange={(e) => {
-                          const clean = e.target.value.replace('@', '').trim();
-                          updateField({ botUsername: clean, baleBotUsername: clean });
-                        }}
-                        placeholder="Onivalbot"
-                        className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-xs font-mono text-left focus:outline-hidden focus:border-emerald-500"
-                      />
+                  {/* Customer Bot Username */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-xs font-bold text-slate-700">آیدی / یوزرنیم ربات مشتری در بله</label>
+                      <a
+                        href={`https://ble.ir/${(formData.customerBotUsername || formData.botUsername || 'Onivalbot').replace('@', '')}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[11px] text-emerald-600 hover:underline flex items-center gap-0.5"
+                      >
+                        <span>ble.ir/{(formData.customerBotUsername || formData.botUsername || 'Onivalbot').replace('@', '')}</span>
+                        <ExternalLink className="w-2.5 h-2.5" />
+                      </a>
                     </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1.5">آیدی اکانت شخصی ادمین بله</label>
-                      <input
-                        type="text"
-                        dir="ltr"
-                        value={formData.baleAdminUsername || ''}
-                        onChange={(e) => updateField({ baleAdminUsername: e.target.value.trim() })}
-                        placeholder="@hasti_hjz"
-                        className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-xs font-mono text-left focus:outline-hidden focus:border-emerald-500"
-                      />
-                      <span className="text-[10px] text-slate-400 mt-1 block">تراکنش‌های بله و کارت‌به‌کارت به این اکانت ارسال می‌شود.</span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1.5">شناسه عددی چت ادمین (Chat ID)</label>
-                      <input
-                        type="text"
-                        dir="ltr"
-                        value={formData.adminChatId}
-                        onChange={(e) => {
-                          const val = e.target.value.trim();
-                          updateField({ adminChatId: val, baleAdminChatId: val });
-                        }}
-                        placeholder="923387796"
-                        className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-xs font-mono text-left focus:outline-hidden focus:border-emerald-500"
-                      />
-                      <span className="text-[10px] text-slate-400 mt-1 block">با ارسال /start از اکانت ادمین به ربات، خودکار ثبت می‌شود.</span>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1.5">آدرس سرور API بله</label>
-                      <input
-                        type="text"
-                        dir="ltr"
-                        value={formData.baseUrl}
-                        onChange={(e) => updateField({ baseUrl: e.target.value })}
-                        className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-xs font-mono text-left focus:outline-hidden focus:border-emerald-500"
-                      />
-                    </div>
+                    <input
+                      type="text"
+                      dir="ltr"
+                      value={formData.customerBotUsername || formData.botUsername || ''}
+                      onChange={(e) => {
+                        const clean = e.target.value.replace('@', '').trim();
+                        updateField({ customerBotUsername: clean, botUsername: clean, baleBotUsername: clean });
+                      }}
+                      placeholder="Onivalbot"
+                      className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-xs font-mono text-left focus:outline-hidden focus:border-emerald-500"
+                    />
                   </div>
 
                   {/* BALE WALLET PAYMENT TOKENS SECTION */}
@@ -816,7 +847,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
                         <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                        <h4 className="text-xs font-black text-emerald-950">توکن‌های پرداخت کیف پولی بازوی @{(formData.botUsername || 'Onivalbot').replace('@', '')}</h4>
+                        <h4 className="text-xs font-black text-emerald-950">توکن‌های پرداخت کیف پول برای ربات مشتری</h4>
                       </div>
                       <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-emerald-200 text-[11px] font-bold">
                         <button
@@ -828,7 +859,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                               : 'text-slate-600 hover:text-slate-900'
                           }`}
                         >
-                          حالت واقعی (Live)
+                          واقعی (Live)
                         </button>
                         <button
                           type="button"
@@ -839,17 +870,14 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                               : 'text-slate-600 hover:text-slate-900'
                           }`}
                         >
-                          حالت آزمایشی (Test)
+                          آزمایشی (Test)
                         </button>
                       </div>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <label className="text-[11px] font-bold text-slate-700">توکن پرداخت کیف پولی (اصلی)</label>
-                          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800">WALLET-v5gqSc1W1kaBUo2B</span>
-                        </div>
+                        <label className="text-[11px] font-bold text-slate-700 block mb-1">توکن پرداخت واقعی کیف پول (Live)</label>
                         <input
                           type="text"
                           dir="ltr"
@@ -860,10 +888,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                         />
                       </div>
                       <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <label className="text-[11px] font-bold text-slate-700">توکن آزمایشی پرداخت کیف پولی</label>
-                          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-100 text-amber-800">WALLET-TEST-...</span>
-                        </div>
+                        <label className="text-[11px] font-bold text-slate-700 block mb-1">توکن پرداخت تستی (Test)</label>
                         <input
                           type="text"
                           dir="ltr"
@@ -874,208 +899,21 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                         />
                       </div>
                     </div>
-
-                    <div className="text-[11px] text-slate-600 flex items-center justify-between pt-1 border-t border-emerald-100">
-                      <span>توکن فعال کنونی: <strong className="font-mono text-emerald-800">{formData.balePaymentMode === 'test' ? (formData.balePaymentTokenTest || 'WALLET-TEST-1111111111111111') : (formData.balePaymentTokenLive || 'WALLET-v5gqSc1W1kaBUo2B')}</strong></span>
-                      <a
-                        href="https://docs.bale.ai/#%D9%BE%D8%B1%D8%AF%D8%A7%D8%AE%D8%AA"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-emerald-700 hover:underline flex items-center gap-1"
-                      >
-                        <BookOpen className="w-3 h-3" />
-                        <span>مستندات پرداخت بله</span>
-                      </a>
-                    </div>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1.5">آدرس وب‌هوک دریافت پیام و تراکنش‌های بله</label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        dir="ltr"
-                        value={formData.baleWebhookUrl || ''}
-                        onChange={(e) => updateField({ baleWebhookUrl: e.target.value })}
-                        placeholder={`${window.location.origin}/api/webhook/bale`}
-                        className="flex-1 px-3.5 py-2.5 border border-slate-200 rounded-xl text-xs font-mono text-left focus:outline-hidden focus:border-emerald-500"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleWebhookAction('bale', 'set')}
-                        disabled={webhookLoading === 'bale-set'}
-                        className="px-3.5 py-2.5 rounded-xl bg-emerald-100 text-emerald-800 hover:bg-emerald-200 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-                      >
-                        <RefreshCw className={`w-3.5 h-3.5 ${webhookLoading === 'bale-set' ? 'animate-spin' : ''}`} />
-                        <span>ثبت در سرور بله</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* REAL ADMIN WELCOME MESSAGE DISPATCHER & CONNECTION TESTER */}
-                  <div className="p-4 bg-gradient-to-l from-emerald-50 via-teal-50/60 to-white rounded-2xl border-2 border-emerald-300 shadow-xs space-y-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shadow-xs">
-                          <Send className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <h4 className="text-xs font-black text-emerald-950">تست واقعی اتصال و ارسال پیام به ادمین</h4>
-                          <p className="text-[11px] text-slate-500">
-                            ارسال متد <code className="font-mono text-emerald-800">sendMessage</code> به Chat ID ادمین ({formData.adminChatId || 'تنظیم نشده'})
-                          </p>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleSendAdminWelcomeTest}
-                        disabled={isSendingWelcomeTest}
-                        className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black shadow-md transition flex items-center justify-center gap-2 cursor-pointer"
-                        title="ارسال مستقیم درخواست Fetch به سرور بله"
-                      >
-                        <Send className={`w-3.5 h-3.5 ${isSendingWelcomeTest ? 'animate-bounce' : ''}`} />
-                        <span>{isSendingWelcomeTest ? 'در حال ارسال پیام به ادمین...' : 'تست اتصال و ارسال پیام به ادمین'}</span>
-                      </button>
-                    </div>
-
-                    <div className="text-[11px] text-slate-600 bg-white/80 p-2.5 rounded-xl border border-emerald-100 flex items-center gap-2">
-                      <span className="text-emerald-700 font-bold shrink-0">💬 متن ارسالی:</span>
-                      <span className="text-slate-800 font-medium select-all">«اتصال ربات به هاست با موفقیت انجام شد. شما به عنوان ادمین شناسایی شدید»</span>
-                    </div>
-
-                    {/* Result details box */}
-                    {welcomeTestResult && (() => {
-                      const isRealSuccess = Boolean(welcomeTestResult.ok && (welcomeTestResult.delivered || welcomeTestResult.messageId));
-                      const isForbidden = Boolean(
-                        welcomeTestResult.forbiddenStartRequired ||
-                        welcomeTestResult.status === 403 ||
-                        /Forbidden|can't initiate conversation/i.test(welcomeTestResult.description || '') ||
-                        /Forbidden|can't initiate conversation/i.test(welcomeTestResult.message || '')
-                      );
-                      const displayToken = welcomeTestResult.usedToken || formData.botToken || formData.baleBotToken || '';
-
-                      return (
-                        <div className={`p-4 rounded-2xl border text-xs space-y-2 ${
-                          isRealSuccess
-                            ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
-                            : isForbidden
-                            ? 'bg-amber-50 border-amber-300 text-amber-950'
-                            : 'bg-rose-50 border-rose-300 text-rose-950'
-                        }`}>
-                          <div className="flex items-center justify-between font-black pb-2 border-b border-current/15">
-                            <span className="flex items-center gap-1.5">
-                              {isRealSuccess ? (
-                                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                              ) : isForbidden ? (
-                                <AlertTriangle className="w-4 h-4 text-amber-600" />
-                              ) : (
-                                <AlertCircle className="w-4 h-4 text-rose-600" />
-                              )}
-                              <span>
-                                {isRealSuccess
-                                  ? 'پیام با موفقیت به بله ادمین تحویل داده شد!'
-                                  : isForbidden
-                                  ? 'نیازمند لمس دکمه «شروع» در ربات توسط ادمین'
-                                  : 'عدم ارسال پیام به اکانت ادمین'}
-                              </span>
-                            </span>
-                            <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-white border">
-                              {welcomeTestResult.status ? `HTTP ${welcomeTestResult.status}` : 'API Response'}
-                            </span>
-                          </div>
-
-                          <div>📢 <strong>نتیجه:</strong> {welcomeTestResult.message}</div>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 font-mono text-[10px]">
-                            <div className="bg-white/90 p-2 rounded-xl border border-current/10">
-                              🎯 چت‌آیدی مقصد: <span className="font-bold">{welcomeTestResult.usedChatId || formData.adminChatId || '69451465'}</span>
-                            </div>
-                            <div className="bg-white/90 p-2 rounded-xl border border-current/10 truncate">
-                              🔑 توکن استفاده‌شده: <span className="font-bold">{displayToken ? `${displayToken.slice(0, 18)}...` : 'خالی (وارد نشده)'}</span>
-                            </div>
-                          </div>
-
-                          {welcomeTestResult.messageId && (
-                            <div className="text-emerald-800 font-bold bg-white/80 p-2 rounded-xl border border-emerald-200">
-                              ✅ شناسه پیام در بله (Message ID): {welcomeTestResult.messageId}
-                            </div>
-                          )}
-
-                          {welcomeTestResult.hint && !isForbidden && (
-                            <div className="p-2.5 rounded-xl bg-white/80 border border-current/15 text-[11px] leading-relaxed">
-                              💡 <strong>راهنما:</strong> {welcomeTestResult.hint}
-                            </div>
-                          )}
-
-                          {isForbidden && (
-                            <div className="mt-2 p-3.5 rounded-xl bg-amber-100/90 border border-amber-300 text-amber-950 space-y-2.5">
-                              <div className="flex items-center gap-2 font-black text-xs text-amber-900">
-                                <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
-                                <span>خطای ۴۰۳ بله: ربات نمی‌تواند آغازگر مکالمه باشد</span>
-                              </div>
-                              <p className="text-[11px] leading-relaxed text-amber-900">
-                                پیام‌رسان بله برای جلوگیری از ارسال پیام‌های ناخواسته، اجازه نمی‌دهد ربات به کاربری پیام بفرستد مگر اینکه آن کاربر حداقل یک بار وارد ربات شده و دکمه <strong>«شروع» (Start)</strong> را زده باشد.
-                              </p>
-                              <div className="pt-1">
-                                <a
-                                  href={`https://ble.ir/${(welcomeTestResult.botUsername || formData.baleBotUsername || formData.botUsername || 'Onivalbot').replace('@', '')}`}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-md transition cursor-pointer"
-                                >
-                                  <ExternalLink className="w-4 h-4" />
-                                  <span>ورود مستقیم به ربات بله و زدن دکمه Start (@{(welcomeTestResult.botUsername || formData.baleBotUsername || formData.botUsername || 'Onivalbot').replace('@', '')})</span>
-                                </a>
-                              </div>
-                              <div className="text-[10px] text-amber-900 font-bold">
-                                👈 راهکار: روی دکمه سبز رنگ بالا کلیک کنید، در برنامه بله دکمه «شروع» را بزنید و سپس مجدداً این دکمه تست را فشار دهید تا پیام فوری به اکانت شما ارسال شود.
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-                  </div>
-
-                  {/* Quick Diagnostics Result Box */}
-                  {baleDiagnostics && (
-                    <div className={`p-3.5 rounded-xl border text-xs ${baleDiagnostics.success ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900' : 'bg-rose-50 border-rose-200 text-rose-900'}`}>
-                      <div className="flex items-center justify-between font-bold mb-1">
-                        <span>نتیجه تست اتصال بله ({baleDiagnostics.latencyMs}ms):</span>
-                        <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-white border">
-                          {baleDiagnostics.mode === 'live_api' ? 'متصل به سرور واقعی بله' : 'تایید ساختار و شبیه‌ساز'}
-                        </span>
-                      </div>
-                      <p className="text-[11px] leading-relaxed">{baleDiagnostics.message}</p>
-                    </div>
-                  )}
-
-                  {/* Test sendInvoice Result Box */}
-                  {invoiceTestResult && (
-                    <div className={`p-3.5 rounded-xl border text-xs ${invoiceTestResult.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-amber-50 border-amber-200 text-amber-900'}`}>
-                      <div className="font-bold mb-1 flex items-center justify-between">
-                        <span>نتیجه ارسال مستقیم فاکتور کیف پول (sendInvoice):</span>
-                        <span className="font-mono text-[10px]">{invoiceTestResult.walletToken?.slice(0, 15)}...</span>
-                      </div>
-                      <p className="text-[11px] leading-relaxed">{invoiceTestResult.message}</p>
-                    </div>
-                  )}
-
-                  {/* Complete Simulation Result Box */}
-                  {baleCycleResult && (
-                    <div className="p-3.5 rounded-xl border bg-slate-900 text-white text-xs space-y-2">
-                      <div className="flex items-center justify-between font-bold text-amber-400 border-b border-slate-800 pb-1.5">
+                  {/* Customer Bot Test Results Box */}
+                  {customerBotTestResult && (
+                    <div className={`p-3.5 rounded-xl border text-xs ${customerBotTestResult.ok ? 'bg-emerald-50 border-emerald-300 text-emerald-950' : 'bg-rose-50 border-rose-300 text-rose-950'}`}>
+                      <div className="flex items-center justify-between font-bold pb-1 mb-1 border-b border-current/15">
                         <span className="flex items-center gap-1.5">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                          <span>گزارش موفقیت شبیه‌سازی کامل چرخه بله</span>
+                          {customerBotTestResult.ok ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <AlertCircle className="w-4 h-4 text-rose-600" />}
+                          <span>نتیجه استعلام وضعیت ربات مشتری</span>
                         </span>
-                        <span className="font-mono text-[11px] text-slate-300">کد: {baleCycleResult.order?.trackingCode}</span>
+                        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-white border">
+                          @{customerBotTestResult.botInfo?.username || 'bot'}
+                        </span>
                       </div>
-                      <p className="text-[11px] text-slate-300 leading-relaxed">{baleCycleResult.message}</p>
-                      <div className="bg-slate-800/80 p-2.5 rounded-lg text-[10px] text-slate-300 space-y-1">
-                        <div>👤 <strong>ارسال پیام به مشتری:</strong> {baleCycleResult.customerConfirmation?.split('\n')[0]}</div>
-                        <div>👑 <strong>اعلان ارسالی به ادمین ({baleCycleResult.adminAccount}):</strong> جزئیات اقلام فاکتور + دستور تایید سریع</div>
-                      </div>
+                      <p className="text-[11px]">{customerBotTestResult.message}</p>
                     </div>
                   )}
                 </div>
@@ -1083,56 +921,197 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
 
               <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
                 <a
-                  href={`https://ble.ir/${(formData.botUsername || 'Onivalbot').replace('@', '')}`}
+                  href={`https://ble.ir/${(formData.customerBotUsername || formData.botUsername || 'Onivalbot').replace('@', '')}`}
                   target="_blank"
                   rel="noreferrer"
                   className="text-xs font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
-                  <span>باز کردن @{(formData.botUsername || 'Onivalbot').replace('@', '')} در بله</span>
+                  <span>صفحه چت ربات مشتری در بله</span>
                 </a>
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => handleTestBotConnection('bale')}
-                    disabled={testingPlatform === 'bale'}
-                    className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
-                    title="استعلام متد getMe از وب‌سرویس بله"
+                    onClick={handleTestCustomerBot}
+                    disabled={isTestingCustomerBot}
+                    className="px-3 py-2 rounded-xl bg-emerald-100 hover:bg-emerald-200 text-emerald-900 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
                   >
-                    <RefreshCw className={`w-3.5 h-3.5 ${testingPlatform === 'bale' ? 'animate-spin' : ''}`} />
-                    <span>تست اتصال (getMe)</span>
+                    <RefreshCw className={`w-3.5 h-3.5 ${isTestingCustomerBot ? 'animate-spin' : ''}`} />
+                    <span>تست اتصال ربات مشتری</span>
                   </button>
-
                   <button
                     type="button"
                     onClick={handleTestSendInvoice}
                     disabled={isSendingInvoiceTest}
                     className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
-                    title="ارسال فاکتور واقعی کیف پول بله با توکن فعال"
                   >
                     <Send className={`w-3.5 h-3.5 ${isSendingInvoiceTest ? 'animate-pulse' : ''}`} />
-                    <span>{isSendingInvoiceTest ? 'در حال ارسال فاکتور...' : 'ارسال فاکتور تستی (sendInvoice)'}</span>
+                    <span>تست صدور فاکتور (sendInvoice)</span>
                   </button>
+                </div>
+              </div>
+            </div>
 
+            {/* Card 2: ربات ۲: ربات اختصاصی ادمین و مدیریت سفارش‌ها و فیش‌ها (Admin & Management Bot) */}
+            <div className="bg-white rounded-2xl border-2 border-indigo-400/80 shadow-md overflow-hidden flex flex-col justify-between">
+              <div>
+                <div className="p-5 bg-gradient-to-l from-indigo-100/90 via-indigo-50 to-white border-b border-indigo-100 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-bold shadow-md shadow-indigo-600/30">
+                      <ShieldCheck className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-indigo-700 text-white shadow-xs">ربات ۲</span>
+                        <h3 className="text-sm font-black text-slate-900">ربات ادمین و مدیریت سفارش‌ها (@{(formData.adminBotUsername || 'OnivalAdminBot').replace('@', '')})</h3>
+                      </div>
+                      <p className="text-[11px] text-indigo-800 font-medium">ساید ادمین: ارسال فوری فیش‌ها، گزارش سفارشات جدید، اعلان پرداخت‌ها و تایید سفارش</p>
+                    </div>
+                  </div>
+                  <label className="inline-flex items-center gap-2 cursor-pointer bg-white px-3 py-1.5 rounded-xl border border-indigo-200 shadow-2xs">
+                    <span className="text-xs font-black text-slate-800">{formData.adminBotEnabled !== false ? 'فعال' : 'غیرفعال'}</span>
+                    <input
+                      type="checkbox"
+                      checked={formData.adminBotEnabled !== false}
+                      onChange={(e) => updateField({ adminBotEnabled: e.target.checked })}
+                      className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+                    />
+                  </label>
+                </div>
+
+                <div className="p-5 space-y-4">
+                  {/* Notice: Exclusive to admin */}
+                  <div className="bg-indigo-50/70 border border-indigo-200/90 rounded-xl p-3 text-xs text-indigo-950 flex items-center gap-2">
+                    <Bell className="w-4 h-4 text-indigo-600 shrink-0" />
+                    <span>تمامی اعلان‌های سفارشات جدید، تصاویر فیش‌های واریزی کارت‌به‌کارت و پیام‌های مشتری مستقیماً توسط این ربات به پیوی مدیر فرستاده می‌شوند.</span>
+                  </div>
+
+                  {/* Admin Bot Token */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-xs font-bold text-slate-700">توکن بازوی اختصاصی ادمین (از @BotFather)</label>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowAdminBotToken(!showAdminBotToken)}
+                          className="text-[11px] text-slate-500 hover:text-slate-800 flex items-center gap-1"
+                        >
+                          {showAdminBotToken ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          <span>{showAdminBotToken ? 'مخفی' : 'نمایش'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleCopy(formData.adminBotToken || formData.botToken, 'adminBotToken')}
+                          className="text-[11px] text-indigo-600 hover:text-indigo-700 flex items-center gap-1 font-semibold"
+                        >
+                          {copiedKey === 'adminBotToken' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                          <span>{copiedKey === 'adminBotToken' ? 'کپی شد' : 'کپی'}</span>
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      type={showAdminBotToken ? 'text' : 'password'}
+                      dir="ltr"
+                      value={formData.adminBotToken || formData.botToken}
+                      onChange={(e) => updateField({ adminBotToken: e.target.value.trim() })}
+                      placeholder="1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34"
+                      className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-xs font-mono text-left bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                    />
+                    <span className="text-[10px] text-slate-400 mt-1 block">می‌توانید همان توکن یا یک توکن اختصاصی دیگر برای تفکیک پیام‌های ادمین وارد کنید.</span>
+                  </div>
+
+                  {/* Admin Bot Username & Admin Personal Account */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">یوزرنیم ربات ادمین بله</label>
+                      <input
+                        type="text"
+                        dir="ltr"
+                        value={formData.adminBotUsername || 'OnivalAdminBot'}
+                        onChange={(e) => updateField({ adminBotUsername: e.target.value.replace('@', '').trim() })}
+                        placeholder="OnivalAdminBot"
+                        className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-xs font-mono text-left focus:outline-hidden focus:border-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">آیدی اکانت شخصی ادمین بله</label>
+                      <input
+                        type="text"
+                        dir="ltr"
+                        value={formData.baleAdminUsername || ''}
+                        onChange={(e) => updateField({ baleAdminUsername: e.target.value.trim() })}
+                        placeholder="@hasti_hjz"
+                        className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-xs font-mono text-left focus:outline-hidden focus:border-indigo-500"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Admin Chat ID & API Server URL */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">شناسه عددی چت ادمین (Chat ID)</label>
+                      <input
+                        type="text"
+                        dir="ltr"
+                        value={formData.adminChatId || formData.baleAdminChatId || ''}
+                        onChange={(e) => {
+                          const val = e.target.value.trim();
+                          updateField({ adminChatId: val, baleAdminChatId: val });
+                        }}
+                        placeholder="69451465"
+                        className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-xs font-mono text-left focus:outline-hidden focus:border-indigo-500 font-bold"
+                      />
+                      <span className="text-[10px] text-indigo-700 font-medium mt-1 block">چت‌آیدی حسابی که پیام‌ها و فیش‌ها به آن تحویل داده می‌شود.</span>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">آدرس سرور API بله</label>
+                      <input
+                        type="text"
+                        dir="ltr"
+                        value={formData.baseUrl}
+                        onChange={(e) => updateField({ baseUrl: e.target.value })}
+                        className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-xs font-mono text-left focus:outline-hidden focus:border-indigo-500"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Admin Bot Test Results Box */}
+                  {adminBotTestResult && (
+                    <div className={`p-3.5 rounded-xl border text-xs ${adminBotTestResult.ok ? 'bg-emerald-50 border-emerald-300 text-emerald-950' : 'bg-rose-50 border-rose-300 text-rose-950'}`}>
+                      <div className="flex items-center justify-between font-bold pb-1 mb-1 border-b border-current/15">
+                        <span className="flex items-center gap-1.5">
+                          {adminBotTestResult.ok ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <AlertCircle className="w-4 h-4 text-rose-600" />}
+                          <span>نتیجه تست ارسال پیام به ادمین</span>
+                        </span>
+                        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-white border">
+                          چت: {formData.adminChatId}
+                        </span>
+                      </div>
+                      <p className="text-[11px]">{adminBotTestResult.message}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+                <a
+                  href={`https://ble.ir/${(formData.adminBotUsername || 'OnivalAdminBot').replace('@', '')}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs font-bold text-indigo-700 hover:text-indigo-800 flex items-center gap-1"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>صفحه چت ربات ادمین در بله</span>
+                </a>
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    onClick={handleSimulateBaleCycle}
-                    disabled={isSimulatingBaleCycle}
-                    className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
-                    title="تست کامل فرآیند خرید، پرداخت کیف پول، تایید مشتری و نوتیفیکیشن ادمین"
+                    onClick={handleTestAdminBot}
+                    disabled={isTestingAdminBot}
+                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black shadow-md transition flex items-center gap-2 cursor-pointer"
                   >
-                    <Zap className={`w-3.5 h-3.5 ${isSimulatingBaleCycle ? 'animate-spin' : ''}`} />
-                    <span>{isSimulatingBaleCycle ? 'در حال شبیه‌سازی...' : 'شبیه‌سازی کامل چرخه پرداخت'}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleSaveAll()}
-                    disabled={isSaving}
-                    className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>{isSaving ? 'در حال ذخیره...' : 'ذخیره تنظیمات'}</span>
+                    <Send className={`w-3.5 h-3.5 ${isTestingAdminBot ? 'animate-bounce' : ''}`} />
+                    <span>{isTestingAdminBot ? 'در حال ارسال به ادمین...' : 'ارسال پیام تست به اکانت ادمین'}</span>
                   </button>
                 </div>
               </div>
@@ -2144,58 +2123,16 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
             </div>
           </div>
 
-          {/* Live Bot Activity Logs Terminal (6 Cols) */}
-          <div className="lg:col-span-6 bg-slate-900 rounded-2xl border border-slate-800 p-5 shadow-xs text-slate-100 flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-800">
-                <div className="flex items-center gap-2">
-                  <Terminal className="w-5 h-5 text-emerald-400" />
-                  <div>
-                    <h3 className="text-sm font-black text-white">ترمینال زنده رویدادهای ربات بله و تلگرام</h3>
-                    <p className="text-[11px] text-slate-400">ثبت لحظه‌ای تمامی درخواست‌های API، تست‌ها و اعلان‌ها</p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleClearLogs}
-                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] flex items-center gap-1 transition cursor-pointer"
-                >
-                  <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-                  <span>پاکسازی لاگ</span>
-                </button>
-              </div>
-
-              <div className="space-y-2.5 max-h-[420px] overflow-y-auto pr-1 font-mono text-xs">
-                {logs.length === 0 ? (
-                  <div className="text-center py-12 text-slate-500 font-sans">هیچ رویدادی در لاگ ثبت نشده است.</div>
-                ) : (
-                  logs.map((log) => (
-                    <div
-                      key={log.id}
-                      className="p-3 rounded-xl bg-slate-950/80 border border-slate-800/90 flex items-start justify-between gap-3"
-                    >
-                      <div className="space-y-1 font-sans">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`w-2 h-2 rounded-full ${
-                              log.status === 'error' ? 'bg-rose-500' : 'bg-emerald-400'
-                            }`}
-                          />
-                          <span className="text-[11px] font-bold text-amber-400">
-                            {log.platform === 'telegram' ? '[Telegram API]' : '[Bale API]'}
-                          </span>
-                          <span className="text-[10px] text-slate-400 font-mono">{log.type}</span>
-                        </div>
-                        <div className="text-xs text-slate-200 leading-relaxed">{log.text}</div>
-                      </div>
-                      <span className="text-[10px] text-slate-400 shrink-0 font-mono bg-slate-900 px-2 py-0.5 rounded">
-                        {log.time}
-                      </span>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
+          {/* Full Technical Bot Log Box with Raw JSON and Command Runner (6 Cols) */}
+          <div className="lg:col-span-6 flex flex-col">
+            <BotTechnicalLogBox
+              logs={logs}
+              config={config}
+              onRefreshLogs={onRefreshData}
+              onClearLogs={handleClearLogs}
+              title="ترمینال و لاگ باکس فنی ربات بله"
+              subtitle="نمایش بلادرنگ رویدادها، دیتای خام JSON، استخراج فاکتور و بررسی اتصال"
+            />
           </div>
         </div>
       )}

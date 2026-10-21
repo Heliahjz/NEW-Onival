@@ -261,6 +261,10 @@ export interface BotActivityLog {
   text: string;
   status: 'success' | 'warning' | 'error';
   details?: string;
+  rawPayload?: any;
+  rawResponse?: any;
+  orderInfo?: any;
+  technicalDetails?: Record<string, any>;
 }
 
 export interface TelegramConfig {
@@ -273,7 +277,20 @@ export interface TelegramConfig {
   antiSpamSeconds: number;
   active: boolean;
 
-  // Explicit Bale Bot Settings
+  // Two-Bot Dedicated Architecture:
+  // 1. Customer & Payment Bot (ربات اختصاصی مشتری و پرداخت)
+  customerBotEnabled?: boolean;
+  customerBotToken?: string;
+  customerBotUsername?: string;
+  customerBotWebhookUrl?: string;
+
+  // 2. Admin & Management Bot (ربات اختصاصی ادمین و مدیریت فروش)
+  adminBotEnabled?: boolean;
+  adminBotToken?: string;
+  adminBotUsername?: string;
+  adminBotWebhookUrl?: string;
+
+  // Explicit Bale Bot Settings (Legacy & Compatibility)
   baleEnabled?: boolean;
   baleBotToken?: string;
   baleAdminChatId?: string;

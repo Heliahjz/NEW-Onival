@@ -46,10 +46,16 @@ import {
   Film,
   Images,
   ChevronLeft,
-  ShieldCheck
+  ShieldCheck,
+  Terminal,
+  Zap,
+  Code2,
+  FileText,
+  MessageSquare
 } from 'lucide-react';
-import { Product, ProductCategory, Post, ContactMessage, Order, OrderItem, ProductSize, SiteContent, PaymentConfig, TelegramConfig } from '../types';
+import { Product, ProductCategory, Post, ContactMessage, Order, OrderItem, ProductSize, SiteContent, PaymentConfig, TelegramConfig, BotActivityLog } from '../types';
 import { apiFetch, setAdminSessionToken, getCachedLocalState } from '../services/dataService';
+import { BotTechnicalLogBox } from './BotTechnicalLogBox';
 import {
   DEFAULT_PRODUCTS,
   DEFAULT_PRODUCT_CATEGORIES,
@@ -299,9 +305,11 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
   }, []);
 
   const activeBaleBotUsername = (
+    botConfig?.customerBotUsername ||
     botConfig?.baleBotUsername ||
     botConfig?.botUsername ||
     siteContent?.paymentConfig?.baleBotUsername ||
+    activeBotConfig?.customerBotUsername ||
     activeBotConfig?.baleBotUsername ||
     activeBotConfig?.botUsername ||
     'Onivalbot'
@@ -4326,9 +4334,8 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                           </div>
                         </div>
 
-                        {/* Primary Action Button: Direct to active Bale Bot */}
-                        {/* Primary Action Button: Direct to active Bale Bot */}
-                        <div className="pt-1 space-y-2">
+                        {/* Primary Customer Action: Direct to Customer Bale Bot */}
+                        <div className="pt-1 space-y-3">
                           <a
                             href={`https://ble.ir/${(activeBaleBotUsername || 'Onivalbot').replace(/^@/, '')}?start=pay_${currentInvoice.trackingCode.replace(/-/g, '_')}`}
                             target="_blank"
@@ -4336,35 +4343,54 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                             className="w-full py-4 px-6 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white rounded-2xl text-xs sm:text-sm font-black shadow-lg shadow-emerald-600/20 transition flex items-center justify-center gap-2.5 text-center cursor-pointer"
                           >
                             <Send className="w-4 h-4 shrink-0" />
-                            <span>ورود به ربات بله و پرداخت فاکتور (@{(activeBaleBotUsername || 'Onivalbot').replace(/^@/, '')})</span>
+                            <span>ورود به ربات بله و دریافت فاکتور (@{(activeBaleBotUsername || 'Onivalbot').replace(/^@/, '')})</span>
                             <ExternalLink className="w-4 h-4 opacity-75 shrink-0 mr-auto" />
                           </a>
 
-                          <button
-                            type="button"
-                            onClick={() => {
-                              navigator.clipboard?.writeText(`/start pay_${currentInvoice.trackingCode.replace(/-/g, '_')}`);
-                              setCopiedPayCmd(true);
-                              setTimeout(() => setCopiedPayCmd(false), 2500);
-                            }}
-                            className="w-full py-2.5 px-4 bg-emerald-50 hover:bg-emerald-100/70 border border-emerald-300 text-emerald-900 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer"
-                          >
-                            {copiedPayCmd ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4 text-emerald-700" />}
-                            <span>{copiedPayCmd ? 'دستور پرداخت کپی شد! در بله ارسال فرمایید' : `کپی متن دستور پرداخت: /start pay_${currentInvoice.trackingCode.replace(/-/g, '_')}`}</span>
-                          </button>
+                          {/* Quick Copy Command Box */}
+                          <div className="p-3.5 bg-white rounded-2xl border border-emerald-200/90 shadow-2xs space-y-2">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="font-bold text-stone-700 flex items-center gap-1.5">
+                                <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>دستور آماده برای ارسال دستی در ربات:</span>
+                              </span>
+                              <span className="text-[11px] text-stone-400 font-mono">/start pay_...</span>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1 bg-stone-50 border border-stone-200 px-3 py-2 rounded-xl font-mono text-xs text-stone-800 dir-ltr text-left select-all overflow-x-auto whitespace-nowrap">
+                                /start pay_{currentInvoice.trackingCode.replace(/-/g, '_')}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  navigator.clipboard?.writeText(`/start pay_${currentInvoice.trackingCode.replace(/-/g, '_')}`);
+                                  setCopiedPayCmd(true);
+                                  setTimeout(() => setCopiedPayCmd(false), 2500);
+                                }}
+                                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer shadow-xs"
+                              >
+                                {copiedPayCmd ? <Check className="w-4 h-4 text-white" /> : <Copy className="w-4 h-4" />}
+                                <span>{copiedPayCmd ? 'کپی شد!' : 'کپی دستور'}</span>
+                              </button>
+                            </div>
+                            <p className="text-[10px] text-stone-500">
+                              💡 چنانچه با لمس دکمه بالا صفحه چت بدون پیش‌نویس باز شد، کافیست دستور کپی‌شده بالا را در کادر پیام ربات Paste و ارسال فرمایید.
+                            </p>
+                          </div>
                         </div>
 
-                        {/* Concise Process & Tracking Guidance */}
+                        {/* Customer 3-Step Guidance */}
                         <div className="bg-white/90 border border-emerald-200 rounded-2xl p-4 text-xs text-stone-700 space-y-2 leading-relaxed">
                           <div className="font-bold text-emerald-900 flex items-center gap-1.5">
                             <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-                            <span>راهنمای گام به گام پرداخت در ربات بله:</span>
+                            <span>مراحل تسویه فاکتور در ربات بله:</span>
                           </div>
-                          <p className="text-[11px] text-stone-600 leading-relaxed">
-                            ۱. با لمس دکمه سبز رنگ بالا وارد ربات بله شوید.<br />
-                            ۲. دکمه «شروع» یا عبارت «شروع» را ارسال نمایید تا پیش‌فاکتور رسمی و دکمه پرداخت آنلاین بله فوراً صادر شود.<br />
-                            ۳. پس از پرداخت، سفارش شما به طور خودکار به وضعیت «در حال آماده‌سازی و ارسال» تغییر می‌یابد. شماره فاکتور شما (<strong className="font-mono text-emerald-900">{currentInvoice.trackingCode}</strong>) برای پیگیری لحظه‌ای در وب‌سایت اونیوال کافی است.
-                          </p>
+                          <ol className="text-[11px] text-stone-600 list-decimal list-inside space-y-1 leading-relaxed">
+                            <li>با لمس دکمه سبز رنگ بالا وارد ربات رسمی شوید.</li>
+                            <li>دکمه «شروع» را بزنید یا دستور پرداخت کپی‌شده را ارسال کنید.</li>
+                            <li>پیش‌فاکتور به همراه دکمه درخواست پول بله صادر می‌شود؛ با پرداخت آنی سفارش شما تأیید و آماده‌سازی می‌گردد.</li>
+                          </ol>
                         </div>
 
                         {/* Action buttons: Track or Back */}
@@ -5016,6 +5042,8 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
           </div>
         )}
       </div>
+
+
     </div>
   );
 };

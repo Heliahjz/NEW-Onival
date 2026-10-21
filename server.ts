@@ -500,9 +500,22 @@ let orders: any[] = [
 
 // Configuration for Bale Bot, Telegram Bot & Omnichannel Support
 let telegramConfig: any = {
+  // Two-Bot Dedicated Architecture:
+  // 1) Customer & Payment Bot (ربات اختصاصی مشتری و پرداخت)
+  customerBotToken: '1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34',
+  customerBotUsername: 'Onivalbot',
+  customerBotEnabled: true,
+  customerBotWebhookUrl: '',
+
+  // 2) Admin & Management Bot (ربات اختصاصی ادمین و مدیریت فروش)
+  adminBotToken: '1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34',
+  adminBotUsername: 'OnivalAdminBot',
+  adminChatId: '69451465',
+  adminBotEnabled: true,
+  adminBotWebhookUrl: '',
+
   // Primary / Bale Bot compatibility fields
   botToken: '1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34',
-  adminChatId: '923387796',
   botUsername: 'Onivalbot',
   baseUrl: 'https://tapi.bale.ai',
   panelBaseUrl: 'http://localhost:3000',
@@ -512,7 +525,7 @@ let telegramConfig: any = {
   // Explicit Bale Bot Settings
   baleEnabled: true,
   baleBotToken: '1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34',
-  baleAdminChatId: '923387796',
+  baleAdminChatId: '69451465',
   baleAdminUsername: '@hasti_hjz',
   baleBotUsername: 'Onivalbot',
   baleBaseUrl: 'https://tapi.bale.ai',
@@ -575,6 +588,23 @@ let botActivityLogs: any[] = [
   { id: 3, time: '18:05', type: 'bot_query', platform: 'bale', text: 'استعلام وضعیت سفارش ONV-ORD-101 از طریق ربات بله دریافت شد.', status: 'success' }
 ];
 
+// Helper functions for Two-Bot Dedicated Architecture
+function getCustomerBotToken(): string {
+  return (telegramConfig.customerBotToken || telegramConfig.baleBotToken || telegramConfig.botToken || '').trim();
+}
+function getCustomerBotUsername(): string {
+  return (telegramConfig.customerBotUsername || telegramConfig.baleBotUsername || telegramConfig.botUsername || 'Onivalbot').replace(/^@/, '').trim();
+}
+function getAdminBotToken(): string {
+  return (telegramConfig.adminBotToken || telegramConfig.baleBotToken || telegramConfig.botToken || '').trim();
+}
+function getAdminBotUsername(): string {
+  return (telegramConfig.adminBotUsername || telegramConfig.baleBotUsername || 'OnivalAdminBot').replace(/^@/, '').trim();
+}
+function getAdminChatId(): string {
+  return String(telegramConfig.adminChatId || telegramConfig.baleAdminChatId || '').trim();
+}
+
 // Helpers for Bale Bot API & Omnichannel Support
 function getActiveBaleWalletToken(): string {
   if (telegramConfig.balePaymentMode === 'test') {
@@ -614,11 +644,15 @@ async function sendBaleMessage(
       return { ok: true, status: res.status, result: data.result };
     }
 
+    if (res.status === 401) {
+      return { ok: false, status: 401, error: 'توکن ربات نامعتبر است (401 Unauthorized)' };
+    }
+
     // If failed and replyMarkup was passed, fallback to plain text (Bale keyboard structure fallback)
-    if (replyMarkup) {
+    if (replyMarkup && res.status !== 401 && res.status !== 403) {
       console.warn('[Bale Bot] sendMessage with replyMarkup rejected, falling back to plain text:', data?.description || res.status);
       const controller2 = new AbortController();
-      const timer2 = setTimeout(() => controller2.abort(), 6000);
+      const timer2 = setTimeout(() => controller2.abort(), 4000);
       const res2 = await fetch(`${cleanBase}/bot${token}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -697,31 +731,53 @@ async function dispatchBotNotification(text: string, eventType: string) {
   const nowTime = new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   const results: { platform: string; ok: boolean; detail: string }[] = [];
 
-  // 1. Send to Bale Bot if enabled
-  const baleActive = telegramConfig.baleEnabled ?? telegramConfig.active;
-  const baleToken = (telegramConfig.baleBotToken || telegramConfig.botToken || '').trim();
-  const baleChat = (telegramConfig.baleAdminChatId || telegramConfig.adminChatId || '').trim();
+  // 1. Send to Admin Bot (Bale Dedicated Admin Bot)
+  const baleActive = telegramConfig.adminBotEnabled ?? telegramConfig.baleEnabled ?? telegramConfig.active;
+  const adminToken = getAdminBotToken();
+  const adminChat = getAdminChatId();
   const baleBase = (telegramConfig.baleBaseUrl || telegramConfig.baseUrl || 'https://tapi.bale.ai').replace(/\/+$/, '');
 
-  if (baleActive && baleToken && baleChat) {
+  if (baleActive && adminToken && adminChat) {
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 6000);
-      const res = await fetch(`${baleBase}/bot${baleToken}/sendMessage`, {
+      const res = await fetch(`${baleBase}/bot${adminToken}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: baleChat, text }),
+        body: JSON.stringify({ chat_id: adminChat, text }),
         signal: controller.signal
       });
       clearTimeout(timer);
       const data: any = await res.json().catch(() => ({}));
       if (res.ok && data?.ok) {
-        results.push({ platform: 'bale', ok: true, detail: `ارسال واقعی به بله (Message ID: ${data.result?.message_id || 'OK'})` });
+        results.push({ platform: 'bale_admin', ok: true, detail: `ارسال موفق به ربات ادمین بله (شناسه چت: ${adminChat})` });
+        botActivityLogs.unshift({
+          id: Date.now(),
+          time: nowTime,
+          type: 'admin_notification_sent',
+          platform: 'bale',
+          text: `اعلان «${eventType}» با موفقیت توسط ربات ادمین (@${getAdminBotUsername()}) به چت ${adminChat} ارسال شد.`,
+          status: 'success',
+          rawPayload: { adminChat, eventType, text: text.slice(0, 160) },
+          rawResponse: data
+        });
+        savePersistedState();
       } else {
-        results.push({ platform: 'bale', ok: false, detail: data?.description || `HTTP ${res.status}` });
+        const desc = data?.description || `HTTP ${res.status}`;
+        results.push({ platform: 'bale_admin', ok: false, detail: desc });
+        botActivityLogs.unshift({
+          id: Date.now(),
+          time: nowTime,
+          type: 'admin_notification_failed',
+          platform: 'bale',
+          text: `خطا در ارسال اعلان «${eventType}» به ربات ادمین: ${desc}`,
+          status: 'warning',
+          rawPayload: { adminChat, eventType },
+          rawResponse: data
+        });
       }
     } catch (err: any) {
-      results.push({ platform: 'bale', ok: false, detail: err?.message || 'خطای شبکه' });
+      results.push({ platform: 'bale_admin', ok: false, detail: err?.message || 'خطای شبکه' });
     }
   }
 
@@ -1016,8 +1072,8 @@ function loadPersistedState() {
       if (Array.isArray(parsed.slugRedirects)) {
         slugRedirects = parsed.slugRedirects;
       }
+      const cleanBot = (b?: string) => (!b || b === 'onival_bot' || b === '@onival_bot') ? 'Onivalbot' : b;
       if (parsed.telegramConfig && typeof parsed.telegramConfig === 'object') {
-        const cleanBot = (b?: string) => (!b || b === 'onival_bot' || b === '@onival_bot') ? 'Onivalbot' : b;
         telegramConfig = {
           ...telegramConfig,
           ...parsed.telegramConfig,
@@ -1302,7 +1358,8 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
     p === '/firebase/export-state' ||
     p === '/torob/products' ||
     p.startsWith('/torob') ||
-    p.startsWith('/emalls')
+    p.startsWith('/emalls') ||
+    p === '/bot/logs'
   )) {
     return next();
   }
@@ -1320,9 +1377,14 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
     p === '/bot/send-real-message' ||
     p === '/bot/send-test-message' ||
     p === '/bot/test-send-invoice' ||
+    p === '/bot/test-command' ||
     p === '/bot/simulate-bale-payment-cycle' ||
     /^\/orders\/[^/]+\/(upload-receipt|confirm-bale-payment|confirm-gateway-payment)$/.test(p)
   )) {
+    return next();
+  }
+
+  if (m === 'DELETE' && p === '/bot/logs') {
     return next();
   }
 
@@ -3258,13 +3320,25 @@ app.post('/api/bot/simulate-event', async (req: Request, res: Response) => {
   res.status(400).json({ error: 'رویداد نامعتبر است' });
 });
 
+// Helper to convert Persian/Arabic digits to English digits
+function toEnglishDigits(str: string): string {
+  if (!str) return '';
+  return str
+    .replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+    .replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+}
+
 // ================= BALE & TELEGRAM WEBHOOK & LONG POLLING PROCESSOR =================
 function extractTrackingCodeFromText(text: string): string | null {
   if (!text || typeof text !== 'string') return null;
-  const trimmed = text.trim();
+  const rawTrimmed = text.trim();
+  const trimmed = toEnglishDigits(rawTrimmed);
 
-  // If pure generic single commands without parameters, return null to allow default order presentation
-  if (/^[\/!#]?(start|help|admin|orders|شروع|راهنما|سفارشات)$/iu.test(trimmed)) {
+  // If pure generic single commands or default interactive buttons, return null
+  if (/^[\/!#]?(start|help|admin|orders|شروع|راهنما|سفارشات|فروشگاه|محصولات|تماس|پشتیبانی|پیگیری|پرداخت)$/iu.test(trimmed)) {
+    return null;
+  }
+  if (/^(🛍️|🛒|📞|☎️|📦|🔍|💳|🧾)/u.test(trimmed)) {
     return null;
   }
 
@@ -3277,20 +3351,26 @@ function extractTrackingCodeFromText(text: string): string | null {
     }
   }
 
-  // 2. Direct order pattern anywhere in text: ONV-ORD-949, ONV_ORD_949, ONV949, etc.
-  const onvMatch = trimmed.match(/(ONV[-_]?[A-Za-z0-9]{2,}[-_]?[0-9]+|ONV[-_]?[0-9]{2,})/iu);
+  // 2. Direct order pattern anywhere in text: ONV-ORD-949, ONV_ORD_949, ONV949, ORD_915, etc.
+  const onvMatch = trimmed.match(/(ONV[-_]?[A-Za-z0-9]{2,}[-_]?[0-9]+|ONV[-_]?[0-9]{2,}|ORD[-_]?[0-9]{2,})/iu);
   if (onvMatch) {
     return onvMatch[1].trim();
   }
 
-  // 3. Direct pay or order command: pay_ONV-ORD-949, پرداخت_ONV-ORD-949, order_ONV-ORD-949
+  // 3. Persian prefix queries: e.g. "فاکتور 915", "سفارش 915", "کد 915", "پیگیری 915"
+  const prefixMatch = trimmed.match(/(?:فاکتور|سفارش|کد|رهگیری|پرداخت|شماره|invoice|order)\s*[:#-]?\s*([A-Za-z0-9_-]+)/iu);
+  if (prefixMatch && /\d/.test(prefixMatch[1])) {
+    return prefixMatch[1].trim();
+  }
+
+  // 4. Direct pay or order command: pay_ONV-ORD-949, پرداخت_ONV-ORD-949, order_ONV-ORD-949
   const directPayMatch = trimmed.match(/^(?:[\/!#])?(?:pay_|order_|پرداخت_)\s*([A-Za-z0-9_-]+)/iu);
   if (directPayMatch) {
     return directPayMatch[1].trim();
   }
 
-  // 4. Standalone tracking code (at least 3 characters containing digits, e.g. 104 or 432 or ONV-101)
-  if (!trimmed.startsWith('/') && /^[A-Za-z0-9_-]{3,20}$/.test(trimmed) && /\d/.test(trimmed)) {
+  // 5. Standalone tracking code (at least 3 characters containing digits, e.g. 104 or 432 or ONV-101 or 915)
+  if (!trimmed.startsWith('/') && /^[A-Za-z0-9_-]{2,20}$/.test(trimmed) && /\d/.test(trimmed)) {
     return trimmed;
   }
 
@@ -3359,15 +3439,18 @@ function findOrderByTrackingOrCode(code: string): any {
   return null;
 }
 
-async function processIncomingBotUpdate(update: any) {
+async function processIncomingBotUpdate(update: any, botOrigin: 'customer' | 'admin' = 'customer') {
   if (!update || typeof update !== 'object') return;
   const time = new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
 
-  const baleToken = (telegramConfig.baleBotToken || telegramConfig.botToken || '').trim();
+  const customerToken = getCustomerBotToken();
+  const adminToken = getAdminBotToken();
+  const baleToken = botOrigin === 'admin' ? (adminToken || customerToken) : (customerToken || adminToken);
+  const activeToken = baleToken;
   const baleBase = (telegramConfig.baleBaseUrl || telegramConfig.baseUrl || 'https://tapi.bale.ai').replace(/\/+$/, '');
   const siteUrl = (telegramConfig.panelBaseUrl || 'http://localhost:3000').replace(/\/+$/, '');
   const configuredAdminUser = (telegramConfig.baleAdminUsername || 'hasti_hjz').replace(/^@/, '').toLowerCase();
-  const configuredAdminChat = String(telegramConfig.baleAdminChatId || telegramConfig.adminChatId || '');
+  const configuredAdminChat = getAdminChatId();
 
   // 0. Handle Callback Query (e.g. inline button clicks in Bale)
   if (update.callback_query) {
@@ -3599,12 +3682,13 @@ async function processIncomingBotUpdate(update: any) {
 
       if (baleToken && senderChatId) {
         // 1. Send detailed invoice text with inline keyboard buttons
-        await sendBaleMessage(baleBase, baleToken, senderChatId, invoiceDetailText, inlineKeyboard);
+        const msgRes = await sendBaleMessage(baleBase, baleToken, senderChatId, invoiceDetailText, inlineKeyboard);
 
         // 2. Issue Bale Wallet native Invoice («درخواست پول») if unpaid
+        let invoiceResult: any = null;
         if (!isPaid) {
           const walletToken = getActiveBaleWalletToken();
-          const invoiceResult = await sendBaleInvoice({
+          invoiceResult = await sendBaleInvoice({
             baseUrl: baleBase,
             token: baleToken,
             chatId: isNaN(Number(senderChatId)) ? senderChatId : Number(senderChatId),
@@ -3617,8 +3701,8 @@ async function processIncomingBotUpdate(update: any) {
           });
 
           // If failed with configured wallet token, retry with official test wallet token
-          if (!invoiceResult.ok) {
-            await sendBaleInvoice({
+          if (!invoiceResult.ok && invoiceResult.status !== 401) {
+            const retryRes = await sendBaleInvoice({
               baseUrl: baleBase,
               token: baleToken,
               chatId: isNaN(Number(senderChatId)) ? senderChatId : Number(senderChatId),
@@ -3628,17 +3712,54 @@ async function processIncomingBotUpdate(update: any) {
               providerToken: 'WALLET-TEST-1111111111111111',
               startParameter: `pay_${targetOrder.trackingCode.replace(/-/g, '_')}`,
               totalPriceRial: Number(targetOrder.totalPrice || 0) * 10
-            }).catch(() => {});
+            }).catch(() => null);
+            if (retryRes) {
+              invoiceResult = { ...retryRes, retriedWithTestToken: true };
+            }
           }
         }
+
+        // Send persistent quick buttons to customer
+        const replyKeyboard = {
+          keyboard: [
+            [{ text: '🧾 استعلام و پرداخت فاکتور من' }],
+            [{ text: '🛍️ فروشگاه اونیوال' }, { text: '📦 پیگیری سفارش' }],
+            [{ text: '💳 راهنمای روش‌های پرداخت' }, { text: '📞 تماس با ما و پشتیبانی' }]
+          ],
+          resize_keyboard: true,
+          one_time_keyboard: false
+        };
+        sendBaleMessage(baleBase, baleToken, senderChatId, '📌 گزینه‌های دسترسی سریع:', replyKeyboard).catch(() => {});
 
         botActivityLogs.unshift({
           id: Date.now(),
           time,
           type: 'invoice_opened_in_bot',
           platform: 'bale',
-          text: `مشتری (${targetOrder.userFullName}) فاکتور ${targetOrder.trackingCode} را در ربات بله باز کرد و درخواست پرداخت برایش ارسال شد.`,
-          status: 'success'
+          text: `فاکتور سفارش ${targetOrder.trackingCode} با موفقیت شناسایی شد و اقلام آن (${(targetOrder.items || []).length} قلم کالا به مبلغ کل ${Number(targetOrder.totalPrice || 0).toLocaleString('fa-IR')} تومان) از دیتابیس خوانده و درخواست پرداخت برای کاربر در بله صادر گردید.`,
+          status: (invoiceResult ? invoiceResult.ok : msgRes.ok) ? 'success' : 'warning',
+          details: `چت‌آیدی کاربر: ${senderChatId} | وضعیت ارسال پیام فاکتور: ${msgRes.ok ? 'موفق' : 'خطا'} | وضعیت درخواست پول بله: ${invoiceResult ? (invoiceResult.ok ? 'موفق' : (invoiceResult.data?.description || `HTTP ${invoiceResult.status}`)) : 'پیشتر تسویه شده'}`,
+          rawPayload: {
+            chatId: senderChatId,
+            trackingCode: targetOrder.trackingCode,
+            totalPrice: targetOrder.totalPrice,
+            itemsCount: (targetOrder.items || []).length,
+            userFullName: targetOrder.userFullName,
+            phoneNumber: targetOrder.phoneNumber,
+            paymentStatus: targetOrder.paymentStatus
+          },
+          rawResponse: {
+            messageDelivery: msgRes,
+            invoiceDelivery: invoiceResult
+          },
+          orderInfo: {
+            id: targetOrder.id,
+            trackingCode: targetOrder.trackingCode,
+            userFullName: targetOrder.userFullName,
+            totalPrice: targetOrder.totalPrice,
+            paymentStatus: targetOrder.paymentStatus,
+            items: targetOrder.items
+          }
         });
         savePersistedState();
 
@@ -3649,6 +3770,14 @@ async function processIncomingBotUpdate(update: any) {
         }
       }
     };
+
+    // Shared default URLs for interactive bot response buttons
+    const originBase = (telegramConfig.panelBaseUrl && !telegramConfig.panelBaseUrl.includes('localhost'))
+      ? telegramConfig.panelBaseUrl.replace(/\/+$/, '')
+      : (process.env.APP_URL || 'https://ais-dev-uy5bcdp7o5x4p2wvng2rjs-701810134340.europe-west2.run.app');
+    const storeUrl = originBase;
+    const supportUsername = (telegramConfig.baleSupportId || telegramConfig.baleBotUsername || 'onival_bale_support').replace(/^@/, '');
+    const supportUrl = `https://ble.ir/${supportUsername}`;
 
     // =========================================================================
     // STEP A: PAYMENT & INVOICE REQUEST (Explicit Code in message or /start param)
@@ -3696,9 +3825,182 @@ async function processIncomingBotUpdate(update: any) {
     }
 
     // =========================================================================
-    // STEP B: ADMIN SPECIFIC COMMANDS (/orders, /confirm_...)
+    // STEP B: DEFAULT INTERACTIVE USER BUTTONS (Shop, Contact, Tracking, Guide)
+    // Responds to user clicking default menu buttons or typing standard commands
     // =========================================================================
-    if (isAdmin) {
+
+    // 1. Shop & Products Button (فروشگاه و محصولات)
+    if (/^(🛍️|🛒)?\s*(فروشگاه.*|محصولات.*|کاتالوگ.*|خرید.*|shop|products)$/iu.test(text) || text === '/shop' || text === '/products') {
+      const shopText =
+        `🛍️ به فروشگاه تخصصی فرآورده‌های ارگانیک اونیوال (ONIVAL) خوش آمدید!\n\n` +
+        `🌿 دسته‌بندی محصولات طبیعی کندو و کوهستان:\n` +
+        `▫️ عسل طبیعی و ارگانیک سبلان (گون، آویشن، چهل‌گیاه)\n` +
+        `▫️ ژل رویال ۱۰۰٪ خالص و گرده گل تازه کوهستان\n` +
+        `▫️ بره‌موم طبیعی و معجون‌های تقویت سیستم ایمنی\n` +
+        `▫️ روغن‌های گیاهی خالص و ارگانیک\n\n` +
+        `🚚 ارسال سریع پستی به سراسر کشور با ضمانت اصالت و برگه آزمایشگاهی.\n\n` +
+        `🌐 جهت مشاهده لیست کامل، قیمت‌های به‌روز و ثبت آنلاین سفارش:\n${storeUrl}`;
+
+      const shopKb = {
+        inline_keyboard: [
+          [{ text: '🛍️ ورود به وب‌سایت و فروشگاه اونیوال', url: storeUrl }],
+          [{ text: '📞 تماس و مشاوره با کارشناسان', url: supportUrl }]
+        ]
+      };
+
+      if (baleToken && senderChatId) {
+        const sendRes = await sendBaleMessage(baleBase, baleToken, senderChatId, shopText, shopKb);
+        botActivityLogs.unshift({
+          id: Date.now(),
+          time,
+          type: 'default_command_shop',
+          platform: 'bale',
+          text: `دستور پیش‌فرض «فروشگاه اونیوال» توسط کاربر (${senderChatId}) دریافت شد و لینک ویترین و محصولات ارسال گردید.`,
+          status: 'success',
+          rawPayload: { command: text, chatId: senderChatId, username: senderUsername },
+          rawResponse: sendRes
+        });
+        savePersistedState();
+      }
+      return;
+    }
+
+    // 2. Contact Us / Support Button (تماس با ما و پشتیبانی)
+    if (/^(📞|☎️)?\s*(تماس.*|پشتیبانی.*|ارتباط.*|contact|support)$/iu.test(text) || text === '/contact' || text === '/support') {
+      const contactPhone = siteContent?.contactPhone || '۰۲۱-۱۲۳۴۵۶۷۸ / ۰۹۱۲۳۴۵۶۷۸۹';
+      const contactAddress = siteContent?.contactAddress || 'تهران، مجموعه تخصصی فرآورده‌های ارگانیک اونیوال';
+      const contactText =
+        `📞 تماس با ما و واحد پشتیبانی فروشگاه اونیوال:\n\n` +
+        `▫️ آیدی پشتیبان اختصاصی در بله: @${supportUsername}\n` +
+        `▫️ شماره‌های تماس و مشاوره: ${contactPhone}\n` +
+        `▫️ ساعات پاسخگویی: همه روزه از ساعت ۸:۰۰ الی ۲۲:۰۰\n` +
+        `▫️ نشانی دفتر مرکزی: ${contactAddress}\n\n` +
+        `💡 پیگیری سفارشات: برای پیگیری آنی سفارش، شماره فاکتور خود (مانند ONV-ORD-XXX) را در همین چت ارسال نمایید.`;
+
+      const contactKb = {
+        inline_keyboard: [
+          [{ text: '💬 چت مستقیم با پشتیبانی در بله', url: supportUrl }],
+          [{ text: '🌐 صفحه تماس با ما در وب‌سایت', url: `${storeUrl}/#contact` }]
+        ]
+      };
+
+      if (baleToken && senderChatId) {
+        const sendRes = await sendBaleMessage(baleBase, baleToken, senderChatId, contactText, contactKb);
+        botActivityLogs.unshift({
+          id: Date.now(),
+          time,
+          type: 'default_command_contact',
+          platform: 'bale',
+          text: `دستور پیش‌فرض «تماس با ما و پشتیبانی» توسط کاربر (${senderChatId}) دریافت شد و مشخصات تماس ارسال گردید.`,
+          status: 'success',
+          rawPayload: { command: text, chatId: senderChatId, username: senderUsername },
+          rawResponse: sendRes
+        });
+        savePersistedState();
+      }
+      return;
+    }
+
+    // 3. Track Order Button (پیگیری سفارش)
+    if (/^(📦|🔍)?\s*(پیگیری.*|رهگیری.*|وضعیت سفارش.*|track|tracking)$/iu.test(text) || text === '/track') {
+      const activePending = orders.find(o => o.paymentStatus !== 'Paid') || orders[0];
+      let trackText =
+        `📦 سامانه هوشمند پیگیری سفارشات اونیوال:\n\n` +
+        `جهت بررسی وضعیت آماده‌سازی، کد رهگیری پستی و تاییدیه فاکتور، کافیست شماره فاکتور خود را ارسال فرمایید (مثال: ONV-ORD-949 یا فقط عدد آن مانند 949).\n\n`;
+
+      if (activePending) {
+        trackText +=
+          `💡 آخرین فاکتور فعال در سیستم:\n` +
+          `▫️ کد رهگیری: ${activePending.trackingCode}\n` +
+          `▫️ خریدار: ${activePending.userFullName}\n` +
+          `▫️ مبلغ: ${Number(activePending.totalPrice || 0).toLocaleString('fa-IR')} تومان\n` +
+          `▫️ وضعیت پرداخت: ${activePending.paymentStatus === 'Paid' ? '✅ پرداخت شده' : '⏳ در انتظار پرداخت'}\n\n`;
+      }
+
+      trackText += `🌐 برای پیگیری در وب‌سایت از دکمه زیر استفاده نمایید:`;
+
+      const trackKb = {
+        inline_keyboard: [
+          [{ text: '🔍 پیگیری سفارش در وب‌سایت', url: activePending ? `${storeUrl}/?track=${activePending.trackingCode}` : `${storeUrl}/?track=` }],
+          [{ text: '🛍️ ورود به فروشگاه', url: storeUrl }]
+        ]
+      };
+
+      if (baleToken && senderChatId) {
+        const sendRes = await sendBaleMessage(baleBase, baleToken, senderChatId, trackText, trackKb);
+        botActivityLogs.unshift({
+          id: Date.now(),
+          time,
+          type: 'default_command_track',
+          platform: 'bale',
+          text: `دستور پیش‌فرض «پیگیری سفارش» برای کاربر (${senderChatId}) پردازش و راهنمای پیگیری ارسال شد.`,
+          status: 'success',
+          rawPayload: { command: text, chatId: senderChatId },
+          rawResponse: sendRes
+        });
+        savePersistedState();
+      }
+      return;
+    }
+
+    // 4. Payment Guide Button (راهنمای روش‌های پرداخت)
+    if (/^(💳)?\s*(راهنمای پرداخت.*|کارت به کارت.*|نحوه پرداخت.*|روش پرداخت.*|pay_help|payment)$/iu.test(text) || text === '/pay_help') {
+      const cardNum = siteContent?.paymentConfig?.cardNumber || '۶۰۳۷-۹۹۷۵-۹۹۱۲-۳۴۵۶';
+      const cardHolder = siteContent?.paymentConfig?.cardHolderName || 'فروشگاه تخصصی اونیوال';
+      const bank = siteContent?.paymentConfig?.bankName || 'بانک ملی ایران';
+
+      const payHelpText =
+        `💳 راهنمای روش‌های پرداخت سفارش در اونیوال:\n\n` +
+        `۱️⃣ پرداخت مستقیم با کیف پول بله (سریع‌ترین روش):\n` +
+        `در پیام فاکتور، دکمه «پرداخت» کارت درخواست پول بله را لمس کنید تا فاکتور آنی و بدون کارمزد تسویه شود.\n\n` +
+        `۲️⃣ پرداخت آنلاین شتابی در سایت:\n` +
+        `با لمس لینک پرداخت هر فاکتور، وارد درگاه پرداخت بانکی سایت می‌شوید.\n\n` +
+        `۳️⃣ کارت به کارت شتابی:\n` +
+        `▫️ شماره کارت: ${cardNum}\n` +
+        `▫️ به نام: ${cardHolder}\n` +
+        `▫️ بانک: ${bank}\n\n` +
+        `📌 پس از کارت به کارت، کد رهگیری فاکتور یا تصویر فیش را ارسال نمایید تا وضعیت سفارش تأیید گردد.`;
+
+      const payKb = {
+        inline_keyboard: [
+          [{ text: '🌐 ورود به سایت و پرداخت فاکتور', url: storeUrl }],
+          [{ text: '📞 پشتیبانی مالی و فیش', url: supportUrl }]
+        ]
+      };
+
+      if (baleToken && senderChatId) {
+        const sendRes = await sendBaleMessage(baleBase, baleToken, senderChatId, payHelpText, payKb);
+        botActivityLogs.unshift({
+          id: Date.now(),
+          time,
+          type: 'default_command_pay_help',
+          platform: 'bale',
+          text: `راهنمای روش‌های پرداخت و کارت به کارت برای کاربر (${senderChatId}) ارسال شد.`,
+          status: 'success',
+          rawPayload: { command: text, chatId: senderChatId },
+          rawResponse: sendRes
+        });
+        savePersistedState();
+      }
+      return;
+    }
+
+    // 5. My Latest Invoice Button (آخرین فاکتور من)
+    if (/^(🧾)?\s*(فاکتور.*|invoice)$/iu.test(text) || text === '/invoice') {
+      const latestPendingOrder = orders.find(o => o.paymentStatus !== 'Paid') || orders[0];
+      if (latestPendingOrder) {
+        await deliverOrderInvoice(latestPendingOrder, 'مشخصات آخرین فاکتور سفارش شما در سیستم:');
+        return;
+      }
+    }
+
+    // =========================================================================
+    // STEP C: ADMIN SPECIFIC COMMANDS (/orders, /confirm_...)
+    // Handled when interacting with Admin Bot or explicitly requested by admin
+    // =========================================================================
+    const isAdminBotScope = botOrigin === 'admin' || (isAdmin && (text.startsWith('/orders') || text.startsWith('/confirm_') || text === '/admin'));
+
+    if (isAdminBotScope) {
       if (text === '/orders' || text === 'سفارشات' || text === 'لیست سفارشات') {
         const pendingList = orders.slice(0, 8);
         let reply = `📋 آخرین وضعیت سفارشات فروشگاه اونیوال:\n\n`;
@@ -3712,8 +4014,8 @@ async function processIncomingBotUpdate(update: any) {
             `تایید سریع: /confirm_${o.trackingCode}`
           ).join('\n──────────\n');
         }
-        if (baleToken && senderChatId) {
-          await sendBaleMessage(baleBase, baleToken, senderChatId, reply);
+        if (adminToken && senderChatId) {
+          await sendBaleMessage(baleBase, adminToken, senderChatId, reply);
         }
         return;
       }
@@ -3731,110 +4033,283 @@ async function processIncomingBotUpdate(update: any) {
             time,
             type: 'admin_bale_confirm',
             platform: 'bale',
-            text: `سفارش ${order.trackingCode} مستقیماً توسط مدیر در پیام‌رسان بله تایید گردید.`,
+            text: `سفارش ${order.trackingCode} مستقیماً توسط مدیر در ربات ادمین تایید گردید.`,
             status: 'success'
           });
           const reply = `✅ سفارش ${order.trackingCode} با موفقیت توسط شما تایید شد!\n\n` +
             `👤 خریدار: ${order.userFullName}\n` +
             `💰 مبلغ: ${Number(order.totalPrice).toLocaleString('fa-IR')} تومان\n` +
             `📦 وضعیت جدید: در حال آماده‌سازی و ارسال`;
-          if (baleToken && senderChatId) {
-            await sendBaleMessage(baleBase, baleToken, senderChatId, reply);
+          if (adminToken && senderChatId) {
+            await sendBaleMessage(baleBase, adminToken, senderChatId, reply);
           }
         } else {
-          if (baleToken && senderChatId) {
-            await sendBaleMessage(baleBase, baleToken, senderChatId, `⚠️ سفارش با کد رهگیری «${codeToConfirm}» در سیستم یافت نشد.`);
+          if (adminToken && senderChatId) {
+            await sendBaleMessage(baleBase, adminToken, senderChatId, `⚠️ سفارش با کد رهگیری «${codeToConfirm}» در سیستم یافت نشد.`);
           }
+        }
+        return;
+      }
+
+      if (botOrigin === 'admin' && (text === '/start' || text === '/admin' || text === 'شروع')) {
+        const adminGreeting =
+          `سلام مدیر گرامی 👑\n\n` +
+          `این «ربات اختصاصی ادمین و مدیریت فروشگاه اونیوال» است.\n` +
+          `شناسه عددی چت شما: ${senderChatId}\n\n` +
+          `📌 تمامی اعلان‌های سفارشات جدید، فیش‌های کارت‌به‌کارت و پرداخت‌های کیف پول بله به این چت ارسال می‌شوند.\n\n` +
+          `دستورات کاربردی مدیریت:\n` +
+          `📋 /orders : مشاهده آخرین سفارشات\n` +
+          `✅ /confirm_کدفاکتور : تایید و تسویه فوری سفارش`;
+
+        const adminKb = {
+          inline_keyboard: [
+            [{ text: '🌐 ورود به پنل مدیریت سایت', url: storeUrl }],
+            [{ text: '🛍️ مشاهده فروشگاه', url: storeUrl }]
+          ]
+        };
+        if (adminToken && senderChatId) {
+          await sendBaleMessage(baleBase, adminToken, senderChatId, adminGreeting, adminKb);
         }
         return;
       }
     }
 
     // =========================================================================
-    // STEP C: START / GENERAL MESSAGES (/start, شروع, سلام, پرداخت, فاکتور, etc.)
-    // Always provide the customer with their active order invoice and payment options!
+    // STEP D: START / GENERAL MESSAGES FOR CUSTOMER BOT (/start, شروع, سلام)
+    // Welcomes the customer and presents quick action buttons & latest invoice
     // =========================================================================
     const latestPendingOrder = orders.find(o => o.paymentStatus !== 'Paid') || orders[0];
+    const isStartWord = /^[\/!#]?(start|help|شروع|راهنما|سلام)$/iu.test(text);
 
-    if (latestPendingOrder) {
-      const isStartWord = /^(\/)?(start|help|شروع|راهنما|پرداخت|سفارش|فاکتور|سلام|خرید)$/i.test(text);
-      const noteHeading = isStartWord
-        ? 'مشخصات آخرین فاکتور سفارش شما آماده پرداخت است:'
-        : 'فاکتور سفارش شما در سیستم اونیوال شناسایی شد:';
-
-      await deliverOrderInvoice(latestPendingOrder, noteHeading);
-
-      // If sender is admin, also send quick admin shortcuts
-      if (isAdmin && (text === '/start' || text === '/help' || text === 'شروع')) {
-        const adminShortcuts =
-          `👑 پنل مدیریت سفارشات در بله:\n` +
-          `📋 دستور /orders : مشاهده تمام سفارشات\n` +
-          `✅ دستور /confirm_${latestPendingOrder.trackingCode} : تایید و تسویه فوری این فاکتور`;
-        await sendBaleMessage(baleBase, baleToken, senderChatId, adminShortcuts).catch(() => {});
+    if (customerToken && senderChatId) {
+      // If customer pressed /start or sent a start greeting, IMMEDIATELY deliver their active invoice!
+      if (latestPendingOrder && (isStartWord || latestPendingOrder.paymentStatus !== 'Paid')) {
+        await deliverOrderInvoice(latestPendingOrder, 'فاکتور سفارش فعال شما آماده پرداخت است:');
+        return;
       }
+
+      // Customer Welcome Message with Navigation Links
+      const welcomeText =
+        `سلام! 🍯 به ربات رسمی پرداخت و فروشگاه تخصصی فرآورده‌های ارگانیک اونیوال خوش آمدید.\n\n` +
+        `جهت تسویه یا مشاهده پیش‌فاکتور، کافیست شماره فاکتور خود (مانند ONV-ORD-949 یا فقط عدد آن) را ارسال فرمایید یا از گزینه‌های زیر استفاده نمایید:`;
+
+      const welcomeKb = {
+        inline_keyboard: [
+          [
+            { text: '🛍️ ورود به فروشگاه آنلاین', url: storeUrl },
+            { text: '📞 تماس با ما و پشتیبانی', url: supportUrl }
+          ],
+          ...(latestPendingOrder ? [[
+            { text: `💳 پرداخت فاکتور (${latestPendingOrder.trackingCode})`, url: `${storeUrl}/?track=${latestPendingOrder.trackingCode}` },
+            { text: '🔍 پیگیری سفارش در سایت', url: `${storeUrl}/?track=${latestPendingOrder.trackingCode}` }
+          ]] : [])
+        ]
+      };
+
+      const sendRes = await sendBaleMessage(baleBase, customerToken, senderChatId, welcomeText, welcomeKb);
+      botActivityLogs.unshift({
+        id: Date.now(),
+        time,
+        type: 'default_command_start',
+        platform: 'bale',
+        text: `پیام خوش‌آمدگویی و منوی دسترسی سریع توسط ربات مشتری به کاربر (${senderChatId}) ارسال شد.`,
+        status: 'success',
+        rawPayload: { command: text, chatId: senderChatId },
+        rawResponse: sendRes
+      });
+      savePersistedState();
+
+      // Send persistent quick buttons to customer
+      const replyKeyboard = {
+        keyboard: [
+          [{ text: '🧾 استعلام و پرداخت فاکتور من' }],
+          [{ text: '🛍️ فروشگاه اونیوال' }, { text: '📦 پیگیری سفارش' }],
+          [{ text: '💳 راهنمای روش‌های پرداخت' }, { text: '📞 تماس با ما و پشتیبانی' }]
+        ],
+        resize_keyboard: true,
+        one_time_keyboard: false
+      };
+      sendBaleMessage(baleBase, customerToken, senderChatId, '📌 منوی دسترسی سریع مشتری:', replyKeyboard).catch(() => {});
       return;
-    }
-
-    // =========================================================================
-    // STEP D: FALLBACK WHEN NO ORDERS EXIST IN SYSTEM
-    // =========================================================================
-    if (baleToken && senderChatId) {
-      if (isAdmin) {
-        const adminGreeting =
-          `سلام مدیر گرامی 👑\n\n` +
-          `اتصال ربات به هاست با موفقیت برقرار است و شما به عنوان ادمین شناسایی شدید ✅\n\n` +
-          `🎯 شناسه عددی چت شما (Chat ID): ${senderChatId}\n` +
-          `تمامی سفارشات جدید، پرداخت‌های کیف پول بله و فیش‌های کارت به کارت به صورت آنی برای شما ارسال خواهند شد.\n\n` +
-          `دستورات کاربردی مدیریت:\n` +
-          `📋 /orders : مشاهده آخرین سفارشات\n` +
-          `✅ /confirm_کدفاکتور : تایید و تسویه فوری سفارش`;
-        await sendBaleMessage(baleBase, baleToken, senderChatId, adminGreeting);
-      } else {
-        const welcome =
-          `سلام! 🍯 به ربات رسمی فروشگاه تخصصی فرآورده‌های ارگانیک اونیوال خوش آمدید.\n\n` +
-          `🎯 شناسه عددی شما در بله (Chat ID): ${senderChatId}\n\n` +
-          `در حال حاضر فاکتوری در انتظار پرداخت برای شما ثبت نشده است.\n\n` +
-          `جهت مشاهده محصولات ارگانیک، خرید عسل طبیعی و ثبت سفارش، لطفاً وارد وب‌سایت فروشگاه شوید:\n` +
-          `🌐 ${siteUrl}\n\n` +
-          `📞 پشتیبانی آنلاین: ${telegramConfig.baleSupportId || '@onival_bale_support'}`;
-
-        const kb = {
-          inline_keyboard: [
-            [{ text: '🌐 ورود به وب‌سایت و فروشگاه اونیوال', url: siteUrl }],
-            [{ text: '📞 ارتباط با پشتیبانی فروشگاه', url: `https://ble.ir/${(telegramConfig.baleSupportId || telegramConfig.baleBotUsername || 'onival_bale_support').replace(/^@/, '')}` }]
-          ]
-        };
-        await sendBaleMessage(baleBase, baleToken, senderChatId, welcome, kb);
-      }
     }
     return;
   }
 }
 
-app.post(['/api/webhook/bale', '/api/bot/webhook/bale', '/api/webhook/telegram', '/api/bot/webhook/telegram'], async (req: Request, res: Response) => {
-  const update = req.body || {};
+// GET Bot Logs endpoint (for UI Log Box)
+app.get('/api/bot/logs', (req: Request, res: Response) => {
+  res.json({ ok: true, logs: botActivityLogs });
+});
+
+// Interactive Bot Command Tester (for both Customer side & Admin Log Box)
+app.post('/api/bot/test-command', async (req: Request, res: Response) => {
+  const command = String(req.body.command || '/start').trim();
+  const testChatId = String(req.body.chatId || telegramConfig.baleAdminChatId || '69451465');
+
+  const simulatedUpdate = {
+    update_id: Date.now(),
+    message: {
+      message_id: Math.floor(Math.random() * 90000) + 10000,
+      from: {
+        id: isNaN(Number(testChatId)) ? 69451465 : Number(testChatId),
+        first_name: 'تستر ساید مشتری',
+        username: 'onival_tester'
+      },
+      chat: {
+        id: isNaN(Number(testChatId)) ? 69451465 : Number(testChatId),
+        type: 'private'
+      },
+      date: Math.floor(Date.now() / 1000),
+      text: command
+    }
+  };
+
   try {
-    await processIncomingBotUpdate(update);
+    await processIncomingBotUpdate(simulatedUpdate);
+    const extractedCode = extractTrackingCodeFromText(command);
+    const matchedOrder = extractedCode ? findOrderByTrackingOrCode(extractedCode) : null;
+
+    res.json({
+      ok: true,
+      command,
+      extractedCode,
+      matchedOrder: matchedOrder ? {
+        id: matchedOrder.id,
+        trackingCode: matchedOrder.trackingCode,
+        userFullName: matchedOrder.userFullName,
+        totalPrice: matchedOrder.totalPrice,
+        paymentStatus: matchedOrder.paymentStatus,
+        itemsCount: (matchedOrder.items || []).length
+      } : null,
+      logs: botActivityLogs.slice(0, 30)
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      ok: false,
+      error: err?.message || 'خطا در اجرای تست ربات',
+      logs: botActivityLogs.slice(0, 30)
+    });
+  }
+});
+
+// Dedicated Real Admin Bot Tester Endpoint
+app.post('/api/bot/test-admin-bot', async (req: Request, res: Response) => {
+  const { chatId, token } = req.body || {};
+  const adminToken = (token || getAdminBotToken()).trim();
+  const adminChat = (chatId || getAdminChatId()).trim();
+  const baleBase = (telegramConfig.baleBaseUrl || telegramConfig.baseUrl || 'https://tapi.bale.ai').replace(/\/+$/, '');
+  const time = new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  if (!adminToken) return res.status(400).json({ ok: false, message: 'توکن ربات ادمین وارد نشده است.' });
+  if (!adminChat) return res.status(400).json({ ok: false, message: 'شناسه چت ادمین (Admin Chat ID) وارد نشده است.' });
+
+  try {
+    const text =
+      `👑 تست موفقیت‌آمیز ربات اختصاصی ادمین فروشگاه اونیوال:\n\n` +
+      `▫️ وضعیت: ارتباط فعال و آماده دریافت تراکنش‌ها ✅\n` +
+      `▫️ شناسه عددی چت شما: ${adminChat}\n` +
+      `▫️ ساعت تست: ${time}\n\n` +
+      `تمامی اعلان‌های سفارشات جدید، آپلود فیش‌های کارت‌به‌کارت و پرداخت‌های بله به این صفحه ارسال خواهند شد.`;
+
+    const apiRes = await fetch(`${baleBase}/bot${adminToken}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: adminChat, text })
+    });
+    const data: any = await apiRes.json().catch(() => ({}));
+    const ok = Boolean(apiRes.ok && data?.ok);
+
+    botActivityLogs.unshift({
+      id: Date.now(),
+      time,
+      type: 'test_admin_bot',
+      platform: 'bale',
+      text: `ارسال پیام آزمایشی به چت ادمین (${adminChat}) از طریق ربات ادمین: ${ok ? 'موفق' : (data?.description || `HTTP ${apiRes.status}`)}`,
+      status: ok ? 'success' : 'warning',
+      rawResponse: data
+    });
+    savePersistedState();
+
+    res.json({
+      ok,
+      apiData: data,
+      message: ok ? 'پیام تست به اکانت ادمین در بله ارسال شد.' : `خطای بله: ${data?.description || apiRes.status}`,
+      logs: botActivityLogs.slice(0, 30)
+    });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, message: `خطای شبکه: ${err.message}` });
+  }
+});
+
+// Dedicated Real Customer Bot Tester Endpoint
+app.post('/api/bot/test-customer-bot', async (req: Request, res: Response) => {
+  const { token } = req.body || {};
+  const customerToken = (token || getCustomerBotToken()).trim();
+  const baleBase = (telegramConfig.baleBaseUrl || telegramConfig.baseUrl || 'https://tapi.bale.ai').replace(/\/+$/, '');
+  const time = new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  if (!customerToken) return res.status(400).json({ ok: false, message: 'توکن ربات مشتری وارد نشده است.' });
+
+  try {
+    const apiRes = await fetch(`${baleBase}/bot${customerToken}/getMe`);
+    const data: any = await apiRes.json().catch(() => ({}));
+    const ok = Boolean(apiRes.ok && data?.ok);
+
+    botActivityLogs.unshift({
+      id: Date.now(),
+      time,
+      type: 'test_customer_bot',
+      platform: 'bale',
+      text: `بررسی اتصال و وضعیت ربات مشتری در بله: ${ok ? `معتبر (@${data?.result?.username || 'bot'})` : (data?.description || `HTTP ${apiRes.status}`)}`,
+      status: ok ? 'success' : 'warning',
+      rawResponse: data
+    });
+    savePersistedState();
+
+    res.json({
+      ok,
+      botInfo: data?.result,
+      message: ok ? `اتصال ربات مشتری معتبر است (@${data?.result?.username || 'bot'}).` : `پاسخ بله: ${data?.description || apiRes.status}`,
+      logs: botActivityLogs.slice(0, 30)
+    });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, message: `خطای شبکه: ${err.message}` });
+  }
+});
+
+app.post([
+  '/api/webhook/bale',
+  '/api/bot/webhook/bale',
+  '/api/webhook/bale/customer',
+  '/api/webhook/bale/admin',
+  '/api/webhook/telegram',
+  '/api/bot/webhook/telegram'
+], async (req: Request, res: Response) => {
+  const update = req.body || {};
+  const isExplicitAdmin = req.path.includes('/admin') || req.query.bot === 'admin';
+  try {
+    await processIncomingBotUpdate(update, isExplicitAdmin ? 'admin' : 'customer');
   } catch (err) {
     console.warn('Error in webhook update:', err);
   }
   res.json({ ok: true });
 });
 
-// Background Long Polling for Bale Bot (ensures real-time bot responses even in local / dev)
+// Background Long Polling for Both Customer Bot and Admin Bot
 let isBalePollingRunning = false;
 async function startBaleBotPolling() {
   if (isBalePollingRunning) return;
   isBalePollingRunning = true;
-  let offset = 0;
-  console.log('[Bale Polling] Background long-polling started for Bale Bot.');
+  console.log('[Bale Polling] Background long-polling started for Customer Bot and Admin Bot.');
 
+  // Poller 1: Customer Bot Poller
   (async () => {
+    let customerOffset = 0;
     while (isBalePollingRunning) {
-      const baleToken = (telegramConfig.baleBotToken || telegramConfig.botToken || '').trim();
+      const cToken = getCustomerBotToken();
       const baleBase = (telegramConfig.baleBaseUrl || telegramConfig.baseUrl || 'https://tapi.bale.ai').replace(/\/+$/, '');
 
-      if (!baleToken) {
+      if (!cToken) {
         await new Promise((r) => setTimeout(r, 6000));
         continue;
       }
@@ -3842,7 +4317,7 @@ async function startBaleBotPolling() {
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 20000);
-        const res = await fetch(`${baleBase}/bot${baleToken}/getUpdates?offset=${offset}&timeout=10`, {
+        const res = await fetch(`${baleBase}/bot${cToken}/getUpdates?offset=${customerOffset}&timeout=10`, {
           signal: controller.signal
         });
         clearTimeout(timeoutId);
@@ -3852,18 +4327,53 @@ async function startBaleBotPolling() {
           if (data?.ok && Array.isArray(data.result)) {
             for (const item of data.result) {
               if (item.update_id) {
-                offset = Math.max(offset, item.update_id + 1);
+                customerOffset = Math.max(customerOffset, item.update_id + 1);
               }
-              await processIncomingBotUpdate(item).catch((e) => console.warn('processIncomingBotUpdate err:', e));
+              await processIncomingBotUpdate(item, 'customer').catch((e) => console.warn('processIncomingBotUpdate err:', e));
             }
           }
         } else {
-          // If status is 409 Conflict, an external webhook is intentionally handling updates
-          if (res.status === 409) {
-            await new Promise((r) => setTimeout(r, 15000));
-          } else {
-            await new Promise((r) => setTimeout(r, 4000));
+          await new Promise((r) => setTimeout(r, res.status === 409 ? 15000 : 4000));
+        }
+      } catch (err: any) {
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
+  })();
+
+  // Poller 2: Admin Bot Poller (runs if admin token is set and differs from customer token)
+  (async () => {
+    let adminOffset = 0;
+    while (isBalePollingRunning) {
+      const aToken = getAdminBotToken();
+      const cToken = getCustomerBotToken();
+      const baleBase = (telegramConfig.baleBaseUrl || telegramConfig.baseUrl || 'https://tapi.bale.ai').replace(/\/+$/, '');
+
+      if (!aToken || aToken === cToken) {
+        await new Promise((r) => setTimeout(r, 8000));
+        continue;
+      }
+
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 20000);
+        const res = await fetch(`${baleBase}/bot${aToken}/getUpdates?offset=${adminOffset}&timeout=10`, {
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        if (res.ok) {
+          const data: any = await res.json().catch(() => null);
+          if (data?.ok && Array.isArray(data.result)) {
+            for (const item of data.result) {
+              if (item.update_id) {
+                adminOffset = Math.max(adminOffset, item.update_id + 1);
+              }
+              await processIncomingBotUpdate(item, 'admin').catch((e) => console.warn('processIncomingBotUpdate admin err:', e));
+            }
           }
+        } else {
+          await new Promise((r) => setTimeout(r, res.status === 409 ? 15000 : 4000));
         }
       } catch (err: any) {
         await new Promise((r) => setTimeout(r, 2000));
