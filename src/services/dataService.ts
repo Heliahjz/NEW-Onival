@@ -398,33 +398,29 @@ function handleLocalApiRoute(
     const p = String(password || '').trim();
 
     const currentCreds = state.adminCredentials || DEFAULT_ADMIN_CREDENTIALS;
-    const isUserMatch =
-      u === currentCreds.username.toLowerCase() ||
-      u === currentCreds.email.toLowerCase() ||
-      u === 'admin' ||
-      u === 'admin@onival.com' ||
-      u === 'admin@onival.ir' ||
-      u === 'heltashop14@gmail.com';
+    const validUser = (currentCreds.username || 'admin').trim().toLowerCase();
+    const validEmail = (currentCreds.email || 'admin@onival.com').trim().toLowerCase();
+    const validPass = (currentCreds.password || 'admin').trim();
 
-    const isPassMatch =
-      p === currentCreds.password ||
-      p === DEFAULT_ADMIN_CREDENTIALS.password ||
-      p === 'admin';
+    const isUserMatch = u === validUser || u === validEmail;
+    const isPassMatch = isUserMatch && Boolean(validPass) && p === validPass;
 
     if (isUserMatch && isPassMatch) {
-      const token = `local_session_${btoa(`${u}:${Date.now()}`).replace(/=/g, '')}`;
+      const token = `local_session_${btoa(`${currentCreds.username}:${Date.now()}`).replace(/=/g, '')}`;
       setAdminSessionToken(token);
       return {
         status: 200,
         data: {
           ok: true,
+          success: true,
           token,
-          user: {
+          profile: {
             username: currentCreds.username,
             name: currentCreds.name,
             email: currentCreds.email,
           },
           source: 'local_storage',
+          message: 'ورود به پنل مدیریت با موفقیت انجام شد.',
         },
       };
     }
@@ -436,11 +432,19 @@ function handleLocalApiRoute(
 
   // 2. تغییر مشخصات ورود ادمین (Change Credentials)
   if (cleanPath === '/api/account/change-credentials' && method === 'POST') {
-    const { newUsername, newPassword, newEmail, name } = bodyData || {};
-    if (newUsername) state.adminCredentials.username = newUsername.trim();
-    if (newPassword) state.adminCredentials.password = newPassword.trim();
-    if (newEmail) state.adminCredentials.email = newEmail.trim();
-    if (name) state.adminCredentials.name = name.trim();
+    const { username, newUsername, newPassword, password, email, newEmail, name } = bodyData || {};
+    const targetUser = (username || newUsername || '').trim();
+    const targetPass = (newPassword || password || '').trim();
+    const targetEmail = (email || newEmail || '').trim();
+
+    if (!state.adminCredentials) {
+      state.adminCredentials = { ...DEFAULT_ADMIN_CREDENTIALS };
+    }
+
+    if (targetUser) state.adminCredentials.username = targetUser;
+    if (targetPass) state.adminCredentials.password = targetPass;
+    if (targetEmail) state.adminCredentials.email = targetEmail;
+    if (name) state.adminCredentials.name = String(name).trim();
 
     writeLocalBackup(state);
     const token = `local_session_${btoa(`${state.adminCredentials.username}:${Date.now()}`).replace(/=/g, '')}`;
@@ -449,7 +453,13 @@ function handleLocalApiRoute(
       status: 200,
       data: {
         ok: true,
+        success: true,
         token,
+        profile: {
+          username: state.adminCredentials.username,
+          email: state.adminCredentials.email,
+          name: state.adminCredentials.name,
+        },
         message: 'مشخصات حساب مدیریت با موفقیت در دیتابیس محلی ذخیره شد.',
       },
     };
@@ -457,12 +467,13 @@ function handleLocalApiRoute(
 
   // 3. پروفایل ادمین (Admin Profile)
   if (cleanPath === '/api/account/profile' && method === 'GET') {
+    const creds = state.adminCredentials || DEFAULT_ADMIN_CREDENTIALS;
     return {
       status: 200,
       data: {
-        username: state.adminCredentials.username,
-        email: state.adminCredentials.email,
-        name: state.adminCredentials.name,
+        username: creds.username,
+        email: creds.email,
+        name: creds.name,
       },
     };
   }

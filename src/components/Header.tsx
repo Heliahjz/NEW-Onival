@@ -55,6 +55,16 @@ export const Header: React.FC<HeaderProps> = ({
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const notifRef = useRef<HTMLDivElement>(null);
 
+  const NOTIF_STORAGE_KEY = 'onival_admin_seen_notifications_v1.1';
+  const [seenNotificationKeys, setSeenNotificationKeys] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem(NOTIF_STORAGE_KEY);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+
   // Close notification dropdown on outside click
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -90,13 +100,45 @@ export const Header: React.FC<HeaderProps> = ({
     unreadTickets.length +
     activePendingOrders.length;
 
-  const handleMarkAllRead = () => {
-    if (!onMarkMessageRead) return;
-    messages.forEach(m => {
-      if (!m.isRead) {
-        onMarkMessageRead(m.id);
+  // Unique keys for each current notification item
+  const allNotificationKeys = [
+    ...pendingReceiptOrders.map(o => `receipt-${o.id}-${o.paymentStatus}`),
+    ...unreadConsultations.map(m => `consult-${m.id}-${m.isRead ? 'read' : 'unread'}`),
+    ...unreadTickets.map(m => `msg-${m.id}-${m.isRead ? 'read' : 'unread'}`),
+    ...activePendingOrders.map(o => `order-${o.id}-${o.status}`)
+  ];
+
+  // Unread badge strictly counts items that haven't been seen/reviewed yet
+  const unseenCount = allNotificationKeys.filter(k => !seenNotificationKeys.includes(k)).length;
+
+  const handleToggleNotifications = () => {
+    setIsNotifOpen(prev => {
+      const next = !prev;
+      if (next && allNotificationKeys.length > 0) {
+        // Mark current items as viewed so the unread badge clears
+        const updated = Array.from(new Set([...seenNotificationKeys, ...allNotificationKeys]));
+        setSeenNotificationKeys(updated);
+        try {
+          localStorage.setItem(NOTIF_STORAGE_KEY, JSON.stringify(updated));
+        } catch {}
       }
+      return next;
     });
+  };
+
+  const handleMarkAllRead = () => {
+    if (onMarkMessageRead) {
+      messages.forEach(m => {
+        if (!m.isRead) {
+          onMarkMessageRead(m.id);
+        }
+      });
+    }
+    const updated = Array.from(new Set([...seenNotificationKeys, ...allNotificationKeys]));
+    setSeenNotificationKeys(updated);
+    try {
+      localStorage.setItem(NOTIF_STORAGE_KEY, JSON.stringify(updated));
+    } catch {}
   };
 
   return (
@@ -123,11 +165,16 @@ export const Header: React.FC<HeaderProps> = ({
           )}
 
           <div className="min-w-0 flex-1">
-            <h1 className="text-sm sm:text-lg font-black text-slate-800 truncate leading-tight">
-              {title}
-            </h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-sm sm:text-lg font-black text-slate-800 truncate leading-tight">
+                {title}
+              </h1>
+              <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-extrabold bg-amber-100 text-amber-900 border border-amber-300/80 shadow-2xs shrink-0">
+                نسخه ۱.۱.۰
+              </span>
+            </div>
             <p className="hidden md:block text-[11px] text-slate-400 font-medium truncate mt-0.5">
-              پنل یکپارچه مدیریت فروشگاه، سفارشات، مشاوره و ربات‌های پشتیبانی اونیوال
+              پنل یکپارچه مدیریت فروشگاه، سفارشات، مشاوره و ربات‌های پشتیبانی اونیوال (v1.1.0)
             </p>
           </div>
         </div>
@@ -187,7 +234,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="relative" ref={notifRef}>
             <button
               id="btn-admin-notifications"
-              onClick={() => setIsNotifOpen(prev => !prev)}
+              onClick={handleToggleNotifications}
               className={`relative p-2 sm:p-2.5 rounded-xl border transition ${
                 isNotifOpen
                   ? 'bg-amber-50 border-amber-300 text-amber-700 shadow-xs'
@@ -195,10 +242,10 @@ export const Header: React.FC<HeaderProps> = ({
               }`}
               title="اعلان‌ها و رویدادهای سیستم"
             >
-              <Bell className={`w-4 h-4 sm:w-5 sm:h-5 ${totalNotifications > 0 ? 'animate-pulse text-amber-600' : ''}`} />
-              {totalNotifications > 0 && (
+              <Bell className={`w-4 h-4 sm:w-5 sm:h-5 ${unseenCount > 0 ? 'animate-pulse text-amber-600' : ''}`} />
+              {unseenCount > 0 && (
                 <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-rose-500 text-white text-[10px] font-black rounded-full flex items-center justify-center ring-2 ring-white shadow-xs">
-                  {totalNotifications > 99 ? '99+' : totalNotifications}
+                  {unseenCount > 99 ? '99+' : unseenCount}
                 </span>
               )}
             </button>
@@ -216,13 +263,13 @@ export const Header: React.FC<HeaderProps> = ({
                     <span className="text-xs sm:text-sm font-bold">مرکز اعلان‌ها و رویدادهای فوری</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    {totalNotifications > 0 ? (
+                    {unseenCount > 0 ? (
                       <span className="px-2 py-0.5 text-[10px] font-bold bg-rose-500/90 text-white rounded-full">
-                        {totalNotifications} مورد جدید
+                        {unseenCount} مورد جدید
                       </span>
                     ) : (
                       <span className="px-2 py-0.5 text-[10px] font-bold bg-emerald-500/20 text-emerald-300 rounded-full">
-                        به‌روز
+                        خوانده شده
                       </span>
                     )}
                     <button
@@ -421,7 +468,7 @@ export const Header: React.FC<HeaderProps> = ({
 
                 {/* Footer Actions */}
                 <div className="p-2.5 bg-slate-50 border-t border-slate-200/80 flex items-center justify-between gap-2">
-                  {(unreadTickets.length > 0 || unreadConsultations.length > 0) && (
+                  {totalNotifications > 0 && (
                     <button
                       onClick={handleMarkAllRead}
                       className="text-[11px] font-bold text-emerald-700 hover:text-emerald-800 px-2.5 py-1.5 rounded-lg hover:bg-emerald-50 transition"

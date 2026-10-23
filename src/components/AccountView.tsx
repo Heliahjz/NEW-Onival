@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { SiteContent } from '../types';
 import { HostDataManagementCard } from './HostDataManagementCard';
-import { apiFetch } from '../services/dataService';
+import { apiFetch, setAdminSessionToken, getCachedLocalState, writeLocalBackup } from '../services/dataService';
 
 interface AccountViewProps {
   siteContent?: SiteContent;
@@ -372,19 +372,32 @@ export const AccountView: React.FC<AccountViewProps> = ({
     e.preventDefault();
     setStatus({ type: null, message: '' });
 
-    if (!username.trim()) {
+    const trimmedUser = username.trim();
+    const trimmedCurrentPass = currentPassword.trim();
+    const trimmedNewPass = newPassword.trim();
+
+    if (!trimmedUser) {
       setStatus({ type: 'error', message: 'نام کاربری مدیریت نمی‌تواند خالی باشد.' });
       return;
     }
 
-    if (newPassword && newPassword !== confirmPassword) {
-      setStatus({ type: 'error', message: 'رمز عبور جدید و تکرار آن با یکدیگر مطابقت ندارند.' });
-      return;
-    }
-
-    if (newPassword && newPassword.trim().length < 4) {
-      setStatus({ type: 'error', message: 'رمز عبور جدید باید حداقل ۴ کاراکتر باشد.' });
-      return;
+    // If changing password, current password must be provided
+    if (trimmedNewPass) {
+      if (!trimmedCurrentPass) {
+        setStatus({
+          type: 'error',
+          message: 'جهت تغییر رمز عبور، لطفاً «رمز عبور فعلی» خود را در کادر مربوطه وارد فرمایید.'
+        });
+        return;
+      }
+      if (trimmedNewPass !== confirmPassword.trim()) {
+        setStatus({ type: 'error', message: 'رمز عبور جدید و تکرار آن با یکدیگر مطابقت ندارند.' });
+        return;
+      }
+      if (trimmedNewPass.length < 4) {
+        setStatus({ type: 'error', message: 'رمز عبور جدید باید حداقل ۴ کاراکتر باشد.' });
+        return;
+      }
     }
 
     setIsSavingCredentials(true);
@@ -393,11 +406,11 @@ export const AccountView: React.FC<AccountViewProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          username: username.trim(),
+          username: trimmedUser,
           email: email.trim(),
           name: adminName.trim(),
-          currentPassword: currentPassword.trim() || undefined,
-          newPassword: newPassword.trim() || undefined,
+          currentPassword: trimmedCurrentPass || undefined,
+          newPassword: trimmedNewPass || undefined,
           siteLogo,
           siteLogoFit,
           siteLogoShape,
@@ -405,23 +418,51 @@ export const AccountView: React.FC<AccountViewProps> = ({
         })
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setStatus({ type: 'error', message: data.error || 'خطا در بروزرسانی اطلاعات امنیتی مدیر' });
+        setStatus({
+          type: 'error',
+          message: data.error || 'خطا در بروزرسانی اطلاعات امنیتی مدیر. لطفاً رمز عبور فعلی را بررسی فرمایید.'
+        });
       } else {
+        // Immediately store and activate the newly generated session token
+        if (data.token) {
+          setAdminSessionToken(data.token);
+        }
+
+        // Synchronize browser local backup immediately
+        try {
+          const local = getCachedLocalState();
+          if (local) {
+            local.adminCredentials = {
+              ...local.adminCredentials,
+              username: trimmedUser,
+              email: email.trim(),
+              name: adminName.trim(),
+              password: trimmedNewPass ? trimmedNewPass : local.adminCredentials?.password
+            };
+            writeLocalBackup(local);
+          }
+        } catch {
+          // ignore storage error
+        }
+
         setStatus({
           type: 'success',
-          message:
-            newPassword.trim()
-              ? 'نام کاربری و رمز عبور جدید مدیریت با موفقیت ذخیره شد. از این پس برای ورود از اطلاعات جدید استفاده نمایید.'
-              : 'اطلاعات کاربری و پروفایل مدیریت با موفقیت ذخیره شد.'
+          message: trimmedNewPass
+            ? 'نام کاربری و رمز عبور جدید مدیریت با موفقیت در دیتابیس پایدار ذخیره شدند. از این پس فقط با مشخصات جدید می‌توانید وارد شوید.'
+            : 'اطلاعات کاربری و پروفایل مدیریت با موفقیت ذخیره شد.'
         });
         setCurrentPassword('');
         setNewPassword('');
         setConfirmPassword('');
+
+        if (onRefreshData) {
+          onRefreshData();
+        }
       }
     } catch {
-      setStatus({ type: 'error', message: 'خطا در ارتباط با سرور' });
+      setStatus({ type: 'error', message: 'خطا در برقراری ارتباط با سرور' });
     } finally {
       setIsSavingCredentials(false);
     }

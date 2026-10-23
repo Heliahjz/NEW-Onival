@@ -53,10 +53,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* Top Banner / Welcome */}
       <div className="bg-gradient-to-l from-slate-900 via-indigo-950 to-blue-900 rounded-2xl p-6 text-white shadow-md relative overflow-hidden">
         <div className="relative z-10 max-w-2xl">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md text-xs font-medium text-blue-200 mb-3 border border-white/10">
-            <Bot className="w-3.5 h-3.5" />
-            سیستم متصل به بات هوشمند بله و تلگرام
-          </span>
+          <div className="flex flex-wrap items-center gap-2 mb-3">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md text-xs font-medium text-blue-200 border border-white/10">
+              <Bot className="w-3.5 h-3.5" />
+              سیستم متصل به بات هوشمند بله و تلگرام
+            </span>
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-amber-400/20 text-amber-300 text-xs font-black border border-amber-400/30">
+              نسخه ۱.۱.۰ (v1.1.0)
+            </span>
+          </div>
           <h2 className="text-2xl font-bold tracking-tight mb-2">
             پنل یکپارچه مدیریت فروشگاه و ارتباطات انیوال
           </h2>

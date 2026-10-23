@@ -35,7 +35,10 @@ import {
   Server,
   BookOpen,
   AlertTriangle,
-  ShoppingBag
+  ShoppingBag,
+  Download,
+  Code,
+  FileCode
 } from 'lucide-react';
 import { TelegramConfig, BotActivityLog, ContactMessage, Order, SiteContent } from '../types';
 import { apiFetch } from '../services/dataService';
@@ -221,6 +224,51 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
   const [replyingId, setReplyingId] = useState<number | null>(null);
   const [replyText, setReplyText] = useState<string>('');
   const [isSubmittingReply, setIsSubmittingReply] = useState(false);
+
+  // Standalone PHP Files Viewer & Downloader for public_html
+  const [phpModal, setPhpModal] = useState<{ open: boolean; filename: string; title: string; code: string; loading: boolean } | null>(null);
+
+  const handleDownloadPhp = async (fileName: string) => {
+    try {
+      const res = await fetch(`/${fileName}`);
+      if (!res.ok) throw new Error('فایل یافت نشد');
+      const text = await res.text();
+      const blob = new Blob([text], { type: 'application/x-httpd-php' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast(`فایل ${fileName} با موفقیت دانلود شد. می‌توانید آن را در public_html آپلود کنید.`, 'success');
+    } catch (err: any) {
+      showToast(`خطا در دانلود ${fileName}: ${err.message}`, 'error');
+    }
+  };
+
+  const handleOpenPhpCodeModal = async (fileName: string, title: string) => {
+    setPhpModal({ open: true, filename: fileName, title, code: 'در حال بارگذاری کدهای فایل...', loading: true });
+    try {
+      const res = await fetch(`/${fileName}`);
+      const text = await res.text();
+      setPhpModal({ open: true, filename: fileName, title, code: text, loading: false });
+    } catch {
+      setPhpModal(prev => prev ? { ...prev, code: '// خطا در بارگذاری مستقیم فایل. فایل در پوشه public قرار دارد.', loading: false } : null);
+    }
+  };
+
+  const handleCopyPhpCode = async (fileName: string) => {
+    try {
+      const res = await fetch(`/${fileName}`);
+      const text = await res.text();
+      await navigator.clipboard.writeText(text);
+      showToast(`کدهای کامل فایل ${fileName} در حافظه کپی شد. می‌توانید در File Manager سی‌پنل ذخیره کنید.`, 'success');
+    } catch (err: any) {
+      showToast(`خطا در کپی کدهای ${fileName}: ${err.message}`, 'error');
+    }
+  };
 
   const showToast = (text: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToastMessage({ text, type });
@@ -743,25 +791,230 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
       {/* TAB 1: BOTS CONFIGURATION (BALE & TELEGRAM TOKENS) */}
       {activeSubTab === 'bots-config' && (
         <form onSubmit={handleSaveAll} className="space-y-6">
+          {/* STANDALONE PHP BOT FILES FOR PUBLIC_HTML */}
+          <div className="bg-gradient-to-l from-slate-900 via-slate-800 to-indigo-950 rounded-3xl p-6 text-white shadow-xl border border-indigo-500/30 space-y-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/10 pb-5">
+              <div className="space-y-1">
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-bold border border-emerald-500/30">
+                  <Server className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>راهکار ۱۰۰٪ مستقل و خودکفا برای آپلود دستی در پوشه public_html هاست</span>
+                </div>
+                <h3 className="text-lg font-black text-white flex items-center gap-2">
+                  <FileCode className="w-5 h-5 text-amber-400" />
+                  <span>فایل‌های اختصاصی PHP ربات‌ها (بدون نیاز به روشن ماندن Node.js)</span>
+                </h3>
+                <p className="text-xs text-slate-300 leading-relaxed max-w-3xl">
+                  این فایل‌ها مستقل از Node.js هستند و توسط وب‌سرورهای آپاچی و لایت‌اسپید هاست‌های اشتراکی سی‌پنل اجرا می‌شوند. کافیست فایل‌ها را دانلود کرده و مستقیماً در پوشه <code className="bg-black/40 px-2 py-0.5 rounded text-amber-300 font-mono font-bold">public_html</code> قرار دهید.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleDownloadPhp('bale-bot.php')}
+                  className="px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black text-xs transition flex items-center gap-2 shadow-lg shadow-emerald-500/20 cursor-pointer"
+                >
+                  <Download className="w-4 h-4 text-slate-950" />
+                  <span>دانلود bale-bot.php</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDownloadPhp('telegram-bot.php')}
+                  className="px-4 py-2.5 rounded-xl bg-sky-500 hover:bg-sky-600 text-slate-950 font-black text-xs transition flex items-center gap-2 shadow-lg shadow-sky-500/20 cursor-pointer"
+                >
+                  <Download className="w-4 h-4 text-slate-950" />
+                  <span>دانلود telegram-bot.php</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Grid of File Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {/* File 1: bale-bot.php */}
+              <div className="bg-white/5 backdrop-blur-md rounded-2xl p-4 border border-emerald-400/30 flex flex-col justify-between space-y-4 hover:border-emerald-400/60 transition">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-emerald-500 text-slate-950">مخصوص بله (اصلی)</span>
+                    <span className="text-[11px] font-mono text-slate-400">PHP 7.4+</span>
+                  </div>
+                  <h4 className="text-sm font-black text-white font-mono flex items-center gap-1.5">
+                    <Bot className="w-4 h-4 text-emerald-400" />
+                    <span>bale-bot.php</span>
+                  </h4>
+                  <p className="text-[11px] text-slate-300 mt-1 leading-relaxed">
+                    شامل منوی کامل دکمه‌های شیشه‌ای، صدور فاکتور کیف‌پول، پاسخگویی به استعلام فاکتور و اطلاع به ادمین پس از پرداخت قطعی.
+                  </p>
+                  <div className="mt-3 p-2 rounded-xl bg-black/40 border border-white/5 space-y-1 text-[11px]">
+                    <div className="text-slate-400">مسیر آپلود در هاست:</div>
+                    <code className="text-amber-300 font-mono block">public_html/bale-bot.php</code>
+                    <div className="text-slate-400 mt-1">آدرس وب‌هوک در بله:</div>
+                    <code className="text-emerald-300 font-mono block truncate" title={`${formData.panelBaseUrl || window.location.origin}/bale-bot.php`}>
+                      {(formData.panelBaseUrl || window.location.origin).replace(/\/+$/, '')}/bale-bot.php
+                    </code>
+                  </div>
+                </div>
+
+                <div className="space-y-2 pt-2 border-t border-white/10">
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadPhp('bale-bot.php')}
+                      className="px-3 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>دانلود فایل</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyPhpCode('bale-bot.php')}
+                      className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>کپی کدها</span>
+                    </button>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenPhpCodeModal('bale-bot.php', 'کدهای کامل فایل اختصاصی بله (bale-bot.php)')}
+                      className="flex-1 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-bold transition text-center cursor-pointer"
+                    >
+                      مشاهده آنلاین کدهای PHP
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const origin = (formData.panelBaseUrl || window.location.origin).replace(/\/+$/, '');
+                        updateField({ baleWebhookUrl: `${origin}/bale-bot.php` });
+                        showToast('آدرس وب‌هوک بله به فایل روت bale-bot.php تغییر یافت. دکمه «ثبت در بله» را بزنید.', 'info');
+                      }}
+                      className="px-2 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-[10px] font-bold transition text-center cursor-pointer"
+                      title="تنظیم آدرس این فایل به عنوان وب‌هوک ربات مشتری"
+                    >
+                      تنظیم به عنوان وب‌هوک
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* File 2: telegram-bot.php */}
+              <div className="bg-white/5 backdrop-blur-md rounded-2xl p-4 border border-sky-400/30 flex flex-col justify-between space-y-4 hover:border-sky-400/60 transition">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-sky-500 text-slate-950">مخصوص تلگرام</span>
+                    <span className="text-[11px] font-mono text-slate-400">PHP 7.4+</span>
+                  </div>
+                  <h4 className="text-sm font-black text-white font-mono flex items-center gap-1.5">
+                    <Send className="w-4 h-4 text-sky-400" />
+                    <span>telegram-bot.php</span>
+                  </h4>
+                  <p className="text-[11px] text-slate-300 mt-1 leading-relaxed">
+                    دریافت و پاسخ پیام‌ها در تلگرام، منوی دکمه‌ها، استعلام فاکتور و اطلاع به ادمین پس از پرداخت.
+                  </p>
+                  <div className="mt-3 p-2 rounded-xl bg-black/40 border border-white/5 space-y-1 text-[11px]">
+                    <div className="text-slate-400">مسیر آپلود در هاست:</div>
+                    <code className="text-amber-300 font-mono block">public_html/telegram-bot.php</code>
+                    <div className="text-slate-400 mt-1">آدرس وب‌هوک در تلگرام:</div>
+                    <code className="text-sky-300 font-mono block truncate" title={`${formData.panelBaseUrl || window.location.origin}/telegram-bot.php`}>
+                      {(formData.panelBaseUrl || window.location.origin).replace(/\/+$/, '')}/telegram-bot.php
+                    </code>
+                  </div>
+                </div>
+
+                <div className="space-y-2 pt-2 border-t border-white/10">
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadPhp('telegram-bot.php')}
+                      className="px-3 py-2 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/40 text-sky-300 text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>دانلود فایل</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyPhpCode('telegram-bot.php')}
+                      className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>کپی کدها</span>
+                    </button>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenPhpCodeModal('telegram-bot.php', 'کدهای کامل فایل اختصاصی تلگرام (telegram-bot.php)')}
+                      className="flex-1 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-bold transition text-center cursor-pointer"
+                    >
+                      مشاهده آنلاین کدهای PHP
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const origin = (formData.panelBaseUrl || window.location.origin).replace(/\/+$/, '');
+                        updateField({ telegramWebhookUrl: `${origin}/telegram-bot.php` });
+                        showToast('آدرس وب‌هوک تلگرام به فایل روت telegram-bot.php تغییر یافت. دکمه «ثبت در تلگرام» را بزنید.', 'info');
+                      }}
+                      className="px-2 py-1.5 rounded-lg bg-sky-700 hover:bg-sky-600 text-white text-[10px] font-bold transition text-center cursor-pointer"
+                      title="تنظیم آدرس این فایل به عنوان وب‌هوک ربات تلگرام"
+                    >
+                      تنظیم به عنوان وب‌هوک
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* File 3: bot-config.php & Step Guide */}
+              <div className="bg-white/5 backdrop-blur-md rounded-2xl p-4 border border-indigo-400/30 flex flex-col justify-between space-y-4 hover:border-indigo-400/60 transition">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-indigo-500 text-white">راهنمای استقرار دستی</span>
+                    <span className="text-[11px] font-mono text-slate-400">۳ مرحله آسان</span>
+                  </div>
+                  <h4 className="text-sm font-black text-white flex items-center gap-1.5">
+                    <BookOpen className="w-4 h-4 text-indigo-400" />
+                    <span>مراحل استقرار در cPanel</span>
+                  </h4>
+                  <ul className="text-[11px] text-slate-300 mt-2 space-y-1.5 list-disc list-inside leading-relaxed">
+                    <li>فایل <strong className="text-emerald-300 font-mono">bale-bot.php</strong> را دانلود فرمایید.</li>
+                    <li>در سی‌پنل وارد <strong className="text-white">File Manager</strong> شده و فایل را در روت <strong className="text-amber-300 font-mono">public_html</strong> آپلود فرمایید.</li>
+                    <li>در کارت زیر دکمه <strong className="text-emerald-400">«ثبت وب‌هوک در بله»</strong> را بزنید یا آدرس را با <code className="text-sky-300">set_webhook=1?</code> در مرورگر باز کنید.</li>
+                  </ul>
+                </div>
+
+                <div className="pt-2 border-t border-white/10 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadPhp('bot-config.php')}
+                    className="flex-1 px-3 py-2 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/40 text-indigo-300 text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>دانلود bot-config.php</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* TWO-BOT DEDICATED ARCHITECTURE (Customer Bot & Admin Bot) */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 w-full max-w-full min-w-0">
             {/* Card 1: ربات ۱: ربات اختصاصی پرداخت و ارتباط با مشتریان (Customer & Payment Bot) */}
-            <div className="bg-white rounded-2xl border-2 border-emerald-400/80 shadow-md overflow-hidden flex flex-col justify-between">
+            <div className="w-full max-w-full min-w-0 bg-white rounded-2xl border-2 border-emerald-400/80 shadow-md overflow-hidden flex flex-col justify-between">
               <div>
-                <div className="p-5 bg-gradient-to-l from-emerald-100/90 via-emerald-50 to-white border-b border-emerald-100 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-11 h-11 rounded-2xl bg-emerald-600 text-white flex items-center justify-center font-bold shadow-md shadow-emerald-600/30">
+                <div className="p-4 sm:p-5 bg-gradient-to-l from-emerald-100/90 via-emerald-50 to-white border-b border-emerald-100 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div className="w-11 h-11 rounded-2xl bg-emerald-600 text-white flex items-center justify-center font-bold shadow-md shadow-emerald-600/30 shrink-0">
                       <ShoppingBag className="w-6 h-6" />
                     </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-700 text-white shadow-xs">ربات ۱</span>
-                        <h3 className="text-sm font-black text-slate-900">ربات مشتری و پرداخت (@{(formData.customerBotUsername || formData.botUsername || 'Onivalbot').replace('@', '')})</h3>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-700 text-white shadow-xs shrink-0">ربات ۱</span>
+                        <h3 className="text-sm font-black text-slate-900 break-words">ربات مشتری و پرداخت (@{(formData.customerBotUsername || formData.botUsername || 'Onivalbot').replace('@', '')})</h3>
                       </div>
-                      <p className="text-[11px] text-emerald-800 font-medium">ساید مشتری: صدور پیش‌فاکتور، دکمه پرداخت مستقیم کیف پول بله، دکمه‌های فروشگاه و پشتیبانی</p>
+                      <p className="text-[11px] text-emerald-800 font-medium break-words mt-0.5">ساید مشتری: صدور پیش‌فاکتور، دکمه پرداخت مستقیم کیف پول بله، دکمه‌های فروشگاه و پشتیبانی</p>
                     </div>
                   </div>
-                  <label className="inline-flex items-center gap-2 cursor-pointer bg-white px-3 py-1.5 rounded-xl border border-emerald-200 shadow-2xs">
+                  <label className="inline-flex items-center gap-2 cursor-pointer bg-white px-3 py-1.5 rounded-xl border border-emerald-200 shadow-2xs shrink-0">
                     <span className="text-xs font-black text-slate-800">{formData.customerBotEnabled !== false ? 'فعال' : 'غیرفعال'}</span>
                     <input
                       type="checkbox"
@@ -772,22 +1025,22 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                   </label>
                 </div>
 
-                <div className="p-5 space-y-4">
+                <div className="p-4 sm:p-5 space-y-4">
                   {/* Notice: Customer sees only this */}
-                  <div className="bg-emerald-50/70 border border-emerald-200/90 rounded-xl p-3 text-xs text-emerald-950 flex items-center gap-2">
-                    <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span>مشتریان در وب‌سایت فقط نام و آدرس این ربات را می‌بینند (<strong className="font-mono text-emerald-900">ble.ir/{(formData.customerBotUsername || formData.botUsername || 'Onivalbot').replace('@', '')}</strong>) و فاکتورها در این ربات صادر و تسویه می‌شوند.</span>
+                  <div className="bg-emerald-50/70 border border-emerald-200/90 rounded-xl p-3 text-xs text-emerald-950 flex items-start sm:items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5 sm:mt-0" />
+                    <span className="break-words">مشتریان در وب‌سایت فقط نام و آدرس این ربات را می‌بینند (<strong className="font-mono text-emerald-900">ble.ir/{(formData.customerBotUsername || formData.botUsername || 'Onivalbot').replace('@', '')}</strong>) و فاکتورها در این ربات صادر و تسویه می‌شوند.</span>
                   </div>
 
                   {/* Customer Bot Token */}
                   <div>
-                    <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-1.5 mb-1.5">
                       <label className="text-xs font-bold text-slate-700">توکن بازوی مشتری (از @BotFather در بله)</label>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 shrink-0">
                         <button
                           type="button"
                           onClick={() => setShowCustomerBotToken(!showCustomerBotToken)}
-                          className="text-[11px] text-slate-500 hover:text-slate-800 flex items-center gap-1"
+                          className="text-[11px] text-slate-500 hover:text-slate-800 flex items-center gap-1 cursor-pointer"
                         >
                           {showCustomerBotToken ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                           <span>{showCustomerBotToken ? 'مخفی' : 'نمایش'}</span>
@@ -795,7 +1048,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                         <button
                           type="button"
                           onClick={() => handleCopy(formData.customerBotToken || formData.botToken, 'customerBotToken')}
-                          className="text-[11px] text-emerald-600 hover:text-emerald-700 flex items-center gap-1 font-semibold"
+                          className="text-[11px] text-emerald-600 hover:text-emerald-700 flex items-center gap-1 font-semibold cursor-pointer"
                         >
                           {copiedKey === 'customerBotToken' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                           <span>{copiedKey === 'customerBotToken' ? 'کپی شد' : 'کپی'}</span>
@@ -817,16 +1070,16 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
 
                   {/* Customer Bot Username */}
                   <div>
-                    <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-1.5 mb-1.5">
                       <label className="text-xs font-bold text-slate-700">آیدی / یوزرنیم ربات مشتری در بله</label>
                       <a
                         href={`https://ble.ir/${(formData.customerBotUsername || formData.botUsername || 'Onivalbot').replace('@', '')}`}
                         target="_blank"
                         rel="noreferrer"
-                        className="text-[11px] text-emerald-600 hover:underline flex items-center gap-0.5"
+                        className="text-[11px] text-emerald-600 hover:underline flex items-center gap-0.5 shrink-0"
                       >
-                        <span>ble.ir/{(formData.customerBotUsername || formData.botUsername || 'Onivalbot').replace('@', '')}</span>
-                        <ExternalLink className="w-2.5 h-2.5" />
+                        <span className="break-all">ble.ir/{(formData.customerBotUsername || formData.botUsername || 'Onivalbot').replace('@', '')}</span>
+                        <ExternalLink className="w-2.5 h-2.5 shrink-0" />
                       </a>
                     </div>
                     <input
@@ -843,10 +1096,10 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                   </div>
 
                   {/* BALE WALLET PAYMENT TOKENS SECTION */}
-                  <div className="p-4 bg-emerald-50/50 rounded-2xl border border-emerald-200/80 space-y-3">
+                  <div className="p-3.5 sm:p-4 bg-emerald-50/50 rounded-2xl border border-emerald-200/80 space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
                         <h4 className="text-xs font-black text-emerald-950">توکن‌های پرداخت کیف پول برای ربات مشتری</h4>
                       </div>
                       <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-emerald-200 text-[11px] font-bold">
@@ -899,53 +1152,119 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                         />
                       </div>
                     </div>
+
+                    {/* Bale Webhook Configuration Box for Host */}
+                    <div className="p-3.5 bg-emerald-50/80 border border-emerald-200/90 rounded-2xl space-y-2.5">
+                      <div className="flex flex-wrap items-center justify-between gap-1.5">
+                        <label className="text-xs font-black text-emerald-950 flex items-center gap-1.5">
+                          <Webhook className="w-4 h-4 text-emerald-700 shrink-0" />
+                          <span>آدرس وب‌هوک ربات بله روی هاست (Bale Webhook URL)</span>
+                        </label>
+                        <span className="text-[10px] bg-emerald-200/80 text-emerald-900 font-bold px-2 py-0.5 rounded-full shrink-0">
+                          مبتنی بر PHP هاست
+                        </span>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <input
+                          type="text"
+                          dir="ltr"
+                          value={formData.baleWebhookUrl || (formData.panelBaseUrl ? `${formData.panelBaseUrl.replace(/\/+$/, '')}/api/bale-webhook.php` : `${window.location.origin}/api/bale-webhook.php`)}
+                          onChange={(e) => updateField({ baleWebhookUrl: e.target.value })}
+                          placeholder="https://yourdomain.com/api/bale-webhook.php"
+                          className="w-full sm:flex-1 min-w-0 px-3 py-2 border border-emerald-300 rounded-xl text-xs font-mono text-left bg-white focus:outline-hidden focus:border-emerald-600 font-bold"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const origin = formData.panelBaseUrl ? formData.panelBaseUrl.replace(/\/+$/, '') : window.location.origin;
+                            updateField({ baleWebhookUrl: `${origin}/api/bale-webhook.php` });
+                            showToast('آدرس پیش‌فرض فایل PHP وبهوک هاست قرار داده شد.', 'info');
+                          }}
+                          className="w-full sm:w-auto px-3 py-2 sm:py-1.5 bg-white border border-emerald-300 hover:bg-emerald-100/70 text-emerald-900 rounded-xl text-[11px] font-bold transition shrink-0 cursor-pointer text-center justify-center flex items-center"
+                          title="تنظیم خودکار آدرس پیش‌فرض فایل PHP هاست"
+                        >
+                          پیش‌فرض هاست
+                        </button>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1 border-t border-emerald-200/60">
+                        <p className="text-[10px] text-emerald-800 leading-relaxed max-w-sm break-words">
+                          💡 ساختار وبهوک PHP هاست: <code className="bg-white/90 px-1.5 py-0.5 rounded font-mono font-bold text-emerald-950">/api/bale-webhook.php</code> (پشتیبانی کامل از دکمه‌های شیشه‌ای، منوی کیبورد و صدور فاکتور کیف پول).
+                        </p>
+                        <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
+                          <button
+                            type="button"
+                            onClick={() => handleWebhookAction('bale', 'set')}
+                            disabled={webhookLoading !== null}
+                            className="flex-1 sm:flex-initial justify-center px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-[11px] font-bold transition flex items-center gap-1 cursor-pointer shadow-xs"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                            <span>{webhookLoading === 'bale-set' ? 'در حال ثبت...' : 'ثبت وب‌هوک در بله'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleWebhookAction('bale', 'info')}
+                            disabled={webhookLoading !== null}
+                            className="flex-1 sm:flex-initial justify-center px-2.5 py-1.5 bg-white border border-emerald-300 hover:bg-emerald-100 text-emerald-900 rounded-xl text-[11px] font-bold transition cursor-pointer"
+                          >
+                            <span>{webhookLoading === 'bale-info' ? 'استعلام...' : 'وضعیت'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
                   </div>
 
                   {/* Customer Bot Test Results Box */}
                   {customerBotTestResult && (
                     <div className={`p-3.5 rounded-xl border text-xs ${customerBotTestResult.ok ? 'bg-emerald-50 border-emerald-300 text-emerald-950' : 'bg-rose-50 border-rose-300 text-rose-950'}`}>
-                      <div className="flex items-center justify-between font-bold pb-1 mb-1 border-b border-current/15">
-                        <span className="flex items-center gap-1.5">
-                          {customerBotTestResult.ok ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <AlertCircle className="w-4 h-4 text-rose-600" />}
-                          <span>نتیجه استعلام وضعیت ربات مشتری</span>
+                      <div className="flex items-center justify-between font-bold pb-1 mb-1 border-b border-current/15 gap-2">
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          {customerBotTestResult.ok ? <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" /> : <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />}
+                          <span className="truncate">نتیجه استعلام وضعیت ربات مشتری</span>
                         </span>
-                        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-white border">
+                        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-white border shrink-0">
                           @{customerBotTestResult.botInfo?.username || 'bot'}
                         </span>
                       </div>
-                      <p className="text-[11px]">{customerBotTestResult.message}</p>
+                      <p className="text-[11px] break-words">{customerBotTestResult.message}</p>
+                      {customerBotTestResult && !customerBotTestResult.ok && /401|unauthorized/i.test(customerBotTestResult.message || '') && (
+                        <div className="mt-2 p-2.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-950 text-[11px] leading-relaxed break-words">
+                          ⚠️ <strong>توکن ربات منقضی شده است:</strong> در پیام‌رسان بله به <strong>@BotFather</strong> مراجعه نمایید، با دستور <code className="bg-white px-1 py-0.5 rounded font-mono font-bold">/token</code> توکن جدید ربات را دریافت و در کادر توکن بالا قرار دهید.
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
               </div>
 
-              <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+              <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <a
                   href={`https://ble.ir/${(formData.customerBotUsername || formData.botUsername || 'Onivalbot').replace('@', '')}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-xs font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1"
+                  className="text-xs font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1 w-full sm:w-auto"
                 >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  <span>صفحه چت ربات مشتری در بله</span>
+                  <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                  <span className="break-all">صفحه چت ربات مشتری در بله</span>
                 </a>
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
                   <button
                     type="button"
                     onClick={handleTestCustomerBot}
                     disabled={isTestingCustomerBot}
-                    className="px-3 py-2 rounded-xl bg-emerald-100 hover:bg-emerald-200 text-emerald-900 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                    className="w-full sm:w-auto justify-center px-3 py-2 rounded-xl bg-emerald-100 hover:bg-emerald-200 text-emerald-900 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
                   >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isTestingCustomerBot ? 'animate-spin' : ''}`} />
+                    <RefreshCw className={`w-3.5 h-3.5 shrink-0 ${isTestingCustomerBot ? 'animate-spin' : ''}`} />
                     <span>تست اتصال ربات مشتری</span>
                   </button>
                   <button
                     type="button"
                     onClick={handleTestSendInvoice}
                     disabled={isSendingInvoiceTest}
-                    className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                    className="w-full sm:w-auto justify-center px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
                   >
-                    <Send className={`w-3.5 h-3.5 ${isSendingInvoiceTest ? 'animate-pulse' : ''}`} />
+                    <Send className={`w-3.5 h-3.5 shrink-0 ${isSendingInvoiceTest ? 'animate-pulse' : ''}`} />
                     <span>تست صدور فاکتور (sendInvoice)</span>
                   </button>
                 </div>
@@ -953,22 +1272,22 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
             </div>
 
             {/* Card 2: ربات ۲: ربات اختصاصی ادمین و مدیریت سفارش‌ها و فیش‌ها (Admin & Management Bot) */}
-            <div className="bg-white rounded-2xl border-2 border-indigo-400/80 shadow-md overflow-hidden flex flex-col justify-between">
+            <div className="w-full max-w-full min-w-0 bg-white rounded-2xl border-2 border-indigo-400/80 shadow-md overflow-hidden flex flex-col justify-between">
               <div>
-                <div className="p-5 bg-gradient-to-l from-indigo-100/90 via-indigo-50 to-white border-b border-indigo-100 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-11 h-11 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-bold shadow-md shadow-indigo-600/30">
+                <div className="p-4 sm:p-5 bg-gradient-to-l from-indigo-100/90 via-indigo-50 to-white border-b border-indigo-100 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div className="w-11 h-11 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-bold shadow-md shadow-indigo-600/30 shrink-0">
                       <ShieldCheck className="w-6 h-6" />
                     </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-indigo-700 text-white shadow-xs">ربات ۲</span>
-                        <h3 className="text-sm font-black text-slate-900">ربات ادمین و مدیریت سفارش‌ها (@{(formData.adminBotUsername || 'OnivalAdminBot').replace('@', '')})</h3>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-indigo-700 text-white shadow-xs shrink-0">ربات ۲</span>
+                        <h3 className="text-sm font-black text-slate-900 break-words">ربات ادمین و مدیریت سفارش‌ها (@{(formData.adminBotUsername || 'OnivalAdminBot').replace('@', '')})</h3>
                       </div>
-                      <p className="text-[11px] text-indigo-800 font-medium">ساید ادمین: ارسال فوری فیش‌ها، گزارش سفارشات جدید، اعلان پرداخت‌ها و تایید سفارش</p>
+                      <p className="text-[11px] text-indigo-800 font-medium break-words mt-0.5">ساید ادمین: ارسال فوری فیش‌ها، گزارش سفارشات جدید، اعلان پرداخت‌ها و تایید سفارش</p>
                     </div>
                   </div>
-                  <label className="inline-flex items-center gap-2 cursor-pointer bg-white px-3 py-1.5 rounded-xl border border-indigo-200 shadow-2xs">
+                  <label className="inline-flex items-center gap-2 cursor-pointer bg-white px-3 py-1.5 rounded-xl border border-indigo-200 shadow-2xs shrink-0">
                     <span className="text-xs font-black text-slate-800">{formData.adminBotEnabled !== false ? 'فعال' : 'غیرفعال'}</span>
                     <input
                       type="checkbox"
@@ -979,22 +1298,22 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                   </label>
                 </div>
 
-                <div className="p-5 space-y-4">
+                <div className="p-4 sm:p-5 space-y-4">
                   {/* Notice: Exclusive to admin */}
-                  <div className="bg-indigo-50/70 border border-indigo-200/90 rounded-xl p-3 text-xs text-indigo-950 flex items-center gap-2">
-                    <Bell className="w-4 h-4 text-indigo-600 shrink-0" />
-                    <span>تمامی اعلان‌های سفارشات جدید، تصاویر فیش‌های واریزی کارت‌به‌کارت و پیام‌های مشتری مستقیماً توسط این ربات به پیوی مدیر فرستاده می‌شوند.</span>
+                  <div className="bg-indigo-50/70 border border-indigo-200/90 rounded-xl p-3 text-xs text-indigo-950 flex items-start sm:items-center gap-2">
+                    <Bell className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5 sm:mt-0" />
+                    <span className="break-words">تمامی اعلان‌های سفارشات جدید، تصاویر فیش‌های واریزی کارت‌به‌کارت و پیام‌های مشتری مستقیماً توسط این ربات به پیوی مدیر فرستاده می‌شوند.</span>
                   </div>
 
                   {/* Admin Bot Token */}
                   <div>
-                    <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-1.5 mb-1.5">
                       <label className="text-xs font-bold text-slate-700">توکن بازوی اختصاصی ادمین (از @BotFather)</label>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 shrink-0">
                         <button
                           type="button"
                           onClick={() => setShowAdminBotToken(!showAdminBotToken)}
-                          className="text-[11px] text-slate-500 hover:text-slate-800 flex items-center gap-1"
+                          className="text-[11px] text-slate-500 hover:text-slate-800 flex items-center gap-1 cursor-pointer"
                         >
                           {showAdminBotToken ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                           <span>{showAdminBotToken ? 'مخفی' : 'نمایش'}</span>
@@ -1002,7 +1321,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                         <button
                           type="button"
                           onClick={() => handleCopy(formData.adminBotToken || formData.botToken, 'adminBotToken')}
-                          className="text-[11px] text-indigo-600 hover:text-indigo-700 flex items-center gap-1 font-semibold"
+                          className="text-[11px] text-indigo-600 hover:text-indigo-700 flex items-center gap-1 font-semibold cursor-pointer"
                         >
                           {copiedKey === 'adminBotToken' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                           <span>{copiedKey === 'adminBotToken' ? 'کپی شد' : 'کپی'}</span>
@@ -1075,42 +1394,87 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                     </div>
                   </div>
 
+                  {/* Admin Bot Webhook Configuration Box for Host */}
+                  <div className="p-3.5 bg-indigo-50/80 border border-indigo-200/90 rounded-2xl space-y-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-1.5">
+                      <label className="text-xs font-black text-indigo-950 flex items-center gap-1.5">
+                        <Webhook className="w-4 h-4 text-indigo-700 shrink-0" />
+                        <span>آدرس وب‌هوک ربات ادمین روی هاست (Admin Webhook URL)</span>
+                      </label>
+                      <span className="text-[10px] bg-indigo-200/70 text-indigo-950 font-bold px-2 py-0.5 rounded-full shrink-0">
+                        مبتنی بر PHP هاست
+                      </span>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        type="text"
+                        dir="ltr"
+                        value={formData.baleAdminWebhookUrl || (formData.panelBaseUrl ? `${formData.panelBaseUrl.replace(/\/+$/, '')}/api/bale-webhook.php?bot=admin` : `${window.location.origin}/api/bale-webhook.php?bot=admin`)}
+                        onChange={(e) => updateField({ baleAdminWebhookUrl: e.target.value })}
+                        placeholder="https://yourdomain.com/api/bale-webhook.php?bot=admin"
+                        className="w-full sm:flex-1 min-w-0 px-3 py-2 border border-indigo-300 rounded-xl text-xs font-mono text-left bg-white focus:outline-hidden focus:border-indigo-600 font-bold"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const origin = formData.panelBaseUrl ? formData.panelBaseUrl.replace(/\/+$/, '') : window.location.origin;
+                          updateField({ baleAdminWebhookUrl: `${origin}/api/bale-webhook.php?bot=admin` });
+                          showToast('آدرس پیش‌فرض وب‌هوک ربات ادمین روی هاست تنظیم شد.', 'info');
+                        }}
+                        className="w-full sm:w-auto px-3 py-2 sm:py-1.5 bg-white border border-indigo-300 hover:bg-indigo-100 text-indigo-950 rounded-xl text-[11px] font-bold transition shrink-0 cursor-pointer text-center justify-center flex items-center"
+                        title="تنظیم خودکار آدرس پیش‌فرض وبهوک ربات ادمین روی هاست"
+                      >
+                        پیش‌فرض هاست
+                      </button>
+                    </div>
+
+                    <p className="text-[10px] text-indigo-800 leading-relaxed break-words">
+                      💡 این وبهوک دستورات مدیریتی نظیر <code className="bg-white/90 px-1 py-0.5 rounded font-mono font-bold text-indigo-950">/orders</code> و تسویه آنی سفارشات <code className="bg-white/90 px-1 py-0.5 rounded font-mono font-bold text-indigo-950">/confirm_کد</code> را روی هاست دریافت و بلافاصله پردازش می‌کند.
+                    </p>
+                  </div>
+
                   {/* Admin Bot Test Results Box */}
                   {adminBotTestResult && (
                     <div className={`p-3.5 rounded-xl border text-xs ${adminBotTestResult.ok ? 'bg-emerald-50 border-emerald-300 text-emerald-950' : 'bg-rose-50 border-rose-300 text-rose-950'}`}>
-                      <div className="flex items-center justify-between font-bold pb-1 mb-1 border-b border-current/15">
-                        <span className="flex items-center gap-1.5">
-                          {adminBotTestResult.ok ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <AlertCircle className="w-4 h-4 text-rose-600" />}
-                          <span>نتیجه تست ارسال پیام به ادمین</span>
+                      <div className="flex items-center justify-between font-bold pb-1 mb-1 border-b border-current/15 gap-2">
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          {adminBotTestResult.ok ? <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" /> : <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />}
+                          <span className="truncate">نتیجه تست ارسال پیام به ادمین</span>
                         </span>
-                        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-white border">
+                        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-white border shrink-0">
                           چت: {formData.adminChatId}
                         </span>
                       </div>
-                      <p className="text-[11px]">{adminBotTestResult.message}</p>
+                      <p className="text-[11px] break-words">{adminBotTestResult.message}</p>
+                      {adminBotTestResult && !adminBotTestResult.ok && /401|unauthorized/i.test(adminBotTestResult.message || '') && (
+                        <div className="mt-2 p-2.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-950 text-[11px] leading-relaxed break-words">
+                          ⚠️ <strong>توکن ربات منقضی شده است:</strong> در پیام‌رسان بله به <strong>@BotFather</strong> مراجعه نمایید، با دستور <code className="bg-white px-1 py-0.5 rounded font-mono font-bold">/token</code> توکن جدید را دریافت و در کادر توکن قرار دهید.
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
               </div>
 
-              <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+              <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <a
                   href={`https://ble.ir/${(formData.adminBotUsername || 'OnivalAdminBot').replace('@', '')}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-xs font-bold text-indigo-700 hover:text-indigo-800 flex items-center gap-1"
+                  className="text-xs font-bold text-indigo-700 hover:text-indigo-800 flex items-center gap-1 w-full sm:w-auto"
                 >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  <span>صفحه چت ربات ادمین در بله</span>
+                  <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                  <span className="break-all">صفحه چت ربات ادمین در بله</span>
                 </a>
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
                   <button
                     type="button"
                     onClick={handleTestAdminBot}
                     disabled={isTestingAdminBot}
-                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black shadow-md transition flex items-center gap-2 cursor-pointer"
+                    className="w-full sm:w-auto justify-center px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black shadow-md transition flex items-center gap-2 cursor-pointer"
                   >
-                    <Send className={`w-3.5 h-3.5 ${isTestingAdminBot ? 'animate-bounce' : ''}`} />
+                    <Send className={`w-3.5 h-3.5 shrink-0 ${isTestingAdminBot ? 'animate-bounce' : ''}`} />
                     <span>{isTestingAdminBot ? 'در حال ارسال به ادمین...' : 'ارسال پیام تست به اکانت ادمین'}</span>
                   </button>
                 </div>
@@ -1118,19 +1482,19 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
             </div>
 
             {/* Telegram Bot Configuration Card */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden flex flex-col justify-between">
+            <div className="col-span-1 lg:col-span-2 w-full max-w-full bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden flex flex-col justify-between min-w-0">
               <div>
-                <div className="p-5 bg-gradient-to-l from-sky-50/80 to-white border-b border-slate-100 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-sky-600 text-white flex items-center justify-center font-bold shadow-sm">
+                <div className="p-5 bg-gradient-to-l from-sky-50/80 to-white border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-sky-600 text-white flex items-center justify-center font-bold shadow-sm shrink-0">
                       <Send className="w-5 h-5" />
                     </div>
-                    <div>
-                      <h3 className="text-sm font-black text-slate-800">پیکربندی ربات تلگرام (Telegram Bot)</h3>
-                      <p className="text-[11px] text-slate-500">ارسال همزمان اعلان سفارشات، فیش‌های واریزی و تیکت‌های پشتیبانی در تلگرام</p>
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-black text-slate-800 break-words">پیکربندی ربات تلگرام (Telegram Bot)</h3>
+                      <p className="text-[11px] text-slate-500 break-words">ارسال همزمان اعلان سفارشات، فیش‌های واریزی و تیکت‌های پشتیبانی در تلگرام</p>
                     </div>
                   </div>
-                  <label className="inline-flex items-center gap-2 cursor-pointer">
+                  <label className="inline-flex items-center gap-2 cursor-pointer bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 shrink-0">
                     <span className="text-xs font-bold text-slate-700">{formData.telegramBotEnabled ? 'فعال' : 'غیرفعال'}</span>
                     <input
                       type="checkbox"
@@ -1144,13 +1508,13 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                 <div className="p-5 space-y-4">
                   {/* Telegram Token */}
                   <div>
-                    <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
                       <label className="text-xs font-bold text-slate-700">توکن ربات تلگرام (Telegram Bot Token - از @BotFather)</label>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 shrink-0">
                         <button
                           type="button"
                           onClick={() => setShowTelegramToken(!showTelegramToken)}
-                          className="text-[11px] text-slate-500 hover:text-slate-800 flex items-center gap-1"
+                          className="text-[11px] text-slate-500 hover:text-slate-800 flex items-center gap-1 cursor-pointer"
                         >
                           {showTelegramToken ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                           <span>{showTelegramToken ? 'مخفی' : 'نمایش'}</span>
@@ -1158,7 +1522,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                         <button
                           type="button"
                           onClick={() => handleCopy(formData.telegramBotToken || '', 'tgToken')}
-                          className="text-[11px] text-sky-600 hover:text-sky-700 flex items-center gap-1 font-semibold"
+                          className="text-[11px] text-sky-600 hover:text-sky-700 flex items-center gap-1 font-semibold cursor-pointer"
                         >
                           {copiedKey === 'tgToken' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                           <span>{copiedKey === 'tgToken' ? 'کپی شد' : 'کپی'}</span>
@@ -1212,48 +1576,72 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1.5">آدرس وب‌هوک تلگرام</label>
-                      <input
-                        type="text"
-                        dir="ltr"
-                        value={formData.telegramWebhookUrl || ''}
-                        onChange={(e) => updateField({ telegramWebhookUrl: e.target.value })}
-                        className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-xs font-mono text-left focus:outline-hidden focus:border-sky-500"
-                      />
+                      <div className="flex flex-wrap items-center justify-between gap-1 mb-1.5">
+                        <label className="text-xs font-bold text-slate-700">آدرس وب‌هوک تلگرام روی هاست</label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const origin = formData.panelBaseUrl ? formData.panelBaseUrl.replace(/\/+$/, '') : window.location.origin;
+                            updateField({ telegramWebhookUrl: `${origin}/api/telegram-webhook.php` });
+                            showToast('آدرس پیش‌فرض وب‌هوک PHP تلگرام تنظیم شد.', 'info');
+                          }}
+                          className="text-[10px] text-sky-700 font-bold hover:underline cursor-pointer"
+                        >
+                          تنظیم به پیش‌فرض PHP هاست
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap sm:flex-nowrap gap-2">
+                        <input
+                          type="text"
+                          dir="ltr"
+                          value={formData.telegramWebhookUrl || ''}
+                          onChange={(e) => updateField({ telegramWebhookUrl: e.target.value })}
+                          placeholder="https://yourdomain.com/api/telegram-webhook.php"
+                          className="flex-1 min-w-0 px-3.5 py-2.5 border border-slate-200 rounded-xl text-xs font-mono text-left focus:outline-hidden focus:border-sky-500 font-bold"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleWebhookAction('telegram', 'set')}
+                          disabled={webhookLoading !== null}
+                          className="px-3 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold transition cursor-pointer shrink-0"
+                        >
+                          {webhookLoading === 'telegram-set' ? 'در حال ثبت...' : 'ثبت وب‌هوک'}
+                        </button>
+                      </div>
                     </div>
                   </div>
 
                   {/* Quick Test Result Box if tested */}
                   {telegramDiagnostics && (
                     <div className={`p-3.5 rounded-xl border text-xs ${telegramDiagnostics.success ? 'bg-sky-50/70 border-sky-200 text-sky-900' : 'bg-rose-50 border-rose-200 text-rose-900'}`}>
-                      <div className="flex items-center justify-between font-bold mb-1">
+                      <div className="flex flex-wrap items-center justify-between gap-1 font-bold mb-1">
                         <span>نتیجه تست اتصال تلگرام ({telegramDiagnostics.latencyMs}ms):</span>
                         <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-white border">
                           {telegramDiagnostics.mode === 'live_api' ? 'متصل به سرور واقعی تلگرام' : 'تایید ساختار و شبیه‌ساز'}
                         </span>
                       </div>
-                      <p className="text-[11px] leading-relaxed">{telegramDiagnostics.message}</p>
+                      <p className="text-[11px] leading-relaxed break-words">{telegramDiagnostics.message}</p>
                     </div>
                   )}
                 </div>
               </div>
 
-              <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+              <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
                 <a
                   href={`https://t.me/${(formData.telegramBotUsername || 'onival_shop_bot').replace('@', '')}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-xs font-bold text-sky-700 hover:text-sky-800 flex items-center gap-1"
+                  className="text-xs font-bold text-sky-700 hover:text-sky-800 flex items-center gap-1 shrink-0"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
                   <span>باز کردن ربات در تلگرام</span>
                 </a>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
                     onClick={() => handleSaveAll()}
                     disabled={isSaving}
-                    className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                    className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shrink-0"
                   >
                     <CheckCircle2 className="w-3.5 h-3.5 text-sky-400" />
                     <span>{isSaving ? 'در حال ذخیره...' : 'ذخیره توکن و تنظیمات تلگرام'}</span>
@@ -1262,7 +1650,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                     type="button"
                     onClick={() => handleTestBotConnection('telegram')}
                     disabled={testingPlatform === 'telegram'}
-                    className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                    className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shrink-0"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${testingPlatform === 'telegram' ? 'animate-spin' : ''}`} />
                     <span>{testingPlatform === 'telegram' ? 'در حال استعلام...' : 'تست آنلاین اتصال تلگرام'}</span>
@@ -2133,6 +2521,72 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
               title="ترمینال و لاگ باکس فنی ربات بله"
               subtitle="نمایش بلادرنگ رویدادها، دیتای خام JSON، استخراج فاکتور و بررسی اتصال"
             />
+          </div>
+        </div>
+      )}
+
+      {/* Modal for viewing and copying PHP bot scripts */}
+      {phpModal?.open && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/90">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold">
+                  <Code className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white">{phpModal.title}</h3>
+                  <p className="text-[11px] text-slate-400 font-mono mt-0.5">مسیر پیشنهادی آپلود: public_html/{phpModal.filename}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleDownloadPhp(phpModal.filename)}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>دانلود فایل</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleCopyPhpCode(phpModal.filename)}
+                  className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>کپی کدها</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPhpModal(null)}
+                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition cursor-pointer"
+                >
+                  بستن
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4 flex-1 overflow-auto bg-slate-950">
+              <pre dir="ltr" className="font-mono text-xs text-sky-300 leading-relaxed whitespace-pre selection:bg-indigo-500 selection:text-white">
+                {phpModal.code}
+              </pre>
+            </div>
+
+            <div className="p-4 border-t border-slate-800 bg-slate-900 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-300">
+              <span className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                <span>سازگار با PHP 7.4 تا 8.3 و هاست‌های لایت‌اسپید / آپاچی سی‌پنل</span>
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPhpModal(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition cursor-pointer"
+                >
+                  متوجه شدم، بستن پنجره
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

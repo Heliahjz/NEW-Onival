@@ -483,6 +483,13 @@ export default function App() {
     setViewMode('storefront');
   };
 
+  const handleLogout = () => {
+    clearAdminSessionToken();
+    setIsAdminAuthenticated(false);
+    setActiveTab('dashboard');
+    switchToStorefront();
+  };
+
   const handleDirectAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setAdminLoginError('');
@@ -509,40 +516,20 @@ export default function App() {
         setAdminLoginPass('');
         await fetchData(true);
       } else {
-        // بررسی تکمیلی در حالت حافظه محلی در صورتی که پاسخ سرور موفقیت‌آمیز نبود
-        const local = getCachedLocalState();
-        const creds = local.adminCredentials || DEFAULT_ADMIN_CREDENTIALS;
-        const isUserMatch =
-          u.toLowerCase() === creds.username.toLowerCase() ||
-          u.toLowerCase() === creds.email.toLowerCase() ||
-          u.toLowerCase() === 'admin' ||
-          u.toLowerCase() === 'admin@onival.com' ||
-          u.toLowerCase() === 'admin@onival.ir' ||
-          u.toLowerCase() === 'heltashop14@gmail.com';
-        const isPassMatch = p === creds.password || p === 'admin';
-        if (isUserMatch && isPassMatch) {
-          setAdminSessionToken(`onival_admin_local_${Date.now()}`);
-          setIsAdminAuthenticated(true);
-          setAdminLoginUser('');
-          setAdminLoginPass('');
-          await fetchData(true);
-        } else {
-          setAdminLoginError(data.error || 'نام کاربری یا رمز عبور مدیریت اشتباه است.');
-        }
+        setAdminLoginError(data.error || 'نام کاربری یا رمز عبور مدیریت اشتباه است.');
       }
     } catch {
+      // Offline fallback only when network connection fails completely
       const local = getCachedLocalState();
       const creds = local.adminCredentials || DEFAULT_ADMIN_CREDENTIALS;
       const isUserMatch =
-        u.toLowerCase() === creds.username.toLowerCase() ||
-        u.toLowerCase() === creds.email.toLowerCase() ||
-        u.toLowerCase() === 'admin' ||
-        u.toLowerCase() === 'admin@onival.com' ||
-        u.toLowerCase() === 'admin@onival.ir' ||
-        u.toLowerCase() === 'heltashop14@gmail.com';
-      const isPassMatch = p === creds.password || p === 'admin';
+        u.toLowerCase() === (creds.username || '').toLowerCase() ||
+        u.toLowerCase() === (creds.email || '').toLowerCase();
+      const isPassMatch = Boolean(creds.password) && p === creds.password;
+
       if (isUserMatch && isPassMatch) {
-        setAdminSessionToken(`onival_admin_local_${Date.now()}`);
+        const token = `local_session_${btoa(`${creds.username}:${Date.now()}`).replace(/=/g, '')}`;
+        setAdminSessionToken(token);
         setIsAdminAuthenticated(true);
         setAdminLoginUser('');
         setAdminLoginPass('');
@@ -673,6 +660,7 @@ export default function App() {
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
         onViewStorefront={switchToStorefront}
+        onLogout={handleLogout}
         brandName={siteContent?.brandName}
         brandEnglishName={siteContent?.brandEnglishName}
         siteLogo={siteContent?.siteLogo}

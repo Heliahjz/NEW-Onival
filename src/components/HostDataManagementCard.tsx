@@ -14,7 +14,9 @@ import {
   HelpCircle,
   Layers,
   Sparkles,
-  Info
+  Info,
+  Bot,
+  Download
 } from 'lucide-react';
 import {
   runManualSeedDatabase,
@@ -399,6 +401,24 @@ PANEL_BASE_URL=https://yourdomain.com`;
                 className="hidden"
               />
             </label>
+
+            <a
+              href="/bale-bot.php"
+              download="bale-bot.php"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition shadow-xs"
+            >
+              <Bot className="w-4 h-4 text-emerald-200" />
+              <span>دانلود فایل ربات بله (bale-bot.php برای public_html)</span>
+            </a>
+
+            <a
+              href="/telegram-bot.php"
+              download="telegram-bot.php"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs transition shadow-xs"
+            >
+              <Download className="w-4 h-4 text-sky-200" />
+              <span>دانلود فایل ربات تلگرام (telegram-bot.php برای public_html)</span>
+            </a>
           </div>
         </div>
 
@@ -429,7 +449,7 @@ PANEL_BASE_URL=https://yourdomain.com`;
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
               <div className="bg-white p-3.5 rounded-xl border border-indigo-100 shadow-2xs">
                 <div className="font-bold text-slate-800 mb-1 flex items-center gap-1.5">
                   <span className="w-5 h-5 rounded-full bg-indigo-600 text-white text-[11px] flex items-center justify-center font-bold">۱</span>
@@ -443,10 +463,10 @@ PANEL_BASE_URL=https://yourdomain.com`;
               <div className="bg-white p-3.5 rounded-xl border border-indigo-100 shadow-2xs">
                 <div className="font-bold text-slate-800 mb-1 flex items-center gap-1.5">
                   <span className="w-5 h-5 rounded-full bg-indigo-600 text-white text-[11px] flex items-center justify-center font-bold">۲</span>
-                  <span>تنظیم Setup Node.js App در cPanel</span>
+                  <span>پیکربندی Node.js یا PHP</span>
                 </div>
                 <p className="text-slate-600 text-[11px] leading-relaxed">
-                  نسخه Node.js را روی 18 یا بالاتر بگذارید. فیلد Application startup file را روی <code className="font-mono text-indigo-700">dist/server.cjs</code> یا <code className="font-mono text-indigo-700">server.ts</code> قرار دهید.
+                  نسخه Node.js را روی 18 یا بالاتر بگذارید یا با وب‌هوک‌های مستقل PHP پروژه را روی هاست‌های اشتراکی استاندارد مستقر نمایید.
                 </p>
               </div>
 
@@ -456,7 +476,17 @@ PANEL_BASE_URL=https://yourdomain.com`;
                   <span>اجرای بیلد و راه‌اندازی</span>
                 </div>
                 <p className="text-slate-600 text-[11px] leading-relaxed">
-                  با دستور <code className="font-mono text-indigo-700">npm run build</code> پروژه کامپایل می‌شود و با دکمه Restart در پنل cPanel سایت فعال می‌گردد.
+                  با دستور <code className="font-mono text-indigo-700">npm run build</code> پروژه کامپایل و فایل‌های آماده در پوشه dist قرار می‌گیرند.
+                </p>
+              </div>
+
+              <div className="bg-white p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/50 shadow-2xs">
+                <div className="font-bold text-emerald-950 mb-1 flex items-center gap-1.5">
+                  <span className="w-5 h-5 rounded-full bg-emerald-600 text-white text-[11px] flex items-center justify-center font-bold">۴</span>
+                  <span>وب‌هوک PHP ربات‌ها</span>
+                </div>
+                <p className="text-emerald-900 text-[11px] leading-relaxed">
+                  فایل‌های <code className="font-mono font-bold text-emerald-800">/api/bale-webhook.php</code> و <code className="font-mono font-bold text-emerald-800">/api/telegram-webhook.php</code> بدون نیاز به ماندن Node همیشه فعال هستند.
                 </p>
               </div>
             </div>

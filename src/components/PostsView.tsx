@@ -78,6 +78,13 @@ export const PostsView: React.FC<PostsViewProps> = ({
   const [robotsNoIndex, setRobotsNoIndex] = useState(false);
   const [robotsNoFollow, setRobotsNoFollow] = useState(false);
 
+  // WordPress-style in-article image inserter state
+  const [showImageInsertModal, setShowImageInsertModal] = useState(false);
+  const [insertImageUrl, setInsertImageUrl] = useState('');
+  const [insertImageCaption, setInsertImageCaption] = useState('');
+  const [insertImageAlign, setInsertImageAlign] = useState<'center' | 'right' | 'left' | 'full'>('center');
+  const [cursorPosition, setCursorPosition] = useState<number | null>(null);
+
   const openAddModal = () => {
     setEditingPost(null);
     setActiveTab('content');
@@ -162,6 +169,40 @@ export const PostsView: React.FC<PostsViewProps> = ({
     } else {
       setVideoType('direct');
     }
+  };
+
+  const handleInsertImageIntoContent = () => {
+    if (!insertImageUrl.trim()) {
+      alert('لطفاً آدرس تصویر یا فایلی را برای درج انتخاب نمایید.');
+      return;
+    }
+    const cleanUrl = insertImageUrl.trim();
+    const cleanCaption = insertImageCaption.trim();
+    const tag = `\n\n[IMAGE: ${cleanUrl} | ${cleanCaption} | ${insertImageAlign}]\n\n`;
+
+    if (cursorPosition !== null && cursorPosition >= 0) {
+      const before = content.slice(0, cursorPosition);
+      const after = content.slice(cursorPosition);
+      setContent(before + tag + after);
+    } else {
+      setContent((prev) => (prev ? `${prev}${tag}` : tag.trim()));
+    }
+
+    setInsertImageUrl('');
+    setInsertImageCaption('');
+    setShowImageInsertModal(false);
+  };
+
+  const handleInArticleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setInsertImageUrl(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -641,17 +682,156 @@ export const PostsView: React.FC<PostsViewProps> = ({
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                      متن کامل مقاله *
-                    </label>
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <label className="text-xs font-semibold text-slate-700">
+                        متن کامل مقاله *
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setInsertImageUrl(PRESET_POST_IMAGES[0].url);
+                          setInsertImageCaption('');
+                          setInsertImageAlign('center');
+                          setShowImageInsertModal(true);
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300/80 text-xs font-bold transition shadow-2xs cursor-pointer"
+                      >
+                        <ImageIcon className="w-3.5 h-3.5 text-amber-600" />
+                        <span>📸 افزودن تصویر بین متن‌ها (مانند وردپرس)</span>
+                      </button>
+                    </div>
+
+                    {/* WordPress-style Image Insert Tool Modal */}
+                    {showImageInsertModal && (
+                      <div className="p-4 bg-amber-50/70 border-2 border-amber-300 rounded-2xl space-y-3 animate-fadeIn">
+                        <div className="flex items-center justify-between pb-2 border-b border-amber-200">
+                          <span className="text-xs font-black text-amber-950 flex items-center gap-1.5">
+                            <ImageIcon className="w-4 h-4 text-amber-600" />
+                            <span>تنظیم و درج عکس در میان بندهای مقاله</span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setShowImageInsertModal(false)}
+                            className="text-xs text-stone-500 hover:text-stone-800 font-bold"
+                          >
+                            بستن ×
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div className="space-y-1.5">
+                            <label className="text-[11px] font-bold text-slate-700 block">لینک مستقیم تصویر یا انتخاب فایل</label>
+                            <input
+                              type="text"
+                              dir="ltr"
+                              value={insertImageUrl}
+                              onChange={(e) => setInsertImageUrl(e.target.value)}
+                              placeholder="https://images.unsplash.com/... یا عکس آپلود شده"
+                              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono"
+                            />
+                            <label className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white hover:bg-amber-100 border border-amber-300 rounded-lg text-[11px] font-bold text-amber-900 cursor-pointer transition">
+                              <Upload className="w-3 h-3 text-amber-600" />
+                              <span>آپلود تصویر جدید از کامپیوتر</span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                onChange={handleInArticleUpload}
+                                className="hidden"
+                              />
+                            </label>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <label className="text-[11px] font-bold text-slate-700 block">زیرنویس و توضیح تصویر (Caption)</label>
+                            <input
+                              type="text"
+                              value={insertImageCaption}
+                              onChange={(e) => setInsertImageCaption(e.target.value)}
+                              placeholder="مثال: برداشت عسل طبیعی در مراتع سبلان"
+                              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs"
+                            />
+                            
+                            <div>
+                              <label className="text-[11px] font-bold text-slate-700 block mb-1">چیدمان عکس در بین نوشته‌ها (Alignment)</label>
+                              <div className="flex items-center gap-1 text-xs">
+                                {[
+                                  { id: 'center', label: 'وسط‌چین (استاندارد)' },
+                                  { id: 'right', label: 'سمت راست' },
+                                  { id: 'left', label: 'سمت چپ' },
+                                  { id: 'full', label: 'تمام‌عرض' }
+                                ].map((al) => (
+                                  <button
+                                    key={al.id}
+                                    type="button"
+                                    onClick={() => setInsertImageAlign(al.id as any)}
+                                    className={`px-2 py-1 rounded-lg font-bold text-[10px] transition cursor-pointer ${
+                                      insertImageAlign === al.id
+                                        ? 'bg-amber-600 text-white shadow-2xs'
+                                        : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                                    }`}
+                                  >
+                                    {al.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Quick Presets */}
+                        <div className="pt-2 border-t border-amber-200/80 flex flex-wrap items-center gap-2">
+                          <span className="text-[10px] font-bold text-amber-900">تصاویر پیشنهادی سریع:</span>
+                          {PRESET_POST_IMAGES.map((preset, pIdx) => (
+                            <button
+                              key={pIdx}
+                              type="button"
+                              onClick={() => {
+                                setInsertImageUrl(preset.url);
+                                setInsertImageCaption(preset.label);
+                              }}
+                              className="text-[10px] px-2 py-0.5 rounded-md bg-white border border-amber-300 text-amber-900 hover:bg-amber-100 font-bold transition"
+                            >
+                              {preset.label}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="flex justify-end gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setShowImageInsertModal(false)}
+                            className="px-3 py-1.5 rounded-xl bg-white border border-slate-300 text-slate-700 text-xs font-bold hover:bg-slate-50 cursor-pointer"
+                          >
+                            انصراف
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleInsertImageIntoContent}
+                            className="px-4 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-black shadow-sm transition flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span>درج عکس در مکان نشانگر متن</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                     <textarea
-                      rows={6}
+                      rows={8}
                       required
                       value={content}
+                      onSelect={(e) => {
+                        const target = e.target as HTMLTextAreaElement;
+                        setCursorPosition(target.selectionStart);
+                      }}
                       onChange={(e) => setContent(e.target.value)}
-                      className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm leading-relaxed"
+                      placeholder="متن کامل مقاله را بنویسید... می‌توانید با دکمه بالا در هر بخش که مایلید تصویر درج نمایید."
                     />
+                    <p className="text-[11px] text-slate-400">
+                      💡 راهنما: برای درج تصویر در وسط یا بین بندها، نشانگر را در خط مورد نظر قرار داده و دکمه «افزودن تصویر بین متن‌ها» را لمس کنید. تگ به‌صورت خودکار درج و در سایت به شکل عکس با زیرنویس نمایش داده می‌شود.
+                    </p>
                   </div>
                 </>
               ) : (

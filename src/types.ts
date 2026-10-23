@@ -374,9 +374,30 @@ export interface AdminCredentials {
   name: string;
 }
 
+export interface TopBanner {
+  id: string;
+  imageUrl: string;
+  title?: string;
+  subtitle?: string;
+  linkUrl?: string;
+  enabled: boolean;
+}
+
+export interface TopBannerSettings {
+  enabled: boolean;
+  intervalSeconds: number; // e.g. 4 or 5 seconds
+  autoRotate: boolean;
+  showDots: boolean;
+  showArrows: boolean;
+  banners: TopBanner[];
+}
+
 export interface SiteContent {
   brandName: string;
   brandEnglishName: string;
+  showHeroEnglishBadge?: boolean;
+  topBannerSettings?: TopBannerSettings;
+  topBanners?: TopBanner[];
   siteLogo?: string;
   siteLogoFit?: 'cover' | 'contain';
   siteLogoShape?: 'circle' | 'rounded' | 'free';

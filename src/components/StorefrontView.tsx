@@ -56,6 +56,8 @@ import {
 import { Product, ProductCategory, Post, ContactMessage, Order, OrderItem, ProductSize, SiteContent, PaymentConfig, TelegramConfig, BotActivityLog } from '../types';
 import { apiFetch, setAdminSessionToken, getCachedLocalState } from '../services/dataService';
 import { BotTechnicalLogBox } from './BotTechnicalLogBox';
+import { TopBannerCarousel } from './TopBannerCarousel';
+import { ArticleContentRenderer } from './ArticleContentRenderer';
 import {
   DEFAULT_PRODUCTS,
   DEFAULT_PRODUCT_CATEGORIES,
@@ -1350,40 +1352,21 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
         setAdminAuthError('');
         onBackToAdmin();
       } else {
-        const local = getCachedLocalState();
-        const creds = local.adminCredentials || DEFAULT_ADMIN_CREDENTIALS;
-        const isUserMatch =
-          u.toLowerCase() === creds.username.toLowerCase() ||
-          u.toLowerCase() === creds.email.toLowerCase() ||
-          u.toLowerCase() === 'admin' ||
-          u.toLowerCase() === 'admin@onival.com' ||
-          u.toLowerCase() === 'admin@onival.ir' ||
-          u.toLowerCase() === 'heltashop14@gmail.com';
-        const isPassMatch = p === creds.password || p === 'admin';
-        if (isUserMatch && isPassMatch) {
-          setAdminSessionToken(`onival_admin_local_${Date.now()}`);
-          setIsAdminAuthModalOpen(false);
-          setAdminUsernameInput('');
-          setAdminPasswordInput('');
-          setAdminAuthError('');
-          onBackToAdmin();
-        } else {
-          setAdminAuthError(data.error || 'نام کاربری یا رمز عبور مدیریت اشتباه است.');
-        }
+        // Respect the server's rejection (e.g., 401 Wrong password or 429 Rate limit)
+        setAdminAuthError(data.error || 'نام کاربری یا رمز عبور مدیریت اشتباه است.');
       }
     } catch {
+      // Offline fallback only when network fails completely
       const local = getCachedLocalState();
       const creds = local.adminCredentials || DEFAULT_ADMIN_CREDENTIALS;
       const isUserMatch =
-        u.toLowerCase() === creds.username.toLowerCase() ||
-        u.toLowerCase() === creds.email.toLowerCase() ||
-        u.toLowerCase() === 'admin' ||
-        u.toLowerCase() === 'admin@onival.com' ||
-        u.toLowerCase() === 'admin@onival.ir' ||
-        u.toLowerCase() === 'heltashop14@gmail.com';
-      const isPassMatch = p === creds.password || p === 'admin';
+        u.toLowerCase() === (creds.username || '').toLowerCase() ||
+        u.toLowerCase() === (creds.email || '').toLowerCase();
+      const isPassMatch = Boolean(creds.password) && p === creds.password;
+
       if (isUserMatch && isPassMatch) {
-        setAdminSessionToken(`onival_admin_local_${Date.now()}`);
+        const token = `local_session_${btoa(`${creds.username}:${Date.now()}`).replace(/=/g, '')}`;
+        setAdminSessionToken(token);
         setIsAdminAuthModalOpen(false);
         setAdminUsernameInput('');
         setAdminPasswordInput('');
@@ -1489,10 +1472,16 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                   e.preventDefault();
                   handleSelectPage('consultation');
                 }}
-                className={`transition pb-0.5 flex items-center gap-1 ${activePage === 'consultation' && !selectedProduct && !selectedPost ? 'text-stone-900 border-b-2 border-stone-900 font-extrabold' : 'hover:text-stone-900'}`}
+                className={`transition pb-0.5 font-black text-xs cursor-pointer select-none tracking-wide text-amber-800 hover:text-amber-900 hover:scale-105 ${
+                  activePage === 'consultation' && !selectedProduct && !selectedPost
+                    ? 'border-b-2 border-amber-600 text-amber-950 font-black'
+                    : ''
+                }`}
+                style={{
+                  textShadow: '0 1px 2px rgba(217, 119, 6, 0.45), 0 2px 8px rgba(245, 158, 11, 0.38), 0 0 14px rgba(251, 191, 36, 0.5)'
+                }}
               >
-                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                <span>{navigation.consultation || 'مشاوره تخصصی'}</span>
+                {navigation.consultation || 'مشاوره تخصصی'}
               </a>
             </li>
             <li>
@@ -1581,10 +1570,20 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
         </button>
         <button
           onClick={() => handleSelectPage('consultation')}
-          className={`flex flex-col items-center gap-1 ${activePage === 'consultation' && !selectedProduct && !selectedPost ? 'text-amber-600 font-black' : 'hover:text-stone-900'}`}
+          className={`flex flex-col items-center justify-center transition select-none py-1 px-1.5 ${
+            activePage === 'consultation' && !selectedProduct && !selectedPost
+              ? 'text-amber-900 font-black scale-105'
+              : 'text-amber-700 font-black hover:text-amber-900'
+          }`}
         >
-          <Sparkles className="w-4 h-4" />
-          <span>مشاوره</span>
+          <span 
+            className="text-[11px] font-black tracking-tight"
+            style={{
+              textShadow: '0 1px 2px rgba(217, 119, 6, 0.45), 0 2px 7px rgba(245, 158, 11, 0.35), 0 0 10px rgba(251, 191, 36, 0.45)'
+            }}
+          >
+            {navigation.consultation || 'مشاوره تخصصی'}
+          </span>
         </button>
         <button
           onClick={() => handleSelectPage('tracking')}
@@ -2268,8 +2267,8 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                 </div>
               )}
 
-              <div className="text-xs sm:text-sm text-stone-700 leading-relaxed p-4 sm:p-6 bg-stone-50 rounded-2xl border border-stone-100 whitespace-pre-line mb-6">
-                {selectedPost.content}
+              <div className="p-4 sm:p-6 bg-stone-50 rounded-2xl border border-stone-100 mb-6">
+                <ArticleContentRenderer content={selectedPost.content} />
               </div>
 
               <div className="flex justify-end">
@@ -2294,9 +2293,11 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                 <h1 className="text-3xl sm:text-4xl font-black text-stone-900 tracking-tight flex items-center justify-center gap-2 flex-wrap">
                   <span>{siteContent?.heroTitlePrefix || 'فروشگاه تخصصی'}</span>
                   <span className="text-amber-600">{brandName}</span>
-                  <span className="text-xs font-mono font-bold text-stone-400 border border-stone-200 px-2 py-0.5 rounded-md self-center">
-                    {brandEnglishName}
-                  </span>
+                  {(siteContent?.showHeroEnglishBadge ?? true) && (
+                    <span className="text-xs font-mono font-bold text-stone-400 border border-stone-200 px-2 py-0.5 rounded-md self-center">
+                      {brandEnglishName}
+                    </span>
+                  )}
                 </h1>
                 <p className="text-xs sm:text-sm text-stone-500 font-medium mt-2">
                   {siteContent?.heroSubtitle || brandDescription}
@@ -2320,9 +2321,11 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                       <h1 className="text-3xl sm:text-4xl font-black text-stone-900 tracking-tight flex items-center justify-center gap-2 flex-wrap">
                         <span>{sec.title || siteContent?.heroTitlePrefix || 'فروشگاه تخصصی'}</span>
                         <span className="text-amber-600">{brandName}</span>
-                        <span className="text-xs font-mono font-bold text-stone-400 border border-stone-200 px-2 py-0.5 rounded-md self-center">
-                          {brandEnglishName}
-                        </span>
+                        {(siteContent?.showHeroEnglishBadge ?? true) && (
+                          <span className="text-xs font-mono font-bold text-stone-400 border border-stone-200 px-2 py-0.5 rounded-md self-center">
+                            {brandEnglishName}
+                          </span>
+                        )}
                       </h1>
                       <p className="text-xs sm:text-sm text-stone-500 font-medium mt-2">
                         {sec.subtitle || siteContent?.heroSubtitle || brandDescription}
@@ -2336,71 +2339,97 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                   );
 
                 case 'special_offers':
-                  if (specialOffers.length === 0) return null;
                   return (
-                    <section key={sec.id} className="bg-[#ef394e] rounded-[22px] p-5 text-white shadow-lg relative overflow-hidden flex flex-col sm:flex-row items-stretch sm:items-center gap-5">
-                      <div className="flex sm:flex-col items-center justify-between sm:justify-center text-center shrink-0 sm:w-36 border-b sm:border-b-0 sm:border-l border-white/20 pb-3 sm:pb-0 sm:pl-4">
-                        <div className="w-12 h-12 rounded-full border-2 border-white flex items-center justify-center mb-1">
-                          <Percent className="w-6 h-6 stroke-[2.5]" />
-                        </div>
-                        <div>
-                          <h2 className="text-base sm:text-lg font-black tracking-tight mt-1">
-                            {sec.title || 'پیشنهاد شگفت‌انگیز'}
-                          </h2>
-                          {sec.subtitle && (
-                            <p className="text-[11px] text-white/80 hidden sm:block mt-0.5">{sec.subtitle}</p>
-                          )}
-                          <button 
-                            id="btn-view-all-deals"
-                            onClick={handleViewAllOffers}
-                            className="mt-2 text-xs border border-white rounded-lg px-3 py-1 font-bold hover:bg-white hover:text-[#ef394e] transition inline-block cursor-pointer"
-                          >
-                            مشاهده همه
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Offer Horizontal Scroll */}
-                      <div className="flex-1 flex gap-3.5 overflow-x-auto pb-2 scrollbar-none items-center">
-                        {specialOffers.map(p => {
-                          const basePrice = getBasePrice(p, p.sizes?.[0]?.name || 'کوچک');
-                          const finalPrice = calculateFinalPrice(p, p.sizes?.[0]?.name || 'کوچک');
-                          return (
-                            <div
-                              key={p.id}
-                              onClick={() => handleOpenProduct(p)}
-                              className="w-40 shrink-0 bg-white rounded-2xl p-2.5 text-center relative cursor-pointer hover:scale-102 transition shadow-sm"
-                            >
-                              <span className="absolute top-2 right-2 bg-[#ef394e] text-white text-[10px] font-black px-2 py-0.5 rounded-md shadow-xs">
-                                {p.discount}%
-                              </span>
-                              <img 
-                                src={p.imageName} 
-                                alt={p.title} 
-                                className="w-full h-24 object-cover rounded-xl mb-2"
-                              />
-                              <div className="text-xs font-bold text-stone-800 line-clamp-1 h-5">{p.title}</div>
-                              <span className="text-[11px] text-stone-400 line-through block mt-1">
-                                {formatPrice(basePrice)}
-                              </span>
-                              <div className="text-xs font-black text-stone-900 mt-0.5">
-                                {formatPrice(finalPrice)} ت
-                              </div>
+                    <React.Fragment key={sec.id}>
+                      {specialOffers.length > 0 && (
+                        <section className="bg-[#ef394e] rounded-[22px] p-5 text-white shadow-lg relative overflow-hidden flex flex-col sm:flex-row items-stretch sm:items-center gap-5">
+                          <div className="flex sm:flex-col items-center justify-between sm:justify-center text-center shrink-0 sm:w-36 border-b sm:border-b-0 sm:border-l border-white/20 pb-3 sm:pb-0 sm:pl-4">
+                            <div className="w-12 h-12 rounded-full border-2 border-white flex items-center justify-center mb-1">
+                              <Percent className="w-6 h-6 stroke-[2.5]" />
                             </div>
-                          );
-                        })}
-
-                        <div 
-                          onClick={handleViewAllOffers}
-                          className="w-24 h-40 shrink-0 bg-white/95 rounded-2xl flex flex-col items-center justify-center text-[#ef394e] font-black text-xs cursor-pointer p-2 text-center hover:bg-white transition shadow-sm"
-                        >
-                          <div className="w-8 h-8 rounded-full border-2 border-[#ef394e] flex items-center justify-center mb-2">
-                            <ArrowLeft className="w-4 h-4" />
+                            <div>
+                              <h2 className="text-base sm:text-lg font-black tracking-tight mt-1">
+                                {sec.title || 'پیشنهاد شگفت‌انگیز'}
+                              </h2>
+                              {sec.subtitle && (
+                                <p className="text-[11px] text-white/80 hidden sm:block mt-0.5">{sec.subtitle}</p>
+                              )}
+                              <button 
+                                id="btn-view-all-deals"
+                                onClick={handleViewAllOffers}
+                                className="mt-2 text-xs border border-white rounded-lg px-3 py-1 font-bold hover:bg-white hover:text-[#ef394e] transition inline-block cursor-pointer"
+                              >
+                                مشاهده همه
+                              </button>
+                            </div>
                           </div>
-                          <span>موارد<br />بیشتر</span>
-                        </div>
-                      </div>
-                    </section>
+
+                          {/* Offer Horizontal Scroll */}
+                          <div className="flex-1 flex gap-3.5 overflow-x-auto pb-2 scrollbar-none items-center">
+                            {specialOffers.map(p => {
+                              const basePrice = getBasePrice(p, p.sizes?.[0]?.name || 'کوچک');
+                              const finalPrice = calculateFinalPrice(p, p.sizes?.[0]?.name || 'کوچک');
+                              return (
+                                <div
+                                  key={p.id}
+                                  onClick={() => handleOpenProduct(p)}
+                                  className="w-40 shrink-0 bg-white rounded-2xl p-2.5 text-center relative cursor-pointer hover:scale-102 transition shadow-sm"
+                                >
+                                  <span className="absolute top-2 right-2 bg-[#ef394e] text-white text-[10px] font-black px-2 py-0.5 rounded-md shadow-xs">
+                                    {p.discount}%
+                                  </span>
+                                  <img 
+                                    src={p.imageName} 
+                                    alt={p.title} 
+                                    className="w-full h-24 object-cover rounded-xl mb-2"
+                                  />
+                                  <div className="text-xs font-bold text-stone-800 line-clamp-1 h-5">{p.title}</div>
+                                  <span className="text-[11px] text-stone-400 line-through block mt-1">
+                                    {formatPrice(basePrice)}
+                                  </span>
+                                  <div className="text-xs font-black text-stone-900 mt-0.5">
+                                    {formatPrice(finalPrice)} ت
+                                  </div>
+                                </div>
+                              );
+                            })}
+
+                            <div 
+                              onClick={handleViewAllOffers}
+                              className="w-24 h-40 shrink-0 bg-white/95 rounded-2xl flex flex-col items-center justify-center text-[#ef394e] font-black text-xs cursor-pointer p-2 text-center hover:bg-white transition shadow-sm"
+                            >
+                              <div className="w-8 h-8 rounded-full border-2 border-[#ef394e] flex items-center justify-center mb-2">
+                                <ArrowLeft className="w-4 h-4" />
+                              </div>
+                              <span>موارد<br />بیشتر</span>
+                            </div>
+                          </div>
+                        </section>
+                      )}
+
+                      {/* Top Rotating Banner with Standard Auto-Switch right below Special Offers */}
+                      <TopBannerCarousel
+                        settings={siteContent?.topBannerSettings}
+                        banners={siteContent?.topBanners}
+                        onBannerClick={(banner) => {
+                          if (banner.linkUrl) {
+                            if (banner.linkUrl.startsWith('/')) {
+                              const pageKey = banner.linkUrl.replace('/', '');
+                              if (pageKey === 'articles' || pageKey === 'consultation' || pageKey === 'tracking' || pageKey === 'about' || pageKey === 'contact') {
+                                handleSelectPage(pageKey as any);
+                              } else if (pageKey.startsWith('categories/')) {
+                                const catSlug = pageKey.replace('categories/', '');
+                                handleSelectCategory(catSlug);
+                              } else {
+                                window.location.href = banner.linkUrl;
+                              }
+                            } else {
+                              window.open(banner.linkUrl, '_blank');
+                            }
+                          }
+                        }}
+                      />
+                    </React.Fragment>
                   );
 
                 case 'categories':

@@ -530,10 +530,10 @@ let telegramConfig: any = {
   baleBotUsername: 'Onivalbot',
   baleBaseUrl: 'https://tapi.bale.ai',
   baleWebhookUrl: '',
-  balePaymentMode: 'live',
+  balePaymentMode: 'test',
   balePaymentTokenTest: 'WALLET-TEST-1111111111111111',
   balePaymentTokenLive: 'WALLET-v5gqSc1W1kaBUo2B',
-  balePaymentToken: 'WALLET-v5gqSc1W1kaBUo2B',
+  balePaymentToken: 'WALLET-TEST-1111111111111111',
   baleAutoSendInvoice: true,
   baleAutoNotifyAdminAllTransactions: true,
   baleAdminDirectApproval: true,
@@ -610,7 +610,7 @@ function getActiveBaleWalletToken(): string {
   if (telegramConfig.balePaymentMode === 'test') {
     return (telegramConfig.balePaymentTokenTest || 'WALLET-TEST-1111111111111111').trim();
   }
-  return (telegramConfig.balePaymentTokenLive || telegramConfig.balePaymentToken || 'WALLET-v5gqSc1W1kaBUo2B').trim();
+  return (telegramConfig.balePaymentTokenLive || telegramConfig.balePaymentToken || 'WALLET-TEST-1111111111111111').trim();
 }
 
 async function sendBaleMessage(
@@ -679,6 +679,43 @@ async function sendBaleMessage(
         // ignore
       }
     }
+    return { ok: false, error: err?.message };
+  }
+}
+
+async function sendBalePhoto(
+  baseUrl: string,
+  token: string,
+  chatId: string | number,
+  photo: string,
+  caption?: string,
+  replyMarkup?: any
+) {
+  if (!token || !chatId || !photo) {
+    return { ok: false, error: 'پارامترهای ارسالی عکس نامعتبر است' };
+  }
+  const cleanBase = baseUrl.replace(/\/+$/, '');
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 9000);
+    const bodyPayload: any = {
+      chat_id: isNaN(Number(chatId)) ? chatId : Number(chatId),
+      photo,
+      caption: caption ? caption.slice(0, 1024) : undefined
+    };
+    if (replyMarkup) {
+      bodyPayload.reply_markup = replyMarkup;
+    }
+    const res = await fetch(`${cleanBase}/bot${token}/sendPhoto`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(bodyPayload),
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+    const data: any = await res.json().catch(() => ({ ok: false }));
+    return { ok: Boolean(res.ok && data?.ok), status: res.status, result: data?.result, error: data?.description };
+  } catch (err: any) {
     return { ok: false, error: err?.message };
   }
 }
@@ -1298,34 +1335,32 @@ function isRequestAdminAuthorized(req: Request): boolean {
   const validEmail = (adminCredentials.email || 'admin@onival.com').trim().toLowerCase();
   const validPass = (adminCredentials.password || 'admin').trim();
 
-  // Accept local session tokens created by client authentication handler
+  // 1. Validate session token generated via HMAC with current valid credentials
+  const expectedPrimary = generateAdminSessionToken(validUser, validPass);
+  const expectedEmail = generateAdminSessionToken(validEmail, validPass);
+  if (token === expectedPrimary || token === expectedEmail) return true;
+
+  // 2. Also verify with hashed password if stored was plaintext
+  const hashedPass = hashPassword(validPass);
+  const expectedHashedPrimary = generateAdminSessionToken(validUser, hashedPass);
+  const expectedHashedEmail = generateAdminSessionToken(validEmail, hashedPass);
+  if (token === expectedHashedPrimary || token === expectedHashedEmail) return true;
+
+  // 3. Accept local session tokens ONLY if encoded username matches active valid admin username or email
   if (token.startsWith('local_session_') || token.startsWith('host_auth_session_')) {
     try {
       const b64 = token.replace(/^(local_session_|host_auth_session_)/, '');
       const decoded = Buffer.from(b64, 'base64').toString('utf8');
       const u = decoded.split(':')[0]?.trim().toLowerCase();
-      if (u && (u === validUser || u === validEmail || u === 'admin' || u === 'heltashop14@gmail.com')) {
+      if (u && (u === validUser || u === validEmail)) {
         return true;
       }
     } catch {
-      // ignore parsing error and continue
+      // ignore parsing error
     }
-    // Any valid local_session token passed in the browser session is accepted as authenticated
-    return true;
   }
 
-  // Validate token with both current stored password/hash and plaintext fallback
-  const expectedPrimary = generateAdminSessionToken(validUser, validPass);
-  const expectedEmail = generateAdminSessionToken(validEmail, validPass);
-
-  if (token === expectedPrimary || token === expectedEmail) return true;
-
-  // Also verify with hashed password if stored was plain
-  const hashedPass = hashPassword(validPass);
-  const expectedHashedPrimary = generateAdminSessionToken(validUser, hashedPass);
-  const expectedHashedEmail = generateAdminSessionToken(validEmail, hashedPass);
-
-  return token === expectedHashedPrimary || token === expectedHashedEmail;
+  return false;
 }
 
 function requireAdminAuth(req: Request, res: Response, next: NextFunction) {
@@ -1359,7 +1394,8 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
     p === '/torob/products' ||
     p.startsWith('/torob') ||
     p.startsWith('/emalls') ||
-    p === '/bot/logs'
+    p === '/bot/logs' ||
+    p.includes('webhook')
   )) {
     return next();
   }
@@ -1370,7 +1406,7 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
     p === '/orders' ||
     p === '/contact' ||
     p === '/consultations/book' ||
-    p.startsWith('/webhook') ||
+    p.includes('webhook') ||
     p.startsWith('/bot/webhook') ||
     p === '/bot/test-admin-welcome' ||
     p === '/bot/test-connection' ||
@@ -3369,9 +3405,15 @@ function extractTrackingCodeFromText(text: string): string | null {
     return directPayMatch[1].trim();
   }
 
-  // 5. Standalone tracking code (at least 3 characters containing digits, e.g. 104 or 432 or ONV-101 or 915)
-  if (!trimmed.startsWith('/') && /^[A-Za-z0-9_-]{2,20}$/.test(trimmed) && /\d/.test(trimmed)) {
+  // 5. Standalone tracking code (at least 2 characters containing digits, e.g. 104 or 91542 or ONV-101)
+  if (!trimmed.startsWith('/') && /^[A-Za-z0-9_-]{2,30}$/.test(trimmed) && /\d/.test(trimmed)) {
     return trimmed;
+  }
+
+  // 6. Number sequence of 3 to 15 digits
+  const digitMatch = trimmed.match(/\b\d{3,15}\b/);
+  if (digitMatch) {
+    return digitMatch[0];
   }
 
   return null;
@@ -3379,9 +3421,11 @@ function extractTrackingCodeFromText(text: string): string | null {
 
 function findOrderByTrackingOrCode(code: string): any {
   if (!code) return null;
-  const cleanSearch = code.replace(/[^A-Z0-9]/gi, '').toUpperCase();
-  const normalizedCode = code.replace(/-/g, '_').toUpperCase();
-  const hyphenCode = code.replace(/_/g, '-').toUpperCase();
+  const rawCode = String(code).trim();
+  const cleanSearch = rawCode.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+  const normalizedCode = rawCode.replace(/-/g, '_').toUpperCase();
+  const hyphenCode = rawCode.replace(/_/g, '-').toUpperCase();
+  const searchDigits = rawCode.match(/\d+/)?.[0];
 
   // 1. Search in memory
   let found = orders.find(o => {
@@ -3389,11 +3433,14 @@ function findOrderByTrackingOrCode(code: string): any {
     const oClean = oRaw.replace(/[^A-Z0-9]/gi, '');
     const oNorm = oRaw.replace(/-/g, '_');
     const oHyphen = oRaw.replace(/_/g, '-');
-    return oRaw === code.toUpperCase() ||
+    const oDigits = oRaw.match(/\d+/)?.[0];
+    return oRaw === rawCode.toUpperCase() ||
            oNorm === normalizedCode ||
            oHyphen === hyphenCode ||
            oClean === cleanSearch ||
-           String(o.id) === code ||
+           String(o.id) === rawCode ||
+           String(o.orderNumber || '') === rawCode ||
+           (searchDigits && oDigits && searchDigits === oDigits) ||
            (cleanSearch.length >= 3 && oClean.includes(cleanSearch));
   });
 
@@ -3592,8 +3639,8 @@ async function processIncomingBotUpdate(update: any, botOrigin: 'customer' | 'ad
 
   // 3. Handle Messages & Commands
   const msg = update.message;
-  if (msg && msg.text) {
-    const text = msg.text.trim();
+  if (msg) {
+    const text = (msg.text || msg.caption || '').trim();
     const sender = msg.from || {};
     const senderUsername = (sender.username || '').replace(/^@/, '').toLowerCase();
     const senderChatId = String(msg.chat?.id || '');
@@ -3621,6 +3668,97 @@ async function processIncomingBotUpdate(update: any, botOrigin: 'customer' | 'ad
       }
     }
 
+    // CHECK FOR RECEIPT PHOTO / DOCUMENT UPLOAD
+    const hasPhoto = Array.isArray(msg.photo) && msg.photo.length > 0;
+    const hasDoc = msg.document && (msg.document.mime_type?.includes('image') || msg.document.file_name?.match(/\.(jpe?g|png|webp)$/i));
+
+    if (hasPhoto || hasDoc) {
+      const fileId = hasPhoto ? msg.photo[msg.photo.length - 1]?.file_id : msg.document?.file_id;
+      const detectedCode = extractTrackingCodeFromText(text);
+      let targetOrder = detectedCode ? findOrderByTrackingOrCode(detectedCode) : null;
+      if (!targetOrder) {
+        targetOrder = orders.find(o => o.paymentStatus !== 'Paid' && (o.baleChatId === senderChatId || o.chatId === senderChatId)) ||
+                      orders.find(o => o.paymentStatus !== 'Paid') ||
+                      orders[0];
+      }
+
+      if (targetOrder) {
+        targetOrder.receiptFileId = fileId;
+        targetOrder.baleChatId = senderChatId;
+        targetOrder.paymentMethod = 'card_to_card';
+        targetOrder.paymentStatus = 'PendingVerification';
+        savePersistedState();
+      }
+
+      const orderCode = targetOrder ? targetOrder.trackingCode : (detectedCode || 'ثبت‌شده');
+      const orderAmount = targetOrder ? Number(targetOrder.finalTotal || targetOrder.totalPrice || targetOrder.price || 0) : 0;
+      const custDisplayName = targetOrder?.userFullName || `${sender.first_name || ''} ${sender.last_name || ''}`.trim() || 'مشتری گرامی';
+
+      // 1. Thank customer and confirm receipt received
+      const customerThanksText =
+        `از خرید و حسن اعتماد شما به محصولات ارگانیک اونیوال صمیمانه سپاسگزاریم! 🌿🍯\n\n` +
+        `📸 تصویر فیش واریزی شما با موفقیت در سامانه ثبت گردید و جهت بررسی و تأیید نهایی در اختیار واحد مالی و مدیریت قرار گرفت.\n\n` +
+        `🔖 شماره فاکتور: ${orderCode}\n` +
+        (orderAmount > 0 ? `💰 مبلغ فاکتور: ${orderAmount.toLocaleString('fa-IR')} تومان\n` : '') +
+        `⏳ وضعیت: در انتظار بررسی و تأیید مدیریت\n\n` +
+        `به محض بررسی و تأیید رسید توسط حسابداری، پیام تایید نهایی از همین طریق برای شما ارسال خواهد شد. 📦✨`;
+
+      const replyKeyboard = {
+        keyboard: [
+          [{ text: '🧾 استعلام و پرداخت فاکتور من' }],
+          [{ text: '🛍️ فروشگاه اونیوال' }, { text: '📦 پیگیری سفارش' }],
+          [{ text: '💳 راهنمای روش‌های پرداخت' }, { text: '📞 تماس با ما و پشتیبانی' }]
+        ],
+        resize_keyboard: true,
+        one_time_keyboard: false
+      };
+
+      await sendBaleMessage(baleBase, activeToken, senderChatId, customerThanksText, replyKeyboard);
+
+      // 2. Forward photo to admin
+      const adminChat = configuredAdminChat || '69451465';
+      const adminTokenToUse = adminToken || activeToken;
+      if (adminChat && adminTokenToUse) {
+        const itemsList = (targetOrder?.items || [])
+          .map((it: any, i: number) => `▫️ ${i + 1}. ${it.productName || it.title} × ${it.quantity || 1} عدد`)
+          .join('\n') || '▫️ فیش واریز مستقیم کارت به کارت';
+
+        const adminCaption =
+          `🔔 رسید واریز کارت‌به‌کارت جدید دریافت شد!\n\n` +
+          `📦 شماره فاکتور: ${orderCode}\n` +
+          `👤 خریدار: ${custDisplayName}\n` +
+          `📱 شماره تماس: ${targetOrder?.phoneNumber || 'ثبت نشده'}\n` +
+          `💰 مبلغ فاکتور: ${orderAmount.toLocaleString('fa-IR')} تومان\n` +
+          `⏰ زمان ارسال رسید: ${time}\n\n` +
+          `📦 اقلام سفارش:\n${itemsList}\n\n` +
+          `⚡ جهت تأیید و تسویه روی دستور زیر کلیک فرمایید:\n` +
+          `/confirm_${orderCode}`;
+
+        const adminKb = {
+          inline_keyboard: [
+            [{ text: '✅ تایید این فیش واریزی', callback_data: `confirm_${orderCode}` }],
+            [{ text: '🌐 مشاهده سفارش در سایت', url: `${siteUrl}/?track=${orderCode}` }]
+          ]
+        };
+
+        const photoRes = await sendBalePhoto(baleBase, adminTokenToUse, adminChat, fileId, adminCaption, adminKb);
+        if (!photoRes.ok) {
+          await sendBaleMessage(baleBase, adminTokenToUse, adminChat, adminCaption, adminKb);
+        }
+      }
+
+      botActivityLogs.unshift({
+        id: Date.now(),
+        time,
+        type: 'receipt_photo_received',
+        platform: 'bale',
+        text: `تصویر فیش سفارش ${orderCode} از کاربر (${senderChatId}) دریافت و به ادمین (${adminChat}) ارسال شد.`,
+        status: 'info'
+      });
+      savePersistedState();
+      return;
+    }
+
     // Dedicated Helper: Send full order invoice and payment options to the customer/user in Bale
     const deliverOrderInvoice = async (targetOrder: any, noteHeading?: string) => {
       const isPaid = targetOrder.paymentStatus === 'Paid';
@@ -3630,18 +3768,30 @@ async function processIncomingBotUpdate(update: any, botOrigin: 'customer' | 'ad
         : (process.env.APP_URL || 'https://ais-dev-uy5bcdp7o5x4p2wvng2rjs-701810134340.europe-west2.run.app');
       const siteTrackUrl = `${originBase}/?track=${targetOrder.trackingCode}`;
 
-      const itemsSummary = (targetOrder.items || [])
-        .map((it: any, idx: number) => `▫️ ${idx + 1}. ${it.productName} (${it.size || 'استاندارد'}) × ${it.quantity} عدد - ${Number(it.totalPrice || 0).toLocaleString('fa-IR')} تومان`)
-        .join('\n');
+      const buyerName = targetOrder.userFullName || targetOrder.customerName || targetOrder.fullName || 'مشتری گرامی';
+      const buyerPhone = targetOrder.phoneNumber || targetOrder.customerPhone || targetOrder.phone || '';
+      const orderTotalToman = Number(targetOrder.finalTotal || targetOrder.totalPrice || targetOrder.total || targetOrder.price || 150000);
+
+      const itemsSummary = (targetOrder.items && targetOrder.items.length > 0)
+        ? targetOrder.items.map((it: any, idx: number) => {
+            const pName = it.productName || it.title || it.name || 'محصول ارگانیک';
+            const size = it.size || it.weight || 'استاندارد';
+            const qty = it.quantity || it.count || 1;
+            const price = Number(it.totalPrice || (it.unitPrice ? it.unitPrice * qty : (it.price ? it.price * qty : 0)));
+            return `▫️ ${idx + 1}. ${pName}${size && size !== 'استاندارد' ? ` (${size})` : ''} × ${qty} عدد - ${price.toLocaleString('fa-IR')} تومان`;
+          }).join('\n')
+        : (targetOrder.isConsultation || targetOrder.consultationDetails
+            ? `▫️ ۱. رزرو مشاوره تخصصی: ${targetOrder.consultationDetails?.topicTitle || 'مشاوره ارگانیک'}`
+            : '▫️ ۱. فرآورده‌های ارگانیک اونیوال (بسته انتخابی)');
 
       let invoiceDetailText =
         `🧾 درخواست پرداخت فاکتور فروشگاه اینترنتی اونیوال (ONIVAL):\n\n` +
         (noteHeading ? `💡 ${noteHeading}\n\n` : '') +
         `🔖 شماره فاکتور: ${targetOrder.trackingCode}\n` +
-        `👤 خریدار: ${targetOrder.userFullName} (${targetOrder.phoneNumber})\n` +
-        `💰 مبلغ کل قابل پرداخت: ${Number(targetOrder.totalPrice || 0).toLocaleString('fa-IR')} تومان\n` +
+        `👤 خریدار: ${buyerName}${buyerPhone ? ` (${buyerPhone})` : ''}\n` +
+        `💰 مبلغ کل قابل پرداخت: ${orderTotalToman.toLocaleString('fa-IR')} تومان\n` +
         (targetOrder.userAddress ? `📍 نشانی تحویل مرسوله: ${targetOrder.userAddress}\n\n` : '\n') +
-        `📦 اقلام سفارش:\n${itemsSummary || '▫️ اقلام سبد خرید'}\n\n` +
+        `📦 اقلام سفارش:\n${itemsSummary}\n\n` +
         `⏳ وضعیت پرداخت: ${isPaid ? '✅ پرداخت شده و ثبت نهایی (در حال آماده‌سازی و ارسال)' : '⏳ در انتظار پرداخت'}\n\n`;
 
       if (!isPaid) {
@@ -3697,10 +3847,10 @@ async function processIncomingBotUpdate(update: any, botOrigin: 'customer' | 'ad
             payload: `order_${targetOrder.trackingCode}`,
             providerToken: walletToken,
             startParameter: `pay_${targetOrder.trackingCode.replace(/-/g, '_')}`,
-            totalPriceRial: Number(targetOrder.totalPrice || 0) * 10
+            totalPriceRial: orderTotalToman * 10
           });
 
-          // If failed with configured wallet token, retry with official test wallet token
+          // If failed with configured wallet token, retry with fallback wallet token
           if (!invoiceResult.ok && invoiceResult.status !== 401) {
             const retryRes = await sendBaleInvoice({
               baseUrl: baleBase,
@@ -3709,9 +3859,9 @@ async function processIncomingBotUpdate(update: any, botOrigin: 'customer' | 'ad
               title: `فاکتور ${targetOrder.trackingCode}`.slice(0, 32),
               description: `پرداخت سفارش ${targetOrder.trackingCode} فروشگاه اونیوال`.slice(0, 255),
               payload: `order_${targetOrder.trackingCode}`,
-              providerToken: 'WALLET-TEST-1111111111111111',
+              providerToken: 'WALLET-v5gqSc1W1kaBUo2B',
               startParameter: `pay_${targetOrder.trackingCode.replace(/-/g, '_')}`,
-              totalPriceRial: Number(targetOrder.totalPrice || 0) * 10
+              totalPriceRial: orderTotalToman * 10
             }).catch(() => null);
             if (retryRes) {
               invoiceResult = { ...retryRes, retriedWithTestToken: true };
@@ -3763,11 +3913,7 @@ async function processIncomingBotUpdate(update: any, botOrigin: 'customer' | 'ad
         });
         savePersistedState();
 
-        // Notify Store Admin
-        if (configuredAdminChat && configuredAdminChat !== senderChatId) {
-          const adminNotice = `🔔 مشتری (${targetOrder.userFullName}) فاکتور ${targetOrder.trackingCode} را در ربات بله باز کرد.\n💰 مبلغ: ${Number(targetOrder.totalPrice || 0).toLocaleString('fa-IR')} تومان`;
-          dispatchBotNotification(adminNotice, 'customer_opened_invoice').catch(() => {});
-        }
+        // Note: Admin is only notified upon confirmed payment (successful_payment), not when browsing invoice
       }
     };
 
@@ -3985,11 +4131,11 @@ async function processIncomingBotUpdate(update: any, botOrigin: 'customer' | 'ad
       return;
     }
 
-    // 5. My Latest Invoice Button (آخرین فاکتور من)
-    if (/^(🧾)?\s*(فاکتور.*|invoice)$/iu.test(text) || text === '/invoice') {
-      const latestPendingOrder = orders.find(o => o.paymentStatus !== 'Paid') || orders[0];
-      if (latestPendingOrder) {
-        await deliverOrderInvoice(latestPendingOrder, 'مشخصات آخرین فاکتور سفارش شما در سیستم:');
+    // 5. My Latest Invoice Button (استعلام و پرداخت فاکتور من)
+    if (/^(🧾)?\s*(استعلام.*|فاکتور.*|صورتحساب.*|سفارش.*|پرداخت.*|invoice|pay)$/iu.test(text) || text === '/invoice' || text === '/pay') {
+      const targetOrder = orders.find(o => o.paymentStatus !== 'Paid') || orders[0];
+      if (targetOrder) {
+        await deliverOrderInvoice(targetOrder, 'مشخصات آخرین فاکتور سفارش شما در سامانه اونیوال:');
         return;
       }
     }
@@ -4039,9 +4185,28 @@ async function processIncomingBotUpdate(update: any, botOrigin: 'customer' | 'ad
           const reply = `✅ سفارش ${order.trackingCode} با موفقیت توسط شما تایید شد!\n\n` +
             `👤 خریدار: ${order.userFullName}\n` +
             `💰 مبلغ: ${Number(order.totalPrice).toLocaleString('fa-IR')} تومان\n` +
-            `📦 وضعیت جدید: در حال آماده‌سازی و ارسال`;
+            `📦 وضعیت جدید: در حال آماده‌سازی و ارسال\n\n` +
+            `پیام اطلاع‌رسانی برای خریدار ارسال گردید.`;
           if (adminToken && senderChatId) {
             await sendBaleMessage(baleBase, adminToken, senderChatId, reply);
+          }
+
+          // Notify customer in Bale
+          const customerChat = order.baleChatId || order.chatId;
+          if (customerChat && customerToken) {
+            const custNotify =
+              `🎉 خریدار گرامی ${order.userFullName || 'عزیز'}،\n\n` +
+              `✅ فیش واریزی شما برای سفارش ${order.trackingCode} توسط مدیریت فروشگاه تأیید گردید!\n\n` +
+              `💰 مبلغ تسویه شده: ${Number(order.totalPrice || 0).toLocaleString('fa-IR')} تومان\n` +
+              `📦 وضعیت سفارش شما به «در حال آماده‌سازی و ارسال پستی 🚚» تغییر یافت.\n\n` +
+              `از خرید و همراهی گرم شما با مجموعه فرآورده‌های ارگانیک اونیوال صمیمانه سپاسگزاریم. 🍯🌿\n\n` +
+              `🔍 پیگیری لحظه‌ای سفارش:\n${siteUrl}/?track=${order.trackingCode}`;
+
+            sendBaleMessage(baleBase, customerToken, customerChat, custNotify, {
+              inline_keyboard: [
+                [{ text: '🌐 پیگیری آنلاین سفارش در سایت', url: `${siteUrl}/?track=${order.trackingCode}` }]
+              ]
+            }).catch(() => {});
           }
         } else {
           if (adminToken && senderChatId) {
@@ -4078,10 +4243,11 @@ async function processIncomingBotUpdate(update: any, botOrigin: 'customer' | 'ad
     // STEP D: START / GENERAL MESSAGES FOR CUSTOMER BOT (/start, شروع, سلام)
     // Welcomes the customer and presents quick action buttons & latest invoice
     // =========================================================================
+    const targetToken = customerToken || activeToken || adminToken;
     const latestPendingOrder = orders.find(o => o.paymentStatus !== 'Paid') || orders[0];
-    const isStartWord = /^[\/!#]?(start|help|شروع|راهنما|سلام)$/iu.test(text);
+    const isStartWord = /^[\/!#]?(start|help|شروع|راهنما|سلام|hello|hi)$/iu.test(text);
 
-    if (customerToken && senderChatId) {
+    if (targetToken && senderChatId) {
       // If customer pressed /start or sent a start greeting, IMMEDIATELY deliver their active invoice!
       if (latestPendingOrder && (isStartWord || latestPendingOrder.paymentStatus !== 'Paid')) {
         await deliverOrderInvoice(latestPendingOrder, 'فاکتور سفارش فعال شما آماده پرداخت است:');
@@ -4106,7 +4272,7 @@ async function processIncomingBotUpdate(update: any, botOrigin: 'customer' | 'ad
         ]
       };
 
-      const sendRes = await sendBaleMessage(baleBase, customerToken, senderChatId, welcomeText, welcomeKb);
+      const sendRes = await sendBaleMessage(baleBase, targetToken, senderChatId, welcomeText, welcomeKb);
       botActivityLogs.unshift({
         id: Date.now(),
         time,
@@ -4129,8 +4295,22 @@ async function processIncomingBotUpdate(update: any, botOrigin: 'customer' | 'ad
         resize_keyboard: true,
         one_time_keyboard: false
       };
-      sendBaleMessage(baleBase, customerToken, senderChatId, '📌 منوی دسترسی سریع مشتری:', replyKeyboard).catch(() => {});
+      sendBaleMessage(baleBase, targetToken, senderChatId, '📌 منوی دسترسی سریع مشتری:', replyKeyboard).catch(() => {});
       return;
+    }
+
+    // Fallback: Never stay silent
+    if (activeToken && senderChatId) {
+      const fallbackReplyKeyboard = {
+        keyboard: [
+          [{ text: '🧾 استعلام و پرداخت فاکتور من' }],
+          [{ text: '🛍️ فروشگاه اونیوال' }, { text: '📦 پیگیری سفارش' }],
+          [{ text: '💳 راهنمای روش‌های پرداخت' }, { text: '📞 تماس با ما و پشتیبانی' }]
+        ],
+        resize_keyboard: true,
+        one_time_keyboard: false
+      };
+      sendBaleMessage(baleBase, activeToken, senderChatId, 'پیام شما دریافت شد. جهت استعلام فاکتور یا پیگیری سفارش، لطفاً یکی از گزینه‌های زیر را انتخاب فرمایید:', fallbackReplyKeyboard).catch(() => {});
     }
     return;
   }
@@ -4277,14 +4457,43 @@ app.post('/api/bot/test-customer-bot', async (req: Request, res: Response) => {
   }
 });
 
-app.post([
+// Webhook endpoints for Bale & Telegram (compatible with Node & PHP endpoints)
+const WEBHOOK_PATHS = [
   '/api/webhook/bale',
   '/api/bot/webhook/bale',
   '/api/webhook/bale/customer',
   '/api/webhook/bale/admin',
   '/api/webhook/telegram',
-  '/api/bot/webhook/telegram'
-], async (req: Request, res: Response) => {
+  '/api/bot/webhook/telegram',
+  '/api/webhook.php',
+  '/api/bale-webhook.php',
+  '/api/telegram-webhook.php',
+  '/api/bale-bot.php',
+  '/api/telegram-bot.php',
+  '/bale-bot.php',
+  '/telegram-bot.php',
+  '/bot-config.php',
+  '/api/webhook'
+];
+
+app.get(WEBHOOK_PATHS, (req: Request, res: Response) => {
+  const isTg = req.path.includes('telegram') || req.query.platform === 'telegram';
+  res.json({
+    ok: true,
+    status: 'active',
+    service: 'ONIVAL Webhook Gateway',
+    version: '1.1.0',
+    platform: isTg ? 'telegram' : 'bale',
+    timestamp: new Date().toISOString(),
+    baleCustomerBot: `@${(telegramConfig.baleBotUsername || 'Onivalbot').replace(/^@/, '')}`,
+    baleAdminBot: `@${(telegramConfig.baleAdminUsername || 'hasti_hjz').replace(/^@/, '')}`,
+    adminChatId: telegramConfig.baleAdminChatId || telegramConfig.adminChatId || '69451465',
+    paymentMode: telegramConfig.balePaymentMode || 'live',
+    message: 'درگاه وب‌هوک ربات فعال و آماده دریافت به‌روزرسانی‌های پرداخت و پیام‌ها است.'
+  });
+});
+
+app.post(WEBHOOK_PATHS, async (req: Request, res: Response) => {
   const update = req.body || {};
   const isExplicitAdmin = req.path.includes('/admin') || req.query.bot === 'admin';
   try {
@@ -4610,30 +4819,40 @@ app.post('/api/admin/login', (req: Request, res: Response) => {
 app.post('/api/account/change-credentials', (req: Request, res: Response) => {
   const { username, currentPassword, newPassword, email, name, siteLogo, siteLogoFit, siteLogoShape, siteLogoScale } = req.body || {};
 
-  // Verify currentPassword if password or username is being changed and currentPassword was provided
-  if (newPassword || username) {
+  const isChangingPassword = Boolean(newPassword && String(newPassword).trim() !== '');
+  const isChangingUsername = Boolean(
+    username &&
+    String(username).trim().toLowerCase() !== (adminCredentials.username || 'admin').trim().toLowerCase()
+  );
+
+  // If user is changing password or username, strictly verify currentPassword
+  if (isChangingPassword || isChangingUsername) {
     const validPassOrHash = (adminCredentials.password || 'admin').trim();
-    if (currentPassword !== undefined && currentPassword.trim() !== '' && !verifyAdminPassword(currentPassword, validPassOrHash)) {
-      return res.status(400).json({ error: 'رمز عبور فعلی وارد شده صحیح نمی‌باشد.' });
+    if (!currentPassword || !verifyAdminPassword(String(currentPassword).trim(), validPassOrHash)) {
+      return res.status(400).json({
+        ok: false,
+        error: 'رمز عبور فعلی وارد شده صحیح نمی‌باشد. لطفاً رمز عبور فعلی خود را با دقت وارد فرمایید.'
+      });
     }
   }
 
-  if (newPassword !== undefined && newPassword.trim() !== '') {
-    if (newPassword.trim().length < 4) {
-      return res.status(400).json({ error: 'رمز عبور جدید باید حداقل ۴ کاراکتر باشد.' });
+  if (isChangingPassword) {
+    const trimmedPass = String(newPassword).trim();
+    if (trimmedPass.length < 4) {
+      return res.status(400).json({ ok: false, error: 'رمز عبور جدید باید حداقل ۴ کاراکتر باشد.' });
     }
     // Store cryptographically hashed password
-    adminCredentials.password = hashPassword(newPassword.trim());
+    adminCredentials.password = hashPassword(trimmedPass);
   }
 
-  if (username && username.trim()) {
-    adminCredentials.username = username.trim();
+  if (username && String(username).trim()) {
+    adminCredentials.username = String(username).trim();
   }
-  if (email && email.trim()) {
-    adminCredentials.email = email.trim();
+  if (email && String(email).trim()) {
+    adminCredentials.email = String(email).trim();
   }
-  if (name && name.trim()) {
-    adminCredentials.name = name.trim();
+  if (name && String(name).trim()) {
+    adminCredentials.name = String(name).trim();
   }
   if (siteLogo !== undefined) {
     siteContent.siteLogo = siteLogo;
@@ -4669,8 +4888,24 @@ app.post('/api/account/change-credentials', (req: Request, res: Response) => {
       siteLogoScale: siteContent.siteLogoScale || 100
     },
     siteContent,
-    message: 'تنظیمات امنیتی، نام کاربری، رمز عبور و لوگوی سایت با موفقیت ذخیره شد.'
+    message: isChangingPassword
+      ? 'نام کاربری و رمز عبور جدید مدیریت با موفقیت ذخیره شد. از این پس فقط با مشخصات جدید می‌توانید وارد شوید.'
+      : 'تنظیمات حساب مدیریت با موفقیت ذخیره شد.'
   });
+});
+
+app.get('/api/admin/verify-session', (req: Request, res: Response) => {
+  if (isRequestAdminAuthorized(req)) {
+    return res.json({
+      ok: true,
+      profile: {
+        username: adminCredentials.username,
+        email: adminCredentials.email,
+        name: adminCredentials.name
+      }
+    });
+  }
+  return res.status(401).json({ ok: false, error: 'نشست کاربری منقضی شده یا نامعتبر است.' });
 });
 
 // ================= SITE CONTENT & LAYOUT CUSTOMIZER =================

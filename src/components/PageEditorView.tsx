@@ -23,9 +23,11 @@ import {
   Store,
   ExternalLink,
   ShieldCheck,
-  Palette
+  Palette,
+  Image as ImageIcon,
+  Clock
 } from 'lucide-react';
-import { SiteContent, HomeSectionConfig } from '../types';
+import { SiteContent, HomeSectionConfig, TopBanner, TopBannerSettings } from '../types';
 
 interface PageEditorViewProps {
   initialContent?: SiteContent;
@@ -38,6 +40,7 @@ interface PageEditorViewProps {
 
 type EditorSubTab = 
   | 'brand-header'
+  | 'top-banner'
   | 'sections-order'
   | 'nav-tabs'
   | 'home-content'
@@ -145,6 +148,102 @@ export const PageEditorView: React.FC<PageEditorViewProps> = ({
     handleFieldChange('homeSections', sections);
   };
 
+  // Top Banner Carousel Management
+  const handleToggleBannerEnabled = (enabled: boolean) => {
+    setContent(prev => ({
+      ...prev,
+      topBannerSettings: {
+        ...(prev.topBannerSettings || {
+          enabled: true,
+          autoRotate: true,
+          intervalSeconds: 4,
+          height: 'standard'
+        }),
+        enabled
+      }
+    }));
+    setIsDirty(true);
+  };
+
+  const handleBannerIntervalChange = (intervalSeconds: number) => {
+    setContent(prev => ({
+      ...prev,
+      topBannerSettings: {
+        ...(prev.topBannerSettings || {
+          enabled: true,
+          autoRotate: true,
+          intervalSeconds: 4,
+          height: 'standard'
+        }),
+        intervalSeconds
+      }
+    }));
+    setIsDirty(true);
+  };
+
+  const handleToggleBannerAutoRotate = (autoRotate: boolean) => {
+    setContent(prev => ({
+      ...prev,
+      topBannerSettings: {
+        ...(prev.topBannerSettings || {
+          enabled: true,
+          autoRotate: true,
+          intervalSeconds: 4,
+          height: 'standard'
+        }),
+        autoRotate
+      }
+    }));
+    setIsDirty(true);
+  };
+
+  const handleUpdateBanner = (index: number, updated: Partial<TopBanner>) => {
+    const list = [...(content.topBanners || [])];
+    if (list[index]) {
+      list[index] = { ...list[index], ...updated };
+      setContent(prev => ({ ...prev, topBanners: list }));
+      setIsDirty(true);
+    }
+  };
+
+  const handleAddBanner = () => {
+    const newBanner: TopBanner = {
+      id: `banner-${Date.now()}`,
+      title: 'محصولات طبیعی و ارگانیک اونیوال',
+      subtitle: 'تخفیف ویژه سفارش مستقیم از زنبورستان با ارسال سریع',
+      imageUrl: 'https://images.unsplash.com/photo-1587049352846-4a222e784d38?auto=format&fit=crop&w=1600&q=80',
+      badge: 'پیشنهاد ویژه',
+      buttonText: 'مشاهده و خرید آنلاین',
+      buttonLink: '#products',
+      gradientOverlay: 'from-amber-950/80 via-slate-900/60 to-transparent'
+    };
+    setContent(prev => ({
+      ...prev,
+      topBanners: [...(prev.topBanners || []), newBanner]
+    }));
+    setIsDirty(true);
+  };
+
+  const handleRemoveBanner = (index: number) => {
+    const list = [...(content.topBanners || [])];
+    list.splice(index, 1);
+    setContent(prev => ({ ...prev, topBanners: list }));
+    setIsDirty(true);
+  };
+
+  const handleBannerImageUpload = (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          handleUpdateBanner(index, { imageUrl: reader.result });
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   // Topics management
   const handleAddTopic = () => {
     if (!newTopicInput.trim()) return;
@@ -230,6 +329,7 @@ export const PageEditorView: React.FC<PageEditorViewProps> = ({
 
   const subTabs = [
     { id: 'brand-header', label: 'سربرگ و برند', icon: Type },
+    { id: 'top-banner', label: 'اسلایدر بنر متحرک بالای صفحه', icon: ImageIcon, badge: 'ویژه' },
     { id: 'sections-order', label: 'چیدمان و موقعیت بخش‌ها', icon: Layers, badge: `${content.homeSections?.length || 5} بخش` },
     { id: 'nav-tabs', label: 'عناوین تب‌های ناوبری', icon: Sliders },
     { id: 'home-content', label: 'محتوای صفحه اصلی', icon: Sparkles },
@@ -454,6 +554,29 @@ export const PageEditorView: React.FC<PageEditorViewProps> = ({
               </div>
             </div>
 
+            {/* Optional English Badge Toggle (ONIVAL box opposite hero title) */}
+            <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <label className="block text-xs font-black text-slate-800">
+                  نمایش باکس کوچک لاتین برند ({content.brandEnglishName || 'ONIVAL'}) روبه‌روی تیتر اصلی:
+                </label>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  کادر کوچک انگلیسی که رو به روی تیتر اصلی فروشگاه قرار دارد. می‌توانید آن را خاموش یا روشن کنید.
+                </p>
+              </div>
+              <label className="inline-flex items-center gap-2 cursor-pointer shrink-0 bg-white px-3.5 py-1.5 rounded-xl border border-slate-300 shadow-2xs">
+                <span className="text-xs font-bold text-slate-700">
+                  {(content.showHeroEnglishBadge ?? true) ? 'فعال (نمایش)' : 'غیرفعال (مخفی)'}
+                </span>
+                <input
+                  type="checkbox"
+                  checked={content.showHeroEnglishBadge ?? true}
+                  onChange={e => handleFieldChange('showHeroEnglishBadge', e.target.checked)}
+                  className="w-4 h-4 accent-amber-600 rounded cursor-pointer"
+                />
+              </label>
+            </div>
+
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-2">
                 شعار پنل ادمین و نوار بالا:
@@ -487,9 +610,11 @@ export const PageEditorView: React.FC<PageEditorViewProps> = ({
                 <h3 className="text-2xl font-black tracking-tight flex items-center gap-2 flex-wrap justify-center sm:justify-start">
                   <span className="text-slate-100">{content.heroTitlePrefix || 'فروشگاه تخصصی'}</span>
                   <span className="text-amber-400">{content.brandName || 'اونیوال'}</span>
-                  <span className="text-[10px] font-mono font-bold text-slate-400 border border-slate-600 px-2 py-0.5 rounded">
-                    {content.brandEnglishName || 'ONIVAL'}
-                  </span>
+                  {(content.showHeroEnglishBadge ?? true) && (
+                    <span className="text-[10px] font-mono font-bold text-slate-400 border border-slate-600 px-2 py-0.5 rounded">
+                      {content.brandEnglishName || 'ONIVAL'}
+                    </span>
+                  )}
                 </h3>
                 <p className="text-xs text-slate-300 mt-3 leading-relaxed">
                   {content.heroSubtitle || 'توضیحات سربرگ'}
@@ -499,9 +624,265 @@ export const PageEditorView: React.FC<PageEditorViewProps> = ({
 
             <div className="pt-6 mt-6 border-t border-slate-800 text-[11px] text-slate-400 space-y-1">
               <div>✓ اعمال بر روی صفحه اصلی مشتری</div>
-              <div>✓ نمایش در هدر و سایدبار پنل ادمین</div>
+              <div>✓ وضعیت کادر لاتین: {(content.showHeroEnglishBadge ?? true) ? 'نمایش داده می‌شود' : 'مخفی است'}</div>
               <div>✓ موقعیت تراز: {content.heroAlign === 'right' ? 'راست' : content.heroAlign === 'left' ? 'چپ' : 'وسط'}</div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sub-tab: Top Banner Slider Settings & Images */}
+      {activeSubTab === 'top-banner' && (
+        <div className="space-y-6 animate-fadeIn">
+          {/* Header & Main Toggle Card */}
+          <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-xs border border-slate-200/80 space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="p-2 rounded-xl bg-amber-50 text-amber-600 border border-amber-200">
+                    <ImageIcon className="w-5 h-5" />
+                  </span>
+                  <h2 className="text-base font-black text-slate-800">
+                    اسلایدر و بنر متحرک بالای صفحه (زیر بردر پیشنهاد شگفت‌انگیز)
+                  </h2>
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  عکس‌های بنر با زمان‌بندی استاندارد به صورت خودکار جابه‌جا می‌شوند. امکان تغییر ثانیه‌های سوییچ، تصاویر، عناوین و لینک‌ها.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <label className="inline-flex items-center gap-2 cursor-pointer bg-slate-50 px-4 py-2 rounded-2xl border border-slate-200 shadow-2xs">
+                  <span className="text-xs font-black text-slate-800">
+                    {(content.topBannerSettings?.enabled ?? true) ? 'اسلایدر فعال است' : 'اسلایدر غیرفعال'}
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={content.topBannerSettings?.enabled ?? true}
+                    onChange={e => handleToggleBannerEnabled(e.target.checked)}
+                    className="w-4 h-4 accent-amber-600 rounded cursor-pointer"
+                  />
+                </label>
+              </div>
+            </div>
+
+            {/* Rotation Controls (Fixed standard 4s) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="bg-slate-50/70 p-4 rounded-2xl border border-slate-200">
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  چرخش اتوماتیک بنرها (زمان‌بندی ثابت ۴ ثانیه):
+                </label>
+                <div className="flex items-center gap-2 mt-2">
+                  <label className="inline-flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={content.topBannerSettings?.autoRotate ?? true}
+                      onChange={e => handleToggleBannerAutoRotate(e.target.checked)}
+                      className="w-4 h-4 accent-amber-600 rounded cursor-pointer"
+                    />
+                    <span className="text-xs text-slate-700 font-semibold">
+                      {(content.topBannerSettings?.autoRotate ?? true) ? 'جابه‌جایی خودکار روشن (هر ۴ ثانیه)' : 'فقط با کلیک فلش‌ها'}
+                    </span>
+                  </label>
+                </div>
+                <span className="text-[10px] text-slate-400 mt-2 block">اسلایدها بر اساس زمان استاندارد ۴ ثانیه جابه‌جا می‌شوند. با نگه داشتن ماوس یا لمس روی بنر، چرخش موقتاً مکث می‌کند.</span>
+              </div>
+
+              <div className="bg-slate-50/70 p-4 rounded-2xl border border-slate-200 flex flex-col justify-between">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    تعداد اسلایدهای بنر:
+                  </label>
+                  <span className="text-xl font-black text-amber-600">
+                    {(content.topBanners || []).length} بنر فعال
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAddBanner}
+                  className="mt-2 w-full py-2 px-3 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>افزودن اسلاید بنر جدید</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Banner Slides List */}
+          <div className="space-y-4">
+            {(content.topBanners || []).map((banner, index) => (
+              <div
+                key={banner.id || index}
+                className="bg-white rounded-3xl p-5 sm:p-6 shadow-xs border border-slate-200/90 space-y-4"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-7 h-7 rounded-xl bg-amber-500 text-white font-black text-xs flex items-center justify-center shadow-xs">
+                      {index + 1}
+                    </span>
+                    <h3 className="text-sm font-black text-slate-800">
+                      اسلاید بنر شماره {index + 1}: {banner.title || 'بدون تیتر'}
+                    </h3>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveBanner(index)}
+                      className="px-3 py-1.5 rounded-xl text-xs font-bold text-rose-600 hover:bg-rose-50 border border-rose-200 transition flex items-center gap-1 cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>حذف این بنر</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                  {/* Left Column: Image Preview & URL */}
+                  <div className="space-y-3">
+                    <label className="block text-xs font-bold text-slate-700">تصویر بنر:</label>
+                    <div className="relative aspect-video rounded-2xl overflow-hidden border border-slate-200 bg-slate-100 shadow-inner group">
+                      <img
+                        src={banner.imageUrl}
+                        alt={banner.title}
+                        className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1587049352846-4a222e784d38?auto=format&fit=crop&w=1600&q=80';
+                        }}
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex items-end p-2.5">
+                        <span className="text-[10px] text-white font-bold bg-black/40 px-2 py-0.5 rounded backdrop-blur-xs">
+                          {banner.badge || 'بنر تبلیغاتی'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          dir="ltr"
+                          value={banner.imageUrl}
+                          onChange={e => handleUpdateBanner(index, { imageUrl: e.target.value })}
+                          className="flex-1 min-w-0 px-3 py-2 text-xs font-mono rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-amber-500"
+                          placeholder="https://..."
+                        />
+                        <label className="px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition cursor-pointer flex items-center gap-1 shrink-0">
+                          <ImageIcon className="w-3.5 h-3.5" />
+                          <span>آپلود عکس</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={e => handleBannerImageUpload(index, e)}
+                          />
+                        </label>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        <span className="text-[10px] text-slate-400">عکس‌های پیشنهادی:</span>
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateBanner(index, { imageUrl: 'https://images.unsplash.com/photo-1587049352846-4a222e784d38?auto=format&fit=crop&w=1600&q=80' })}
+                          className="text-[10px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded hover:bg-amber-100 cursor-pointer"
+                        >
+                          عسل سبلان
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateBanner(index, { imageUrl: 'https://images.unsplash.com/photo-1558642452-9d2a7deb7f62?auto=format&fit=crop&w=1600&q=80' })}
+                          className="text-[10px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded hover:bg-amber-100 cursor-pointer"
+                        >
+                          شهد طبیعی
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateBanner(index, { imageUrl: 'https://images.unsplash.com/photo-1471193945509-9ad0617afabf?auto=format&fit=crop&w=1600&q=80' })}
+                          className="text-[10px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded hover:bg-amber-100 cursor-pointer"
+                        >
+                          گیاهان دارویی
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right 2 Columns: Title, Subtitle, Button, Badge */}
+                  <div className="lg:col-span-2 space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">تیتر اصلی بنر:</label>
+                        <input
+                          type="text"
+                          value={banner.title}
+                          onChange={e => handleUpdateBanner(index, { title: e.target.value })}
+                          className="w-full px-3.5 py-2 text-xs font-bold rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-amber-500"
+                          placeholder="مثلاً: جشنواره تابستانه عسل طبیعی سبلان"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">برچسب کوچک بالای تیتر (Badge):</label>
+                        <input
+                          type="text"
+                          value={banner.badge || ''}
+                          onChange={e => handleUpdateBanner(index, { badge: e.target.value })}
+                          className="w-full px-3.5 py-2 text-xs font-bold rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-amber-500"
+                          placeholder="مثلاً: تخفیف ویژه ۴۰٪ یا تضمین کیفیت"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">زیرعنوان و توضیحات بنر:</label>
+                      <textarea
+                        rows={2}
+                        value={banner.subtitle || ''}
+                        onChange={e => handleUpdateBanner(index, { subtitle: e.target.value })}
+                        className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-amber-500"
+                        placeholder="توضیح کوتاه و جذاب در مورد پیشنهاد..."
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">متن دکمه بنر:</label>
+                        <input
+                          type="text"
+                          value={banner.buttonText || ''}
+                          onChange={e => handleUpdateBanner(index, { buttonText: e.target.value })}
+                          className="w-full px-3.5 py-2 text-xs font-bold rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-amber-500"
+                          placeholder="مثلاً: مشاهده و خرید آنلاین"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">لینک دکمه (آدرس یا آیدی سکشن):</label>
+                        <input
+                          type="text"
+                          dir="ltr"
+                          value={banner.buttonLink || ''}
+                          onChange={e => handleUpdateBanner(index, { buttonLink: e.target.value })}
+                          className="w-full px-3.5 py-2 text-xs font-mono rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-amber-500"
+                          placeholder="#products یا /products یا لینک کامل"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+
+            {(content.topBanners || []).length === 0 && (
+              <div className="p-8 text-center bg-white rounded-3xl border border-dashed border-slate-300">
+                <ImageIcon className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                <p className="text-xs font-bold text-slate-600">هنوز هیچ اسلاید بنری ثبت نشده است.</p>
+                <button
+                  type="button"
+                  onClick={handleAddBanner}
+                  className="mt-3 px-4 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold hover:bg-amber-700 transition cursor-pointer"
+                >
+                  افزودن اولین اسلاید بنر
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

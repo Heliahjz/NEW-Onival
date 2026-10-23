@@ -17,7 +17,10 @@ import {
   Send,
   Globe,
   AlertCircle,
-  Sliders
+  Sliders,
+  Download,
+  FileSpreadsheet,
+  Users
 } from 'lucide-react';
 import { Order } from '../types';
 
@@ -79,6 +82,152 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
       setVerifyingId(null);
     }
   };
+
+  const downloadCsvWithBom = (csvContent: string, filename: string) => {
+    const BOM = '\uFEFF';
+    const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const escapeCsv = (val: any) => {
+    if (val === null || val === undefined) return '""';
+    const str = String(val).replace(/"/g, '""');
+    return `"${str}"`;
+  };
+
+  const handleExportOrdersExcel = (onlyPaid: boolean = false) => {
+    const targetOrders = onlyPaid ? orders.filter(o => o.paymentStatus === 'Paid') : orders;
+    if (targetOrders.length === 0) {
+      return;
+    }
+
+    const headers = [
+      'شناسه سیستم',
+      'شماره فاکتور / کد رهگیری',
+      'نام و نام خانوادگی خریدار',
+      'شماره تماس / موبایل',
+      'مبلغ کل فاکتور (تومان)',
+      'وضعیت فاکتور',
+      'وضعیت پرداخت',
+      'روش پرداخت',
+      'اقلام سفارش',
+      'تعداد کل کالاها',
+      'نشانی تحویل',
+      'تاریخ ثبت فاکتور',
+      'فیش واریزی دارد؟'
+    ];
+
+    const rows = targetOrders.map(o => {
+      const itemsDesc = (o.items || [])
+        .map(it => `${it.productName} (${it.size || 'استاندارد'}) × ${it.quantity} عدد`)
+        .join(' | ');
+      const totalQty = (o.items || []).reduce((acc, it) => acc + (it.quantity || 1), 0);
+      const statusFa = o.status === 'Completed' ? 'تکمیل شده'
+        : o.status === 'Shipped' ? 'ارسال شده'
+        : o.status === 'Processing' ? 'در حال آماده‌سازی'
+        : o.status === 'Cancelled' ? 'لغو شده' : 'در انتظار بررسی';
+      const payStatusFa = o.paymentStatus === 'Paid' ? 'پرداخت شده'
+        : o.paymentStatus === 'PendingVerification' ? 'فیش منتظر تایید'
+        : o.paymentStatus === 'Failed' ? 'ناموفق / رد شده' : 'در انتظار پرداخت';
+      const payMethodFa = o.paymentMethod === 'card_to_card' ? 'کارت به کارت'
+        : o.paymentMethod === 'online_gateway' ? 'درگاه بانکی' : 'ربات بله';
+
+      return [
+        escapeCsv(o.id),
+        escapeCsv(o.trackingCode),
+        escapeCsv(o.userFullName),
+        escapeCsv(o.phoneNumber),
+        escapeCsv(o.totalPrice),
+        escapeCsv(statusFa),
+        escapeCsv(payStatusFa),
+        escapeCsv(payMethodFa),
+        escapeCsv(itemsDesc),
+        escapeCsv(totalQty),
+        escapeCsv(o.userAddress),
+        escapeCsv(o.creationTime),
+        escapeCsv(o.receiptImageUrl ? 'بله' : 'خیر')
+      ].join(',');
+    });
+
+    const csvContent = [headers.map(escapeCsv).join(','), ...rows].join('\r\n');
+    const filename = `onival_orders_${onlyPaid ? 'paid_' : 'all_'}${new Date().toLocaleDateString('fa-IR').replace(/\//g, '-')}.csv`;
+    downloadCsvWithBom(csvContent, filename);
+  };
+
+  const handleExportCustomersExcel = () => {
+    if (orders.length === 0) {
+      return;
+    }
+
+    const customersMap = new Map<string, {
+      fullName: string;
+      phoneNumber: string;
+      totalSpent: number;
+      ordersCount: number;
+      lastOrderDate: string;
+      lastTrackingCode: string;
+      lastStatus: string;
+      address: string;
+    }>();
+
+    for (const o of orders) {
+      const cleanPhone = (o.phoneNumber || '').trim();
+      const existing = customersMap.get(cleanPhone);
+      if (existing) {
+        existing.totalSpent += (o.totalPrice || 0);
+        existing.ordersCount += 1;
+        if (!existing.address && o.userAddress) existing.address = o.userAddress;
+        if (!existing.fullName && o.userFullName) existing.fullName = o.userFullName;
+      } else {
+        customersMap.set(cleanPhone, {
+          fullName: o.userFullName || 'مشتری گرامی',
+          phoneNumber: cleanPhone,
+          totalSpent: o.totalPrice || 0,
+          ordersCount: 1,
+          lastOrderDate: o.creationTime || '',
+          lastTrackingCode: o.trackingCode || '',
+          lastStatus: o.paymentStatus === 'Paid' ? 'پرداخت شده' : 'در انتظار',
+          address: o.userAddress || ''
+        });
+      }
+    }
+
+    const customerList = Array.from(customersMap.values());
+    const headers = [
+      'شماره همراه خریدار (مخصوص پنل پیامک و تبلیغات)',
+      'نام و نام خانوادگی',
+      'تعداد کل سفارشات',
+      'مجموع خریدهای ثبت شده (تومان)',
+      'آخرین کد سفارش',
+      'وضعیت آخرین فاکتور',
+      'نشانی خریدار',
+      'تاریخ آخرین خرید'
+    ];
+
+    const rows = customerList.map(c => [
+      escapeCsv(c.phoneNumber),
+      escapeCsv(c.fullName),
+      escapeCsv(c.ordersCount),
+      escapeCsv(c.totalSpent),
+      escapeCsv(c.lastTrackingCode),
+      escapeCsv(c.lastStatus),
+      escapeCsv(c.address),
+      escapeCsv(c.lastOrderDate)
+    ].join(','));
+
+    const csvContent = [headers.map(escapeCsv).join(','), ...rows].join('\r\n');
+    const filename = `onival_customers_sms_marketing_${new Date().toLocaleDateString('fa-IR').replace(/\//g, '-')}.csv`;
+    downloadCsvWithBom(csvContent, filename);
+  };
+
+  const uniqueCustomersCount = new Set(orders.map(o => (o.phoneNumber || '').trim()).filter(Boolean)).size;
 
   const getStatusBadge = (status: Order['status']) => {
     switch (status) {
@@ -260,6 +409,61 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
             }`}
           >
             تکمیل شده
+          </button>
+        </div>
+      </div>
+
+      {/* Export Toolbar: Excel Orders & Marketing Customer List */}
+      <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-sky-50 p-4 sm:p-5 rounded-2xl border border-emerald-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="p-1.5 rounded-lg bg-emerald-600 text-white shadow-xs">
+              <FileSpreadsheet className="w-4 h-4" />
+            </span>
+            <h3 className="text-sm font-black text-slate-800">
+              خروجی جدول اکسل (Excel / CSV) برای فاکتورها و لیست مشتریان
+            </h3>
+            <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200">
+              UTF-8 BOM سازگار با اکسل
+            </span>
+          </div>
+          <p className="text-xs text-slate-600 mt-1">
+            مناسب ارسال تبلیغات پیامکی، عضویت در کانال‌های رسانه‌ای، حسابداری و بایگانی فاکتورهای فروشگاه. ({orders.length} فاکتور، {uniqueCustomersCount} مشتری یکتا)
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex rounded-xl shadow-xs border border-emerald-300 overflow-hidden bg-white">
+            <button
+              type="button"
+              onClick={() => handleExportOrdersExcel(false)}
+              className="px-3.5 py-2 text-xs font-bold text-emerald-900 hover:bg-emerald-50 transition flex items-center gap-1.5 cursor-pointer border-l border-emerald-200"
+              title="خروجی تمام سفارشات و فاکتورها در فرمت اکسل"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+              <span>اکسل تمام فاکتورها ({orders.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleExportOrdersExcel(true)}
+              className="px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50 transition flex items-center gap-1 cursor-pointer bg-emerald-50/50"
+              title="فقط سفارشاتی که وضعیت پرداخت آن‌ها Paid است"
+            >
+              <span>فقط پرداخت‌شده‌ها ({orders.filter(o => o.paymentStatus === 'Paid').length})</span>
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleExportCustomersExcel}
+            className="px-4 py-2 rounded-xl text-xs font-black bg-blue-600 hover:bg-blue-700 text-white shadow-xs transition flex items-center gap-2 cursor-pointer"
+            title="خروجی شماره تلفن‌ها، نام، جمع مبالغ خرید و آدرس بدون شماره تکراری برای پنل پیامک"
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>خروجی لیست مشتریان (تبلیغات و پیامک)</span>
+            <span className="bg-blue-500/80 px-1.5 py-0.2 rounded-full text-[10px] font-mono">
+              {uniqueCustomersCount}
+            </span>
           </button>
         </div>
       </div>

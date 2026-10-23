@@ -1141,6 +1141,31 @@ function findOrderByTrackingOrCodePhp(&$db, $code, $dataFile, $legacyDataFile) {
     return null;
 }
 
+// ================= UNIFIED BALE & TELEGRAM WEBHOOK ROUTER =================
+if (
+    $path === '/api/webhook/bale' ||
+    $path === '/api/bot/webhook/bale' ||
+    $path === '/api/webhook/bale/customer' ||
+    $path === '/api/webhook/bale/admin' ||
+    $path === '/api/webhook/telegram' ||
+    $path === '/api/bot/webhook/telegram' ||
+    $path === '/api/webhook.php' ||
+    $path === '/api/bale-webhook.php' ||
+    $path === '/api/telegram-webhook.php' ||
+    $path === '/api/webhook'
+) {
+    if (strpos($path, 'telegram') !== false) {
+        $_GET['platform'] = 'telegram';
+    } else {
+        $_GET['platform'] = 'bale';
+    }
+    if (strpos($path, 'admin') !== false) {
+        $_GET['bot'] = 'admin';
+    }
+    require __DIR__ . '/webhook.php';
+    exit;
+}
+
 // ================= REAL BALE BOT WEBHOOK LISTENER (/api/webhook/bale) =================
 if (($path === '/api/webhook/bale' || $path === '/api/bot/webhook/bale') && $method === 'POST') {
     $update = $body;

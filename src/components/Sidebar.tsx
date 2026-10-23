@@ -16,7 +16,8 @@ import {
   Sparkles,
   Globe,
   Search,
-  X
+  X,
+  LogOut
 } from 'lucide-react';
 
 export type NavItem = 
@@ -44,6 +45,7 @@ interface SidebarProps {
   isOpen: boolean;
   onClose: () => void;
   onViewStorefront?: () => void;
+  onLogout?: () => void;
   brandName?: string;
   brandEnglishName?: string;
   siteLogo?: string;
@@ -60,6 +62,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isOpen,
   onClose,
   onViewStorefront,
+  onLogout,
   brandName = 'اونیوال',
   brandEnglishName = 'ONIVAL',
   siteLogo,
@@ -254,15 +257,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
           })}
         </nav>
 
-        {/* Footer Info */}
-        <div className="p-4 border-t border-slate-800 text-xs text-slate-400">
+        {/* Footer Info & Logout */}
+        <div className="p-4 border-t border-slate-800 text-xs text-slate-400 space-y-3">
           <div className="flex items-center justify-between">
             <span>سامانه فروشگاه:</span>
             <span className="font-mono text-amber-400 font-bold">{brandEnglishName || 'ONIVAL'} Core</span>
           </div>
-          <div className="mt-1 text-[11px] text-slate-400">
-            نسخه پایدار ۲.۴ • اتصال به سرور هاست و بات بله
+          <div className="text-[11px] text-slate-400">
+            نسخه ۱.۱.۰ (v1.1.0) • اتصال هاست، ربات بله و تلگرام
           </div>
+          {onLogout && (
+            <button
+              type="button"
+              onClick={() => {
+                onLogout();
+                onClose();
+              }}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold text-rose-300 hover:text-white bg-rose-500/10 hover:bg-rose-600/30 border border-rose-500/20 transition cursor-pointer"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>خروج از پنل مدیریت</span>
+            </button>
+          )}
         </div>
       </aside>
     </>

@@ -83,11 +83,26 @@ if (fs.existsSync(distDir)) {
     fs.mkdirSync(distApiDir, { recursive: true });
   }
 
-  const srcApiPhp = path.join(publicDir, 'api', 'index.php');
-  const destApiPhp = path.join(distApiDir, 'index.php');
-  if (fs.existsSync(srcApiPhp)) {
-    fs.copyFileSync(srcApiPhp, destApiPhp);
-    console.log('✓ Successfully copied PHP API router to dist/api/index.php');
+  // Ensure all PHP files in public/api exist in dist/api
+  const publicApiFiles = ['index.php', 'webhook.php', 'bale-webhook.php', 'telegram-webhook.php'];
+  for (const phpFile of publicApiFiles) {
+    const src = path.join(publicDir, 'api', phpFile);
+    const dest = path.join(distApiDir, phpFile);
+    if (fs.existsSync(src)) {
+      fs.copyFileSync(src, dest);
+      console.log(`✓ Copied ${phpFile} to dist/api/${phpFile}`);
+    }
+  }
+
+  // Ensure root PHP bot files for public_html exist in dist/
+  const rootPhpFiles = ['bale-bot.php', 'telegram-bot.php', 'bot-config.php'];
+  for (const phpFile of rootPhpFiles) {
+    const src = path.join(publicDir, phpFile);
+    const dest = path.join(distDir, phpFile);
+    if (fs.existsSync(src)) {
+      fs.copyFileSync(src, dest);
+      console.log(`✓ Copied ${phpFile} to dist/${phpFile}`);
+    }
   }
 
   // Ensure server-data directory and protective .htaccess exist in dist/

@@ -406,10 +406,10 @@
     "baleBotUsername": "Onivalbot",
     "baleBaseUrl": "https://tapi.bale.ai",
     "baleWebhookUrl": "http://localhost:3000/api/bot/webhook/bale",
-    "balePaymentMode": "test",
-    "balePaymentTokenTest": "WALLET-TEST-1111111111111111",
+    "balePaymentMode": "live",
+    "balePaymentTokenTest": "WALLET-v5gqSc1W1kaBUo2B",
     "balePaymentTokenLive": "WALLET-v5gqSc1W1kaBUo2B",
-    "balePaymentToken": "WALLET-TEST-1111111111111111",
+    "balePaymentToken": "WALLET-v5gqSc1W1kaBUo2B",
     "baleAutoSendInvoice": true,
     "baleAutoNotifyAdminAllTransactions": true,
     "baleAdminDirectApproval": true,
@@ -675,7 +675,7 @@
   },
   "adminCredentials": {
     "username": "admin",
-    "password": "admin",
+    "password": "6db4e37df1c2abbfca3529f83b23d5e17fad82dab3a4d8b12964d3c95295001b",
     "email": "admin@onival.com",
     "name": "مدیریت اونیوال (ONIVAL Admin)"
   },
@@ -1231,9 +1231,12 @@
     {
       "id": 104,
       "userFullName": "مریم شریفی",
+      "customerName": "مریم شریفی",
       "phoneNumber": "09124455667",
+      "customerPhone": "09124455667",
       "userAddress": "مشاوره آنلاین در پیام‌رسان بله (Bale) | آیدی/شماره: @maryam_sh | زمان: فردا - نوبت عصر (۱۶:۰۰ الی ۱۹:۰۰)",
       "totalPrice": 150000,
+      "finalTotal": 150000,
       "status": "Pending",
       "paymentStatus": "Unpaid",
       "paymentMethod": "bale_bot",
@@ -1406,5 +1409,5 @@
       }
     }
   ],
-  "updatedAt": "2026-10-21T09:02:45.202Z"
+  "updatedAt": "2026-10-23T09:31:23.017Z"
 }

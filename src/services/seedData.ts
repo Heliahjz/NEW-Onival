@@ -448,10 +448,10 @@ export const DEFAULT_TELEGRAM_CONFIG: TelegramConfig = {
   baleBotUsername: 'Onivalbot',
   baleBaseUrl: 'https://tapi.bale.ai',
   baleWebhookUrl: '',
-  balePaymentMode: 'live',
+  balePaymentMode: 'test',
   balePaymentTokenTest: 'WALLET-TEST-1111111111111111',
   balePaymentTokenLive: 'WALLET-v5gqSc1W1kaBUo2B',
-  balePaymentToken: 'WALLET-v5gqSc1W1kaBUo2B',
+  balePaymentToken: 'WALLET-TEST-1111111111111111',
   baleAutoSendInvoice: true,
   baleAutoNotifyAdminAllTransactions: true,
   baleAdminDirectApproval: true,
@@ -501,6 +501,40 @@ export const DEFAULT_BOT_LOGS: BotActivityLog[] = [
 export const DEFAULT_SITE_CONTENT: SiteContent = {
   brandName: 'اونیوال',
   brandEnglishName: 'ONIVAL',
+  showHeroEnglishBadge: true,
+  topBannerSettings: {
+    enabled: true,
+    intervalSeconds: 4,
+    autoRotate: true,
+    showDots: true,
+    showArrows: true,
+    banners: [
+      {
+        id: 'banner-1',
+        imageUrl: 'https://images.unsplash.com/photo-1587049352846-4a222e784d38?w=1600&auto=format&fit=crop&q=80',
+        title: 'عسل طبیعی و خام سبلان با ضمانت کتبی آزمایشگاه',
+        subtitle: 'برداشت مستقیم از دامنه کوهستان بدون حرارت‌دهی صنعتی و ساکارز زیر ۲٪',
+        linkUrl: '/categories/honey',
+        enabled: true
+      },
+      {
+        id: 'banner-2',
+        imageUrl: 'https://images.unsplash.com/photo-1550583724-b2692b85b150?w=1600&auto=format&fit=crop&q=80',
+        title: 'ژل رویال شاهانه ۱۰۰٪ خالص در زنجیره سرمایشی',
+        subtitle: 'اکسیر جوانی و تقویت سیستم ایمنی بدن، بسته‌بندی ایزوله یخچالی',
+        linkUrl: '/categories/supplement',
+        enabled: true
+      },
+      {
+        id: 'banner-3',
+        imageUrl: 'https://images.unsplash.com/photo-1627435601361-ec25f5b1d0e5?w=1600&auto=format&fit=crop&q=80',
+        title: 'دمنوش‌های ارگانیک کوهستان و سکنجبین سنتی',
+        subtitle: 'طبیعی، آرام‌بخش و تصفیه‌کننده کبد بدون شکر سفید صنعتی',
+        linkUrl: '/categories/drink',
+        enabled: true
+      }
+    ]
+  },
   siteLogo: '',
   siteLogoFit: 'cover',
   siteLogoShape: 'rounded',
