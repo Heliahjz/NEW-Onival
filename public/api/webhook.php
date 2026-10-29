@@ -117,8 +117,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         'ordersCount' => count($db['orders'] ?? []),
         'productsCount' => count($db['products'] ?? []),
         'baleCustomerBot' => '@' . ltrim($telegramConfig['baleBotUsername'] ?? 'Onivalbot', '@'),
-        'baleAdminBot' => '@' . ltrim($telegramConfig['baleAdminUsername'] ?? 'hasti_hjz', '@'),
-        'adminChatId' => $telegramConfig['baleAdminChatId'] ?? $telegramConfig['adminChatId'] ?? '69451465',
+        'baleAdminBot' => '@' . ltrim($telegramConfig['baleAdminUsername'] ?? '', '@'),
+        'adminChatId' => $telegramConfig['baleAdminChatId'] ?? $telegramConfig['adminChatId'] ?? '',
         'paymentMode' => $telegramConfig['balePaymentMode'] ?? 'live',
         'webhookUrl' => $currentUrl,
         'message' => 'وبهوک اختصاصی PHP فروشگاه اونیوال روی هاست فعال و آماده دریافت درخواست‌های بله و تلگرام است.'
@@ -145,36 +145,33 @@ $isTelegram = ($queryPlatform === 'telegram' || strpos($_SERVER['REQUEST_URI'] ?
 $platform = $isTelegram ? 'telegram' : 'bale';
 
 // Resolve Tokens & Base URLs
-$baleCustomerToken = trim($telegramConfig['baleBotToken'] ?? $telegramConfig['botToken'] ?? '1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34');
-$baleAdminToken = trim($telegramConfig['baleAdminBotToken'] ?? '');
-$telegramToken = trim($telegramConfig['telegramBotToken'] ?? '');
+$baleCustomerToken = trim((string)($telegramConfig['baleBotToken'] ?? $telegramConfig['botToken'] ?? ''));
+$baleAdminToken = trim((string)($telegramConfig['baleAdminBotToken'] ?? ''));
+$telegramToken = trim((string)($telegramConfig['telegramBotToken'] ?? ''));
 
-$baleBaseUrl = rtrim($telegramConfig['baleBaseUrl'] ?? $telegramConfig['baseUrl'] ?? 'https://tapi.bale.ai', '/');
-$telegramBaseUrl = rtrim($telegramConfig['telegramBaseUrl'] ?? 'https://api.telegram.org', '/');
+$baleBaseUrl = rtrim((string)($telegramConfig['baleBaseUrl'] ?? $telegramConfig['baseUrl'] ?? 'https://tapi.bale.ai'), '/');
+$telegramBaseUrl = rtrim((string)($telegramConfig['telegramBaseUrl'] ?? 'https://api.telegram.org'), '/');
 
 $activeBaseUrl = $isTelegram ? $telegramBaseUrl : $baleBaseUrl;
 $activeToken = $isTelegram ? $telegramToken : ($queryBot === 'admin' && !empty($baleAdminToken) ? $baleAdminToken : $baleCustomerToken);
 
 // Wallet Provider Token for Bale Invoices
 $walletToken = '';
-$baleMode = strtolower($telegramConfig['balePaymentMode'] ?? 'test');
+$baleMode = strtolower((string)($telegramConfig['balePaymentMode'] ?? 'test'));
 if ($baleMode === 'test') {
-    $walletToken = trim($telegramConfig['balePaymentTokenTest'] ?? 'WALLET-TEST-1111111111111111');
+    $walletToken = trim((string)($telegramConfig['balePaymentTokenTest'] ?? 'WALLET-TEST-1111111111111111'));
 } else {
     if (!empty($telegramConfig['balePaymentTokenLive'])) {
-        $walletToken = trim($telegramConfig['balePaymentTokenLive']);
+        $walletToken = trim((string)$telegramConfig['balePaymentTokenLive']);
     } elseif (!empty($telegramConfig['balePaymentToken'])) {
-        $walletToken = trim($telegramConfig['balePaymentToken']);
+        $walletToken = trim((string)$telegramConfig['balePaymentToken']);
     } else {
-        $walletToken = 'WALLET-TEST-1111111111111111';
+        $walletToken = '';
     }
 }
-if (empty($walletToken)) {
-    $walletToken = 'WALLET-TEST-1111111111111111';
-}
 
-$configuredAdminChat = trim($telegramConfig['baleAdminChatId'] ?? $telegramConfig['adminChatId'] ?? '69451465');
-$configuredAdminUser = strtolower(trim($telegramConfig['baleAdminUsername'] ?? 'hasti_hjz', '@'));
+$configuredAdminChat = trim((string)($telegramConfig['baleAdminChatId'] ?? $telegramConfig['adminChatId'] ?? ''));
+$configuredAdminUser = strtolower(trim((string)($telegramConfig['baleAdminUsername'] ?? ''), '@'));
 
 // cURL API Request Helper
 function callBotApi($baseUrl, $token, $method, $payload = []) {
@@ -423,10 +420,9 @@ if (!empty($update['message'])) {
     $text = trim($msg['text'] ?? ($msg['caption'] ?? ''));
     
     $isAdmin = (
-        $senderChatId === $configuredAdminChat ||
+        (!empty($configuredAdminChat) && $senderChatId === $configuredAdminChat) ||
         (!empty($configuredAdminUser) && $senderUsername === $configuredAdminUser) ||
-        $queryBot === 'admin' ||
-        $senderChatId === '69451465'
+        $queryBot === 'admin'
     );
     
     // Resolve dynamic site URLs

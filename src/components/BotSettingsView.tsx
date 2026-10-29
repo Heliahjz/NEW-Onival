@@ -60,7 +60,7 @@ interface BotSettingsViewProps {
 
 type HubTab = 'bots-config' | 'live-tester' | 'support-channels' | 'templates-automation' | 'logs-desk';
 
-const LEGACY_STORAGE_KEY = 'onival_saved_bot_config_v1';
+
 
 export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
   config,
@@ -75,99 +75,75 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
   onRefreshData,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<HubTab>('bots-config');
-  const [lastSavedAt, setLastSavedAt] = useState<string | null>(() => {
-    try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_BOT_CONFIG_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        return parsed._savedAt || null;
-      }
-    } catch {}
-    return null;
-  });
+  const [formData, setFormData] = useState<TelegramConfig>(() => ({
+    customerBotToken: config?.customerBotToken || config?.baleBotToken || config?.botToken || '',
+    customerBotUsername: config?.customerBotUsername || config?.baleBotUsername || config?.botUsername || 'Onivalbot',
+    customerBotEnabled: config?.customerBotEnabled ?? true,
+    adminBotToken: config?.adminBotToken || config?.baleBotToken || config?.botToken || '',
+    adminBotUsername: config?.adminBotUsername || 'OnivalAdminBot',
+    adminChatId: config?.adminChatId || config?.baleAdminChatId || '',
+    adminBotEnabled: config?.adminBotEnabled ?? true,
 
-  // Main comprehensive state synced with server telegramConfig + localStorage backup
-  const [formData, setFormData] = useState<TelegramConfig>(() => {
-    let cached: Partial<TelegramConfig> = {};
-    try {
-      const raw = localStorage.getItem(LOCAL_STORAGE_BOT_CONFIG_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
-      if (raw) cached = JSON.parse(raw);
-    } catch {}
+    botToken: config?.botToken || config?.baleBotToken || '',
+    botUsername: config?.botUsername || 'Onivalbot',
+    baleAdminUsername: config?.baleAdminUsername || '',
+    balePaymentMode: config?.balePaymentMode || 'live',
+    balePaymentTokenLive: config?.balePaymentTokenLive || '',
+    balePaymentTokenTest: config?.balePaymentTokenTest || '',
+    balePaymentToken: config?.balePaymentToken || '',
+    baleAutoSendInvoice: config?.baleAutoSendInvoice ?? true,
+    baleAutoNotifyAdminAllTransactions: config?.baleAutoNotifyAdminAllTransactions ?? true,
+    baleAdminDirectApproval: config?.baleAdminDirectApproval ?? true,
+    baseUrl: config?.baseUrl || 'https://tapi.bale.ai',
+    panelBaseUrl: config?.panelBaseUrl || window.location.origin,
+    antiSpamSeconds: config?.antiSpamSeconds ?? 5,
+    active: config?.active ?? true,
 
-    return {
-      // Two-Bot Dedicated Architecture:
-      customerBotToken: cached.customerBotToken || config.customerBotToken || cached.baleBotToken || config.baleBotToken || cached.botToken || config.botToken || '1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34',
-      customerBotUsername: cached.customerBotUsername || config.customerBotUsername || cached.baleBotUsername || config.baleBotUsername || cached.botUsername || config.botUsername || 'Onivalbot',
-      customerBotEnabled: cached.customerBotEnabled ?? config.customerBotEnabled ?? true,
-      adminBotToken: cached.adminBotToken || config.adminBotToken || cached.baleBotToken || config.baleBotToken || cached.botToken || config.botToken || '1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34',
-      adminBotUsername: cached.adminBotUsername || config.adminBotUsername || 'OnivalAdminBot',
-      adminChatId: cached.adminChatId || config.adminChatId || cached.baleAdminChatId || config.baleAdminChatId || '69451465',
-      adminBotEnabled: cached.adminBotEnabled ?? config.adminBotEnabled ?? true,
+    telegramBotEnabled: config?.telegramBotEnabled ?? true,
+    telegramBotToken: config?.telegramBotToken || '',
+    telegramAdminChatId: config?.telegramAdminChatId || '',
+    telegramBotUsername: config?.telegramBotUsername || 'onival_shop_bot',
+    telegramBaseUrl: config?.telegramBaseUrl || 'https://api.telegram.org',
+    telegramWebhookUrl: config?.telegramWebhookUrl || `${window.location.origin}/api/webhook/telegram`,
 
-      botToken: cached.botToken || config.botToken || '1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34',
-      botUsername: cached.botUsername || config.botUsername || 'Onivalbot',
-      baleAdminUsername: cached.baleAdminUsername || config.baleAdminUsername || '@hasti_hjz',
-      balePaymentMode: cached.balePaymentMode || config.balePaymentMode || 'live',
-      balePaymentTokenLive: cached.balePaymentTokenLive || config.balePaymentTokenLive || 'WALLET-v5gqSc1W1kaBUo2B',
-      balePaymentTokenTest: cached.balePaymentTokenTest || config.balePaymentTokenTest || 'WALLET-TEST-1111111111111111',
-      balePaymentToken: cached.balePaymentToken || config.balePaymentToken || 'WALLET-v5gqSc1W1kaBUo2B',
-      baleAutoSendInvoice: cached.baleAutoSendInvoice ?? config.baleAutoSendInvoice ?? true,
-      baleAutoNotifyAdminAllTransactions: cached.baleAutoNotifyAdminAllTransactions ?? config.baleAutoNotifyAdminAllTransactions ?? true,
-      baleAdminDirectApproval: cached.baleAdminDirectApproval ?? config.baleAdminDirectApproval ?? true,
-      baseUrl: cached.baseUrl || config.baseUrl || 'https://tapi.bale.ai',
-      panelBaseUrl: cached.panelBaseUrl || config.panelBaseUrl || window.location.origin,
-      antiSpamSeconds: cached.antiSpamSeconds ?? config.antiSpamSeconds ?? 5,
-      active: cached.active ?? config.active ?? true,
+    baleWebhookUrl: config?.baleWebhookUrl || `${window.location.origin}/api/webhook/bale`,
+    webhookSecretToken: config?.webhookSecretToken || '',
 
-      telegramBotEnabled: cached.telegramBotEnabled ?? config.telegramBotEnabled ?? true,
-      telegramBotToken: cached.telegramBotToken ?? config.telegramBotToken ?? '7192837465:AAH8xK9lP2mN4vB6cX8zQ1wE3rT5yU7iO9p',
-      telegramAdminChatId: cached.telegramAdminChatId || config.telegramAdminChatId || '923387796',
-      telegramBotUsername: cached.telegramBotUsername || config.telegramBotUsername || 'onival_shop_bot',
-      telegramBaseUrl: cached.telegramBaseUrl || config.telegramBaseUrl || 'https://api.telegram.org',
-      telegramWebhookUrl: cached.telegramWebhookUrl || config.telegramWebhookUrl || `${window.location.origin}/api/webhook/telegram`,
+    telegramSupportId: config?.telegramSupportId || siteContent?.contactTelegramId || '@onival_support',
+    telegramChannelId: config?.telegramChannelId || '@onival_official',
+    baleSupportId: config?.baleSupportId || siteContent?.contactBaleId || '@onival_bale_support',
+    baleChannelId: config?.baleChannelId || '@onival_bale',
+    instagramId: config?.instagramId || siteContent?.contactInstagramId || '@onival.ir',
+    whatsappNumber: config?.whatsappNumber || '09123456789',
+    eitaaSupportId: config?.eitaaSupportId || '@onival_eitaa',
+    rubikaSupportId: config?.rubikaSupportId || '@onival_rubika',
+    supportPhone: config?.supportPhone || siteContent?.contactPhone || '021-88776655',
+    supportEmail: config?.supportEmail || siteContent?.contactEmail || 'support@onival.ir',
+    workingHours: config?.workingHours || siteContent?.contactWorkingHours || 'شنبه تا پنجشنبه از ساعت ۹ صبح الی ۲۱ شب',
+    autoReplyEnabled: config?.autoReplyEnabled ?? true,
+    floatingWidgetEnabled: config?.floatingWidgetEnabled ?? true,
 
-      baleWebhookUrl: cached.baleWebhookUrl || config.baleWebhookUrl || `${window.location.origin}/api/webhook/bale`,
-      webhookSecretToken: cached.webhookSecretToken || config.webhookSecretToken || 'ONIVAL_SEC_2025_9981',
+    notifyOnNewOrder: config?.notifyOnNewOrder ?? true,
+    notifyOnReceiptUpload: config?.notifyOnReceiptUpload ?? true,
+    notifyOnNewTicket: config?.notifyOnNewTicket ?? true,
+    notifyCustomerOnStatusChange: config?.notifyCustomerOnStatusChange ?? true,
 
-      telegramSupportId: cached.telegramSupportId || config.telegramSupportId || siteContent?.contactTelegramId || '@onival_support',
-      telegramChannelId: cached.telegramChannelId || config.telegramChannelId || '@onival_official',
-      baleSupportId: cached.baleSupportId || config.baleSupportId || siteContent?.contactBaleId || '@onival_bale_support',
-      baleChannelId: cached.baleChannelId || config.baleChannelId || '@onival_bale',
-      instagramId: cached.instagramId || config.instagramId || siteContent?.contactInstagramId || '@onival.ir',
-      whatsappNumber: cached.whatsappNumber || config.whatsappNumber || '09123456789',
-      eitaaSupportId: cached.eitaaSupportId || config.eitaaSupportId || '@onival_eitaa',
-      rubikaSupportId: cached.rubikaSupportId || config.rubikaSupportId || '@onival_rubika',
-      supportPhone: cached.supportPhone || config.supportPhone || siteContent?.contactPhone || '021-88776655',
-      supportEmail: cached.supportEmail || config.supportEmail || siteContent?.contactEmail || 'support@onival.ir',
-      workingHours: cached.workingHours || config.workingHours || siteContent?.contactWorkingHours || 'شنبه تا پنجشنبه از ساعت ۹ صبح الی ۲۱ شب',
-      autoReplyEnabled: cached.autoReplyEnabled ?? config.autoReplyEnabled ?? true,
-      floatingWidgetEnabled: cached.floatingWidgetEnabled ?? config.floatingWidgetEnabled ?? true,
-
-      notifyOnNewOrder: cached.notifyOnNewOrder ?? config.notifyOnNewOrder ?? true,
-      notifyOnReceiptUpload: cached.notifyOnReceiptUpload ?? config.notifyOnReceiptUpload ?? true,
-      notifyOnNewTicket: cached.notifyOnNewTicket ?? config.notifyOnNewTicket ?? true,
-      notifyCustomerOnStatusChange: cached.notifyCustomerOnStatusChange ?? config.notifyCustomerOnStatusChange ?? true,
-
-      welcomeTemplate:
-        cached.welcomeTemplate ||
-        config.welcomeTemplate ||
-        'سلام {name} عزیز! 🌸 به ربات رسمی فروشگاه چرم اونیوال خوش آمدید.\nبرای پیگیری سفارش یا پرداخت فاکتور، کد پیگیری خود را ارسال نمایید.',
-      orderInvoiceTemplate:
-        cached.orderInvoiceTemplate ||
-        config.orderInvoiceTemplate ||
-        '🛍 سفارش جدید در فروشگاه اونیوال ثبت شد!\n🔖 کد پیگیری: {trackingCode}\n👤 مشتری: {customerName}\n💳 مبلغ کل: {totalPrice} تومان\n📍 وضعیت: در انتظار پرداخت',
-      receiptApprovedTemplate:
-        cached.receiptApprovedTemplate ||
-        config.receiptApprovedTemplate ||
-        '✅ مشتری گرامی {customerName}، فیش واریزی شما برای سفارش #{trackingCode} تایید شد و بسته شما وارد مرحله آماده‌سازی گردید.',
-      supportReplyTemplate:
-        cached.supportReplyTemplate ||
-        config.supportReplyTemplate ||
-        '💬 پاسخ پشتیبانی اونیوال به پیام شما (کد پیگیری #{trackingCode}):\n\n{response}\n\nبا تشکر از همراهی شما🌺',
-    };
-  });
+    welcomeTemplate:
+      config?.welcomeTemplate ||
+      'سلام {name} عزیز! 🌸 به ربات رسمی فروشگاه تخصصی فرآورده‌های ارگانیک اونیوال خوش آمدید.\nبرای پیگیری سفارش یا پرداخت فاکتور، کد پیگیری خود را ارسال نمایید.',
+    orderInvoiceTemplate:
+      config?.orderInvoiceTemplate ||
+      '🛍 سفارش جدید در فروشگاه اونیوال ثبت شد!\n🔖 کد پیگیری: {trackingCode}\n👤 مشتری: {customerName}\n💳 مبلغ کل: {totalPrice} تومان\n📍 وضعیت: در انتظار پرداخت',
+    receiptApprovedTemplate:
+      config?.receiptApprovedTemplate ||
+      '✅ مشتری گرامی {customerName}، فیش واریزی شما برای سفارش #{trackingCode} تایید شد و بسته شما وارد مرحله آماده‌سازی گردید.',
+    supportReplyTemplate:
+      config?.supportReplyTemplate ||
+      '💬 پاسخ پشتیبانی اونیوال به پیام شما (کد پیگیری #{trackingCode}):\n\n{response}\n\nبا تشکر از همراهی شما🌺',
+  }));
 
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
 
   const updateField = (patch: Partial<TelegramConfig>) => {
     setFormData((prev) => ({ ...prev, ...patch }));
@@ -203,7 +179,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
 
   // Live Message Dispatcher States
   const [testTargetPlatform, setTestTargetPlatform] = useState<'bale' | 'telegram' | 'both'>('both');
-  const [testChatId, setTestChatId] = useState<string>(config.adminChatId || '923387796');
+  const [testChatId, setTestChatId] = useState<string>(config.adminChatId || '');
   const [testMessageText, setTestMessageText] = useState<string>(
     '🔔 پیام تست مستقیم از مرکز فرماندهی پشتیبانی اونیوال\n✅ ارتباط وب‌سرویس ربات برقرار و آماده دریافت سفارشات است.'
   );
@@ -228,12 +204,21 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
   // Standalone PHP Files Viewer & Downloader for public_html
   const [phpModal, setPhpModal] = useState<{ open: boolean; filename: string; title: string; code: string; loading: boolean } | null>(null);
 
+  const fetchDynamicPhpCode = async (fileName: string): Promise<string> => {
+    const cleanFile = fileName.replace(/[^a-zA-Z0-9_.-]/g, '');
+    const res = await apiFetch(`/api/bot/php-code/${cleanFile}`);
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || errData.message || 'خطا در دریافت کد فایل از سرور');
+    }
+    const data = await res.json();
+    return data.code;
+  };
+
   const handleDownloadPhp = async (fileName: string) => {
     try {
-      const res = await fetch(`/${fileName}`);
-      if (!res.ok) throw new Error('فایل یافت نشد');
-      const text = await res.text();
-      const blob = new Blob([text], { type: 'application/x-httpd-php' });
+      const code = await fetchDynamicPhpCode(fileName);
+      const blob = new Blob([code], { type: 'application/x-httpd-php;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -242,29 +227,27 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      showToast(`فایل ${fileName} با موفقیت دانلود شد. می‌توانید آن را در public_html آپلود کنید.`, 'success');
+      showToast(`فایل استاندارد و ایمن ${fileName} بر اساس تنظیمات فعلی دانلود گردید.`, 'success');
     } catch (err: any) {
       showToast(`خطا در دانلود ${fileName}: ${err.message}`, 'error');
     }
   };
 
   const handleOpenPhpCodeModal = async (fileName: string, title: string) => {
-    setPhpModal({ open: true, filename: fileName, title, code: 'در حال بارگذاری کدهای فایل...', loading: true });
+    setPhpModal({ open: true, filename: fileName, title, code: 'در حال تولید امن کدهای سازگار با PHP 8.5...', loading: true });
     try {
-      const res = await fetch(`/${fileName}`);
-      const text = await res.text();
-      setPhpModal({ open: true, filename: fileName, title, code: text, loading: false });
-    } catch {
-      setPhpModal(prev => prev ? { ...prev, code: '// خطا در بارگذاری مستقیم فایل. فایل در پوشه public قرار دارد.', loading: false } : null);
+      const code = await fetchDynamicPhpCode(fileName);
+      setPhpModal({ open: true, filename: fileName, title, code, loading: false });
+    } catch (err: any) {
+      setPhpModal(prev => prev ? { ...prev, code: `// خطا در بارگذاری: ${err.message}`, loading: false } : null);
     }
   };
 
   const handleCopyPhpCode = async (fileName: string) => {
     try {
-      const res = await fetch(`/${fileName}`);
-      const text = await res.text();
-      await navigator.clipboard.writeText(text);
-      showToast(`کدهای کامل فایل ${fileName} در حافظه کپی شد. می‌توانید در File Manager سی‌پنل ذخیره کنید.`, 'success');
+      const code = await fetchDynamicPhpCode(fileName);
+      await navigator.clipboard.writeText(code);
+      showToast(`کدهای به‌روز فایل ${fileName} در حافظه کپی شد. می‌توانید در File Manager هاست ذخیره نمایید.`, 'success');
     } catch (err: any) {
       showToast(`خطا در کپی کدهای ${fileName}: ${err.message}`, 'error');
     }
@@ -285,7 +268,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           chatId: testChatId || formData.adminChatId,
-          providerToken: activeToken || 'WALLET-v5gqSc1W1kaBUo2B',
+          providerToken: activeToken || '',
           priceToman: 350000
         }),
       });
@@ -382,16 +365,12 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
     setIsSaving(true);
     try {
       const { savedAt } = await saveActiveBotConfig(formData);
-      try {
-        localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify({ ...formData, _savedAt: savedAt, _lastUpdated: Date.now() }));
-      } catch {}
       await onUpdateConfig(formData);
       setHasUnsavedChanges(false);
-      setLastSavedAt(savedAt);
-      setSaveSuccessNotice('تنظیمات، توکن‌های بله و اطلاعات ادمین با موفقیت در LocalStorage و سرور ذخیره شد.');
+      setSaveSuccessNotice('تنظیمات، توکن‌های ربات‌ها و اطلاعات ادمین با موفقیت روی دیسک سرور ذخیره شد.');
       setTimeout(() => setSaveSuccessNotice(null), 6000);
       if (onRefreshData) await onRefreshData();
-      showToast('تمامی توکن‌ها، کدها، چت‌آیدی‌ها و تنظیمات ربات‌ها با موفقیت ذخیره شدند.', 'success');
+      showToast('تمامی توکن‌ها، چت‌آیدی‌ها و تنظیمات ربات‌ها با موفقیت در دیتابیس سرور ذخیره شدند.', 'success');
     } catch (err: any) {
       showToast(err?.message || 'خطا در ذخیره‌سازی تنظیمات', 'error');
     } finally {
@@ -964,32 +943,32 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                 </div>
               </div>
 
-              {/* File 3: bot-config.php & Step Guide */}
+              {/* Card 3: PHP 8.5 & cPanel Deployment Guide */}
               <div className="bg-white/5 backdrop-blur-md rounded-2xl p-4 border border-indigo-400/30 flex flex-col justify-between space-y-4 hover:border-indigo-400/60 transition">
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-indigo-500 text-white">راهنمای استقرار دستی</span>
-                    <span className="text-[11px] font-mono text-slate-400">۳ مرحله آسان</span>
+                    <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-indigo-500 text-white">سازگار با PHP 8.5 و 8.x</span>
+                    <span className="text-[11px] font-mono text-slate-400">بدون وابستگی خارجی</span>
                   </div>
                   <h4 className="text-sm font-black text-white flex items-center gap-1.5">
                     <BookOpen className="w-4 h-4 text-indigo-400" />
                     <span>مراحل استقرار در cPanel</span>
                   </h4>
                   <ul className="text-[11px] text-slate-300 mt-2 space-y-1.5 list-disc list-inside leading-relaxed">
-                    <li>فایل <strong className="text-emerald-300 font-mono">bale-bot.php</strong> را دانلود فرمایید.</li>
+                    <li>فایل <strong className="text-emerald-300 font-mono">bale-bot.php</strong> را از دکمه بالا دانلود فرمایید.</li>
                     <li>در سی‌پنل وارد <strong className="text-white">File Manager</strong> شده و فایل را در روت <strong className="text-amber-300 font-mono">public_html</strong> آپلود فرمایید.</li>
-                    <li>در کارت زیر دکمه <strong className="text-emerald-400">«ثبت وب‌هوک در بله»</strong> را بزنید یا آدرس را با <code className="text-sky-300">set_webhook=1?</code> در مرورگر باز کنید.</li>
+                    <li>در کارت زیر دکمه <strong className="text-emerald-400">«ثبت وب‌هوک در بله»</strong> را بزنید؛ توکن امنیتی به صورت خودکار ثبت می‌گردد.</li>
                   </ul>
                 </div>
 
                 <div className="pt-2 border-t border-white/10 flex gap-2">
                   <button
                     type="button"
-                    onClick={() => handleDownloadPhp('bot-config.php')}
-                    className="flex-1 px-3 py-2 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/40 text-indigo-300 text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
+                    onClick={() => handleDownloadPhp('bale-bot.php')}
+                    className="flex-1 px-3 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
                   >
                     <Download className="w-3.5 h-3.5" />
-                    <span>دانلود bot-config.php</span>
+                    <span>دانلود bale-bot.php (PHP 8.5)</span>
                   </button>
                 </div>
               </div>
@@ -1063,7 +1042,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                         const val = e.target.value.trim();
                         updateField({ customerBotToken: val, botToken: val, baleBotToken: val });
                       }}
-                      placeholder="1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34"
+                      placeholder="توکن ربات بله (دریافت شده از BotFather@)"
                       className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-xs font-mono text-left bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
                     />
                   </div>
@@ -1134,9 +1113,9 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                         <input
                           type="text"
                           dir="ltr"
-                          value={formData.balePaymentTokenLive || 'WALLET-v5gqSc1W1kaBUo2B'}
+                          value={formData.balePaymentTokenLive || ''}
                           onChange={(e) => updateField({ balePaymentTokenLive: e.target.value })}
-                          placeholder="WALLET-v5gqSc1W1kaBUo2B"
+                          placeholder="WALLET-XXXXX-XXXXXXXX (از پشتیبانی بله)"
                           className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs font-mono text-left bg-white focus:outline-hidden focus:border-emerald-500"
                         />
                       </div>
@@ -1145,7 +1124,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                         <input
                           type="text"
                           dir="ltr"
-                          value={formData.balePaymentTokenTest || 'WALLET-TEST-1111111111111111'}
+                          value={formData.balePaymentTokenTest || ''}
                           onChange={(e) => updateField({ balePaymentTokenTest: e.target.value })}
                           placeholder="WALLET-TEST-1111111111111111"
                           className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs font-mono text-left bg-white focus:outline-hidden focus:border-emerald-500"
@@ -1333,7 +1312,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                       dir="ltr"
                       value={formData.adminBotToken || formData.botToken}
                       onChange={(e) => updateField({ adminBotToken: e.target.value.trim() })}
-                      placeholder="1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34"
+                      placeholder="توکن ربات ادمین (اختیاری - دریافت شده از BotFather@)"
                       className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-xs font-mono text-left bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                     />
                     <span className="text-[10px] text-slate-400 mt-1 block">می‌توانید همان توکن یا یک توکن اختصاصی دیگر برای تفکیک پیام‌های ادمین وارد کنید.</span>
@@ -1346,7 +1325,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                       <input
                         type="text"
                         dir="ltr"
-                        value={formData.adminBotUsername || 'OnivalAdminBot'}
+                        value={formData.adminBotUsername || ''}
                         onChange={(e) => updateField({ adminBotUsername: e.target.value.replace('@', '').trim() })}
                         placeholder="OnivalAdminBot"
                         className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-xs font-mono text-left focus:outline-hidden focus:border-indigo-500"
@@ -1359,7 +1338,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                         dir="ltr"
                         value={formData.baleAdminUsername || ''}
                         onChange={(e) => updateField({ baleAdminUsername: e.target.value.trim() })}
-                        placeholder="@hasti_hjz"
+                        placeholder="@admin_username"
                         className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-xs font-mono text-left focus:outline-hidden focus:border-indigo-500"
                       />
                     </div>
@@ -1377,7 +1356,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                           const val = e.target.value.trim();
                           updateField({ adminChatId: val, baleAdminChatId: val });
                         }}
-                        placeholder="69451465"
+                        placeholder="12345678"
                         className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-xs font-mono text-left focus:outline-hidden focus:border-indigo-500 font-bold"
                       />
                       <span className="text-[10px] text-indigo-700 font-medium mt-1 block">چت‌آیدی حسابی که پیام‌ها و فیش‌ها به آن تحویل داده می‌شود.</span>
@@ -1534,7 +1513,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                       dir="ltr"
                       value={formData.telegramBotToken || ''}
                       onChange={(e) => updateField({ telegramBotToken: e.target.value })}
-                      placeholder="7192837465:AAH8xK9lP2mN4vB6cX8zQ1wE3rT5yU7iO9p"
+                      placeholder="توکن ربات تلگرام (مثال: 123456789:ABCdefGHI...)"
                       className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-xs font-mono text-left bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500"
                     />
                   </div>
@@ -1547,7 +1526,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                         dir="ltr"
                         value={formData.telegramAdminChatId || ''}
                         onChange={(e) => updateField({ telegramAdminChatId: e.target.value })}
-                        placeholder="923387796"
+                        placeholder="شناسه عددی چت مدیر در تلگرام"
                         className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-xs font-mono text-left focus:outline-hidden focus:border-sky-500"
                       />
                     </div>
@@ -1668,7 +1647,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                 </div>
                 <div>
                   <h4 className="text-sm font-black text-white">راهنمای فعال‌سازی، پرداخت کیف پول و تایید سفارشات در پیام‌رسان بله</h4>
-                  <p className="text-xs text-slate-300">جریان یکپارچه پرداخت مشتری، صدور فاکتور و کنترل تراکنش‌ها توسط اکانت شخصی ادمین (@{(formData.baleAdminUsername || 'hasti_hjz').replace('@', '')})</p>
+                  <p className="text-xs text-slate-300">جریان یکپارچه پرداخت مشتری، صدور فاکتور و کنترل تراکنش‌ها توسط اکانت شخصی ادمین {formData.baleAdminUsername ? `(@${formData.baleAdminUsername.replace('@', '')})` : ''}</p>
                 </div>
               </div>
               <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
@@ -1683,7 +1662,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                   <span>اتصال اکانت شخصی ادمین</span>
                 </div>
                 <p className="text-slate-300">
-                  جهت اتصال اکانت شخصی <strong className="text-white">@{(formData.baleAdminUsername || 'hasti_hjz').replace('@', '')}</strong>، کافی است یک بار در بله وارد بازوی <a href={`https://ble.ir/${(formData.botUsername || 'Onivalbot').replace('@', '')}`} target="_blank" rel="noreferrer" className="text-emerald-400 underline">@{(formData.botUsername || 'Onivalbot').replace('@', '')}</a> شده و دکمه <code className="bg-black/30 px-1.5 py-0.5 rounded text-amber-300">/start</code> را لمس فرمایید تا چت آیدی شما به عنوان مدیر فروشگاه ثبت شود.
+                  جهت دریافت اعلانات سفارشات توسط ادمین، شناسه عددی چت و آیدی کاربری خود را در کادرهای بالا وارد نموده و ذخیره فرمایید. تمامی رویدادها بلافاصله به حساب شما ارسال می‌شوند.
                 </p>
               </div>
 
@@ -1818,7 +1797,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                       dir="ltr"
                       value={testChatId}
                       onChange={(e) => setTestChatId(e.target.value)}
-                      placeholder="923387796"
+                      placeholder="شناسه عددی چت برای تست (Chat ID)"
                       className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-xs font-mono text-left"
                     />
                   </div>
@@ -2040,7 +2019,7 @@ export const BotSettingsView: React.FC<BotSettingsViewProps> = ({
                   >
                     <div>
                       <div className="text-xs font-black text-emerald-950 flex items-center gap-1.5">
-                        <span>۳. تست چرخه پرداخت کیف پول بله و اعلان به @{(formData.baleAdminUsername || 'hasti_hjz').replace('@', '')}</span>
+                        <span>۳. تست چرخه پرداخت کیف پول بله و اعلان به مدیر</span>
                         <span className="px-1.5 py-0.5 rounded bg-emerald-200 text-emerald-900 text-[10px]">پیشنهادی</span>
                       </div>
                       <div className="text-[11px] text-emerald-700">شبیه‌سازی صدور فاکتور، پرداخت کیف پول، تایید مشتری و نوتیفیکیشن ادمین</div>

@@ -104,6 +104,8 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
   const [imageZoomLevel, setImageZoomLevel] = useState<number>(2);
   const [discountPercent, setDiscountPercent] = useState<number>(0);
   const [isAmazingOffer, setIsAmazingOffer] = useState<boolean>(false);
+  const [stock, setStock] = useState<number>(20);
+  const [specialOfferStock, setSpecialOfferStock] = useState<number>(3);
 
   // SEO & Publishing states
   const [status, setStatus] = useState<PublicationStatus>('published');
@@ -128,8 +130,8 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
     setPrice('');
     setHasSize(false);
     setSizes([
-      { name: 'نیم کیلوگرم (۵۰۰ گرم)', price: 200000 },
-      { name: 'یک کیلوگرم (۱۰۰۰ گرم)', price: 380000 },
+      { name: 'نیم کیلوگرم (۵۰۰ گرم)', price: 200000, stock: 15, specialOfferStock: 2 },
+      { name: 'یک کیلوگرم (۱۰۰۰ گرم)', price: 380000, stock: 10, specialOfferStock: 2 },
     ]);
     setShortDescription('');
     setDescription('');
@@ -146,6 +148,8 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
     setImageZoomLevel(2);
     setDiscountPercent(0);
     setIsAmazingOffer(false);
+    setStock(20);
+    setSpecialOfferStock(3);
     setStatus('published');
     setAvailability('InStock');
     setSku('');
@@ -170,16 +174,23 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
     setPrice(product.price.toString());
     setHasSize(product.hasSize);
     if (product.sizes && product.sizes.length > 0) {
-      setSizes([...product.sizes]);
+      setSizes(product.sizes.map((s) => ({
+        ...s,
+        stock: s.stock !== undefined ? s.stock : 10,
+        specialOfferStock: s.specialOfferStock !== undefined ? s.specialOfferStock : 0,
+        isOutOfStock: Boolean(s.isOutOfStock || (s.stock !== undefined && s.stock <= 0)),
+      })));
     } else if (product.hasSize) {
+      const halfStock = Math.floor((product.stock || 20) / 2);
+      const halfQuota = Math.floor((product.specialOfferStock || 0) / 2);
       setSizes([
-        { name: 'سایز کوچک (۵۰۰ گرم)', price: product.priceSmall || product.price },
-        { name: 'سایز بزرگ (۱ کیلوگرم)', price: product.priceLarge || product.price },
+        { name: 'سایز کوچک (۵۰۰ گرم)', price: product.priceSmall || product.price, stock: halfStock, specialOfferStock: halfQuota },
+        { name: 'سایز بزرگ (۱ کیلوگرم)', price: product.priceLarge || product.price, stock: Math.max(1, (product.stock || 20) - halfStock), specialOfferStock: Math.max(0, (product.specialOfferStock || 0) - halfQuota) },
       ]);
     } else {
       setSizes([
-        { name: 'نیم کیلوگرم (۵۰۰ گرم)', price: 200000 },
-        { name: 'یک کیلوگرم (۱۰۰۰ گرم)', price: 380000 },
+        { name: 'نیم کیلوگرم (۵۰۰ گرم)', price: 200000, stock: 15, specialOfferStock: 2 },
+        { name: 'یک کیلوگرم (۱۰۰۰ گرم)', price: 380000, stock: 10, specialOfferStock: 2 },
       ]);
     }
     setShortDescription(product.shortDescription || product.description || '');
@@ -201,9 +212,11 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
     setImageZoomLevel(product.imageZoomLevel || 2);
 
     setDiscountPercent(product.discount ?? product.discountPercent ?? 0);
-    setIsAmazingOffer(Boolean(product.isAmazingOffer || (product.discount ?? 0) > 0));
+    setIsAmazingOffer(Boolean(product.isAmazingOffer || product.isSpecialOffer || (product.discount ?? 0) > 0));
+    setStock(product.stock !== undefined ? product.stock : 20);
+    setSpecialOfferStock(product.specialOfferStock !== undefined ? product.specialOfferStock : (product.discount ? 3 : 0));
     setStatus(product.status || 'published');
-    setAvailability(product.availability || 'InStock');
+    setAvailability(product.availability || ((product.stock !== undefined && product.stock <= 0) ? 'OutOfStock' : 'InStock'));
     setSku(product.sku || `ONV-${product.id}`);
     setBrand(product.brand || 'اونیوال | ONIVAL');
     setSeoTitle(product.seoTitle || '');
@@ -316,7 +329,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
   };
 
   const handleAddSizeRow = () => {
-    setSizes([...sizes, { name: '', price: 0 }]);
+    setSizes([...sizes, { name: '', price: 0, stock: 10, specialOfferStock: 0, isOutOfStock: false }]);
   };
 
   const handleRemoveSizeRow = (index: number) => {
@@ -324,12 +337,22 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
     setSizes(sizes.filter((_, idx) => idx !== index));
   };
 
-  const handleSizeChange = (index: number, field: 'name' | 'price', val: string) => {
+  const handleSizeChange = (
+    index: number,
+    field: 'name' | 'price' | 'stock' | 'specialOfferStock',
+    val: string
+  ) => {
     const updated = [...sizes];
     if (field === 'name') {
       updated[index].name = val;
-    } else {
-      updated[index].price = Number(val) || 0;
+    } else if (field === 'price') {
+      updated[index].price = Math.max(0, Number(val) || 0);
+    } else if (field === 'stock') {
+      const stockVal = Math.max(0, parseInt(val, 10) || 0);
+      updated[index].stock = stockVal;
+      updated[index].isOutOfStock = stockVal <= 0;
+    } else if (field === 'specialOfferStock') {
+      updated[index].specialOfferStock = Math.max(0, parseInt(val, 10) || 0);
     }
     setSizes(updated);
   };
@@ -350,7 +373,23 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
       return;
     }
 
-    const validSizes = hasSize ? sizes.filter((s) => s.name.trim() !== '') : [];
+    const validSizes = hasSize
+      ? sizes
+          .filter((s) => s.name.trim() !== '')
+          .map((s) => {
+            const rowStock = Math.max(0, Number(s.stock !== undefined ? s.stock : 10));
+            const rowOffer = Math.max(0, Number(s.specialOfferStock !== undefined ? s.specialOfferStock : 0));
+            return {
+              name: s.name.trim(),
+              price: Math.max(0, Number(s.price) || 0),
+              stock: rowStock,
+              specialOfferStock: rowOffer,
+              isOutOfStock: rowStock <= 0,
+              sku: s.sku || undefined,
+            };
+          })
+      : [];
+
     const basePrice =
       hasSize && validSizes.length > 0 ? validSizes[0].price : Number(price) || 0;
 
@@ -363,6 +402,14 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
     if (!resolvedImages.includes(resolvedCover)) {
       resolvedImages.unshift(resolvedCover);
     }
+
+    const computedTotalStock = hasSize && validSizes.length > 0
+      ? validSizes.reduce((sum, s) => sum + (s.stock ?? 0), 0)
+      : Math.max(0, Number(stock) || 0);
+
+    const computedTotalOfferStock = hasSize && validSizes.length > 0
+      ? validSizes.reduce((sum, s) => sum + (s.specialOfferStock ?? 0), 0)
+      : (isAmazingOffer || resolvedDiscount > 0 ? Math.max(0, Number(specialOfferStock) || 0) : 0);
 
     const payload: Partial<Product> = {
       title: title.trim(),
@@ -384,12 +431,16 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
       videoType: videoUrl.trim() ? videoType : undefined,
       imageAspectRatio,
       imageFitMode,
-      imageZoomLevel: Number(imageZoomLevel) || 2,
       discount: resolvedDiscount,
       discountPercent: resolvedDiscount,
       isAmazingOffer,
+      isSpecialOffer: Boolean(isAmazingOffer || (resolvedDiscount > 0 && computedTotalOfferStock > 0)),
+      stock: computedTotalStock,
+      isOutOfStock: computedTotalStock <= 0,
+      specialOfferStock: computedTotalOfferStock,
+      specialOfferInitialStock: Math.max(computedTotalOfferStock, editingProduct?.specialOfferInitialStock || computedTotalOfferStock),
       status,
-      availability,
+      availability: computedTotalStock <= 0 ? 'OutOfStock' : availability,
       sku: sku.trim() || `ONV-${editingProduct?.id || Date.now()}`,
       brand: brand.trim() || 'اونیوال | ONIVAL',
       seoTitle: seoTitle.trim() || `${title.trim()} | خرید با ضمانت آزمایشگاهی از اونیوال`,
@@ -533,9 +584,20 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                       </span>
                     )}
 
+                    {(product.stock !== undefined && product.stock <= 0) || product.availability === 'OutOfStock' ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-900 text-white shadow-sm">
+                        ناموجود
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-sky-700 text-white shadow-sm">
+                        موجودی: {product.stock ?? 20} عدد
+                      </span>
+                    )}
+
                     {(product.discount ?? product.discountPercent ?? 0) > 0 ? (
                       <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black bg-rose-600 text-white shadow-sm">
                         {product.discount ?? product.discountPercent}٪ تخفیف
+                        {product.specialOfferStock !== undefined && product.specialOfferStock > 0 ? ` (سهمیه: ${product.specialOfferStock})` : ''}
                       </span>
                     ) : null}
                   </div>
@@ -762,8 +824,8 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                     </button>
                   </div>
 
-                  {/* Category & Stock Availability */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {/* Category, Inventory Stock & Pricing */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3.5">
                     <div>
                       <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                         دسته‌بندی محصول
@@ -771,7 +833,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                       <select
                         value={productCategoryId}
                         onChange={(e) => setProductCategoryId(Number(e.target.value))}
-                        className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                       >
                         {categories.map((c) => (
                           <option key={c.id} value={c.id}>
@@ -783,12 +845,41 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
 
                     <div>
                       <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                        وضعیت موجودی (Schema Offer)
+                        موجودی انبار (تعداد کل) *
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        required
+                        value={stock}
+                        onChange={(e) => {
+                          const val = Math.max(0, parseInt(e.target.value, 10) || 0);
+                          setStock(val);
+                          if (val === 0) {
+                            setAvailability('OutOfStock');
+                          } else if (availability === 'OutOfStock') {
+                            setAvailability('InStock');
+                          }
+                        }}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                        placeholder="مثلاً: 25"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                        وضعیت عرضه و فروش
                       </label>
                       <select
                         value={availability}
-                        onChange={(e) => setAvailability(e.target.value as StockAvailability)}
-                        className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                        onChange={(e) => {
+                          const newAvail = e.target.value as StockAvailability;
+                          setAvailability(newAvail);
+                          if (newAvail === 'OutOfStock' && stock > 0) {
+                            setStock(0);
+                          }
+                        }}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                       >
                         <option value="InStock">موجود در انبار (InStock)</option>
                         <option value="OutOfStock">ناموجود (OutOfStock)</option>
@@ -806,20 +897,20 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                           required={!hasSize}
                           value={price}
                           onChange={(e) => setPrice(e.target.value)}
-                          className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                           placeholder="مثلاً: 250000"
                         />
                       </div>
                     )}
                   </div>
 
-                  {/* Discount & Amazing Offer */}
+                  {/* Discount & Amazing Offer with Quota Control */}
                   <div className="p-4 bg-rose-50/60 rounded-2xl border border-rose-200/70 space-y-3">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div className="flex items-center gap-2">
                         <Percent className="w-4 h-4 text-rose-600" />
                         <span className="text-xs font-bold text-slate-800">
-                          تنظیمات تخفیف و پیشنهاد شگفت‌انگیز
+                          تنظیمات تخفیف و سهمیه پیشنهاد شگفت‌انگیز
                         </span>
                       </div>
 
@@ -828,7 +919,12 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                           <button
                             key={preset}
                             type="button"
-                            onClick={() => setDiscountPercent(preset)}
+                            onClick={() => {
+                              setDiscountPercent(preset);
+                              if (preset > 0 && specialOfferStock === 0) {
+                                setSpecialOfferStock(3);
+                              }
+                            }}
                             className={`px-2 py-1 rounded-lg text-[11px] font-bold transition ${
                               discountPercent === preset
                                 ? 'bg-rose-600 text-white shadow-sm'
@@ -841,7 +937,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
                       <div>
                         <label className="block text-[11px] font-semibold text-slate-600 mb-1">
                           درصد تخفیف (۰ تا ۹۰ درصد)
@@ -851,22 +947,50 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                           min={0}
                           max={90}
                           value={discountPercent}
-                          onChange={(e) => setDiscountPercent(Number(e.target.value) || 0)}
+                          onChange={(e) => {
+                            const val = Number(e.target.value) || 0;
+                            setDiscountPercent(val);
+                            if (val > 0 && specialOfferStock === 0) {
+                              setSpecialOfferStock(3);
+                            }
+                          }}
                           className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-sm font-bold text-rose-600 focus:outline-none focus:ring-2 focus:ring-rose-500/20"
                         />
                       </div>
 
-                      <div className="flex items-end">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                          سهمیه فروش در تخفیف (عدد)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          value={specialOfferStock}
+                          onChange={(e) => setSpecialOfferStock(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                          className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-sm font-bold text-amber-600 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                          placeholder="مثلاً: 3"
+                        />
+                        <span className="block text-[10px] text-slate-400 mt-0.5">
+                          پس از فروش این تعداد، تخفیف منقضی و قیمت عادی اعمال می‌شود.
+                        </span>
+                      </div>
+
+                      <div className="flex items-start pt-5">
                         <label className="flex items-center gap-2.5 w-full px-3 py-2 bg-white border border-slate-200 rounded-xl cursor-pointer hover:border-rose-300 transition">
                           <input
                             type="checkbox"
                             checked={isAmazingOffer}
-                            onChange={(e) => setIsAmazingOffer(e.target.checked)}
+                            onChange={(e) => {
+                              setIsAmazingOffer(e.target.checked);
+                              if (e.target.checked && specialOfferStock === 0) {
+                                setSpecialOfferStock(3);
+                              }
+                            }}
                             className="w-4 h-4 text-rose-600 rounded focus:ring-rose-500"
                           />
                           <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
                           <span className="text-xs font-bold text-slate-700">
-                            نمایش در اسلایدر «پیشنهاد شگفت‌انگیز»
+                            اسلایدر «شگفت‌انگیز»
                           </span>
                         </label>
                       </div>
@@ -905,36 +1029,110 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                     </div>
 
                     {hasSize && (
-                      <div className="space-y-2 pt-2 border-t border-slate-200/60">
-                        {sizes.map((s, idx) => (
-                          <div key={idx} className="flex items-center gap-2">
-                            <input
-                              type="text"
-                              required
-                              value={s.name}
-                              onChange={(e) => handleSizeChange(idx, 'name', e.target.value)}
-                              placeholder="عنوان سایز (مثلاً: نیم کیلوگرم)"
-                              className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                            />
-                            <input
-                              type="number"
-                              required
-                              value={s.price}
-                              onChange={(e) => handleSizeChange(idx, 'price', e.target.value)}
-                              placeholder="قیمت (تومان)"
-                              className="w-36 px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                            />
-                            {sizes.length > 1 && (
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveSizeRow(idx)}
-                                className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            )}
-                          </div>
-                        ))}
+                      <div className="space-y-3 pt-3 border-t border-slate-200/80">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px] bg-blue-50/70 p-2.5 rounded-xl border border-blue-200/60 text-blue-900">
+                          <span className="font-bold">
+                            📦 مدیریت موجودی انبار و سهمیه تخفیف هر بسته‌بندی:
+                          </span>
+                          <span>
+                            مجموع موجودی کل: <strong className="text-blue-700 font-black">{sizes.reduce((sum, s) => sum + (Number(s.stock) || 0), 0)} عدد</strong>
+                            {' '} | سهمیه تخفیف کل: <strong className="text-amber-700 font-black">{sizes.reduce((sum, s) => sum + (Number(s.specialOfferStock) || 0), 0)} عدد</strong>
+                          </span>
+                        </div>
+
+                        {/* Column Header Titles */}
+                        <div className="hidden sm:grid sm:grid-cols-12 gap-2 px-2 text-[11px] font-bold text-slate-500">
+                          <div className="col-span-4">عنوان اندازه / بسته‌بندی</div>
+                          <div className="col-span-3">قیمت (تومان)</div>
+                          <div className="col-span-2">موجودی انبار</div>
+                          <div className="col-span-2">سهمیه تخفیف</div>
+                          <div className="col-span-1 text-center">حذف</div>
+                        </div>
+
+                        <div className="space-y-2">
+                          {sizes.map((s, idx) => (
+                            <div
+                              key={idx}
+                              className="p-3 sm:p-2 bg-white border border-slate-200 rounded-xl flex flex-col sm:grid sm:grid-cols-12 gap-2 sm:items-center shadow-2xs"
+                            >
+                              <div className="sm:col-span-4">
+                                <label className="sm:hidden block text-[10px] font-bold text-slate-600 mb-1">
+                                  عنوان بسته / اندازه:
+                                </label>
+                                <input
+                                  type="text"
+                                  required
+                                  value={s.name}
+                                  onChange={(e) => handleSizeChange(idx, 'name', e.target.value)}
+                                  placeholder="مثلاً: ۵۰۰ گرم یا قوطی شیشه‌ای"
+                                  className="w-full px-3 py-1.5 bg-slate-50 sm:bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                                />
+                              </div>
+
+                              <div className="sm:col-span-3">
+                                <label className="sm:hidden block text-[10px] font-bold text-slate-600 mb-1">
+                                  قیمت (تومان):
+                                </label>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  required
+                                  value={s.price}
+                                  onChange={(e) => handleSizeChange(idx, 'price', e.target.value)}
+                                  placeholder="قیمت (تومان)"
+                                  className="w-full px-3 py-1.5 bg-slate-50 sm:bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                                />
+                              </div>
+
+                              <div className="sm:col-span-2">
+                                <label className="sm:hidden block text-[10px] font-bold text-slate-600 mb-1">
+                                  موجودی انبار (عدد):
+                                </label>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={s.stock !== undefined ? s.stock : 10}
+                                  onChange={(e) => handleSizeChange(idx, 'stock', e.target.value)}
+                                  placeholder="موجودی"
+                                  title="تعداد موجودی فیزیکی این بسته‌بندی در انبار"
+                                  className={`w-full px-3 py-1.5 border rounded-lg text-xs font-black focus:outline-none focus:ring-2 ${
+                                    (s.stock !== undefined && s.stock <= 0)
+                                      ? 'bg-rose-50 border-rose-300 text-rose-700 focus:ring-rose-500/20'
+                                      : 'bg-emerald-50 sm:bg-white border-slate-200 text-emerald-800 focus:ring-emerald-500/20'
+                                  }`}
+                                />
+                              </div>
+
+                              <div className="sm:col-span-2">
+                                <label className="sm:hidden block text-[10px] font-bold text-slate-600 mb-1">
+                                  سهمیه تخفیف (عدد):
+                                </label>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={s.specialOfferStock !== undefined ? s.specialOfferStock : 0}
+                                  onChange={(e) => handleSizeChange(idx, 'specialOfferStock', e.target.value)}
+                                  placeholder="سهمیه تخفیف"
+                                  title="تعداد مجاز برای فروش با نرخ تخفیفی در شگفت‌انگیز (پس از فروش، با قیمت عادی فروخته می‌شود)"
+                                  className="w-full px-3 py-1.5 bg-amber-50 sm:bg-white border border-slate-200 rounded-lg text-xs font-bold text-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                                />
+                              </div>
+
+                              <div className="sm:col-span-1 flex justify-end sm:justify-center pt-1 sm:pt-0">
+                                {sizes.length > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveSizeRow(idx)}
+                                    title="حذف این بسته‌بندی"
+                                    className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>

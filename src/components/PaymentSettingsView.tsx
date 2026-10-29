@@ -101,7 +101,7 @@ export const PaymentSettingsView: React.FC<PaymentSettingsViewProps> = ({
           ...currentBot,
           botUsername: cleanBotName,
           baleBotUsername: cleanBotName,
-          baleAdminUsername: config.baleAdminUsername || currentBot.baleAdminUsername || '@hasti_hjz',
+          baleAdminUsername: config.baleAdminUsername || currentBot.baleAdminUsername || '',
           baleBotButtonText: config.baleBotButtonText || `اتصال به ربات بله و پرداخت فاکتور (@${cleanBotName})`
         };
         await saveActiveBotConfig(updatedBot);
@@ -654,7 +654,7 @@ export const PaymentSettingsView: React.FC<PaymentSettingsViewProps> = ({
                   dir="ltr"
                   value={config.baleAdminUsername || ''}
                   onChange={e => handleField('baleAdminUsername', e.target.value.trim())}
-                  placeholder="@hasti_hjz"
+                  placeholder="@admin_username"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs font-mono text-left text-slate-800"
                 />
               </div>

@@ -16,7 +16,9 @@ import {
   Sparkles,
   Info,
   Bot,
-  Download
+  Download,
+  FileSpreadsheet,
+  FileCode
 } from 'lucide-react';
 import {
   runManualSeedDatabase,
@@ -48,6 +50,38 @@ export const HostDataManagementCard: React.FC<HostDataManagementCardProps> = ({
   }>({ type: null, message: '' });
   const [copiedEnv, setCopiedEnv] = useState(false);
   const [showGuide, setShowGuide] = useState(true);
+  const [downloadingExport, setDownloadingExport] = useState<string | null>(null);
+
+  const handleDownloadExport = async (endpoint: string, filename: string, title: string) => {
+    setDownloadingExport(endpoint);
+    try {
+      const res = await apiFetch(endpoint);
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        setFeedback({
+          type: 'success',
+          message: `فایل «${title}» با موفقیت از سرور دانلود شد.`,
+        });
+        return;
+      }
+      throw new Error('خطا در دریافت فایل خروجی از سرور');
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        message: err?.message || `خطا در دریافت فایل «${title}».`,
+      });
+    } finally {
+      setDownloadingExport(null);
+    }
+  };
 
   React.useEffect(() => {
     const unsub = subscribeServerConnectionStatus((st) => {
@@ -127,7 +161,29 @@ export const HostDataManagementCard: React.FC<HostDataManagementCardProps> = ({
   };
 
   // ۳. خروجی گرفتن کامل از دیتابیس (JSON Backup)
-  const handleExportFullBackup = () => {
+  const handleExportFullBackup = async () => {
+    try {
+      const res = await apiFetch('/api/admin/backup/download');
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `onival-host-backup-${new Date().toISOString().slice(0, 10)}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        setFeedback({
+          type: 'success',
+          message: 'فایل پشتیبان کامل دیتابیس مستقیماً از سرور هاست اختصاصی شما دانلود شد.',
+        });
+        return;
+      }
+    } catch {
+      // fallback
+    }
+
     const state = getCachedLocalState();
     const blob = new Blob([JSON.stringify(state, null, 2)], {
       type: 'application/json;charset=utf-8',
@@ -142,7 +198,7 @@ export const HostDataManagementCard: React.FC<HostDataManagementCardProps> = ({
     URL.revokeObjectURL(url);
     setFeedback({
       type: 'success',
-      message: 'فایل پشتیبان کامل دیتابیس سایت با موفقیت دانلود شد.',
+      message: 'فایل پشتیبان دیتابیس با موفقیت دانلود شد.',
     });
   };
 
@@ -190,15 +246,42 @@ export const HostDataManagementCard: React.FC<HostDataManagementCardProps> = ({
     reader.readAsText(file);
   };
 
+  const handleDownloadBotPhp = async (fileName: string) => {
+    try {
+      const res = await apiFetch(`/api/bot/php-code/${fileName}`);
+      if (!res.ok) throw new Error('خطا در دریافت فایل');
+      const data = await res.json();
+      const blob = new Blob([data.code], { type: 'application/x-httpd-php;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setFeedback({
+        type: 'success',
+        message: `فایل اختصاصی ${fileName} بر اساس پیکربندی امن سرور دانلود شد.`,
+      });
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        message: err.message || `خطا در دریافت فایل ${fileName}`,
+      });
+    }
+  };
+
   const sampleEnvConfig = `# تنظیمات محیطی هاست لینوکسی سی‌پنل (.env)
 NODE_ENV=production
 PORT=3000
 APP_URL=https://yourdomain.com
-ADMIN_TOKEN_SECRET=onival_secure_hmac_secret_2025
+ADMIN_TOKEN_SECRET=your_random_secure_secret_here
 
 # تنظیمات ربات‌های بله و تلگرام
-TELEGRAM_BOT_TOKEN=7192837465:AAH8xK9lP2mN4vB6cX8zQ1wE3rT5yU7iO9p
-TELEGRAM_ADMIN_CHAT_ID=923387796
+BALE_BOT_TOKEN=
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_ADMIN_CHAT_ID=
 BALE_API_BASE_URL=https://tapi.bale.ai
 PANEL_BASE_URL=https://yourdomain.com`;
 
@@ -331,26 +414,18 @@ PANEL_BASE_URL=https://yourdomain.com`;
             </div>
           </div>
 
-          {/* اطلاعات حساب ادمین پیش‌فرض */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3.5 rounded-xl bg-white border border-indigo-200/80">
-            <div className="flex items-center justify-between md:justify-start gap-2 text-xs">
-              <span className="text-slate-500 font-bold">نام کاربری ادمین پیش‌فرض:</span>
-              <code className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-800 font-mono font-bold">
-                admin
-              </code>
+          {/* راهنمای امنیت ذخیره‌سازی، بکاپ و انتقال به هاست دیگر */}
+          <div className="p-4 rounded-xl bg-white border border-slate-200/90 space-y-2">
+            <div className="flex items-center gap-2 text-xs font-black text-slate-800">
+              <ShieldCheck className="w-4 h-4 text-emerald-600" />
+              <span>پایگاه‌داده امن و روش پشتیبان‌گیری و جابه‌جایی اطلاعات:</span>
             </div>
-            <div className="flex items-center justify-between md:justify-start gap-2 text-xs">
-              <span className="text-slate-500 font-bold">ایمیل ادمین پیش‌فرض:</span>
-              <code className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-800 font-mono font-bold">
-                admin@onival.com
-              </code>
-            </div>
-            <div className="flex items-center justify-between md:justify-start gap-2 text-xs">
-              <span className="text-slate-500 font-bold">رمز عبور پیش‌فرض:</span>
-              <code className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-800 font-mono font-bold">
-                admin
-              </code>
-            </div>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              اطلاعات سایت مستقیماً در مسیر اختصاصی <code dir="ltr" className="font-mono font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded">server-data/onival-persistent-data.json</code> ذخیره می‌شوند. این پوشه در لایه سرور قرار داشته و دسترسی عمومی وب به آن مسدود است تا اطلاعات کاربران و رمزها محافظت گردد.
+            </p>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              <span className="font-bold text-amber-700">📌 نحوه بکاپ‌گیری و انتقال:</span> برای انتقال به هاست دیگر، کافی است دکمه «دانلود فایل پشتیبان کامل دیتابیس (JSON Backup)» را بزنید و در هاست جدید دکمه «بازگردانی فایل پشتیبان در هاست» را کلیک کنید، یا کل پوشه <code dir="ltr" className="font-mono text-indigo-700">server-data/</code> را از طریق File Manager یا FTP در ریشه هاست مقصد کپی نمایید.
+            </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5 pt-1">
@@ -402,23 +477,77 @@ PANEL_BASE_URL=https://yourdomain.com`;
               />
             </label>
 
-            <a
-              href="/bale-bot.php"
-              download="bale-bot.php"
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition shadow-xs"
+            <button
+              type="button"
+              onClick={() => handleDownloadBotPhp('bale-bot.php')}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition shadow-xs cursor-pointer"
             >
               <Bot className="w-4 h-4 text-emerald-200" />
               <span>دانلود فایل ربات بله (bale-bot.php برای public_html)</span>
-            </a>
+            </button>
 
-            <a
-              href="/telegram-bot.php"
-              download="telegram-bot.php"
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs transition shadow-xs"
+            <button
+              type="button"
+              onClick={() => handleDownloadBotPhp('telegram-bot.php')}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs transition shadow-xs cursor-pointer"
             >
               <Download className="w-4 h-4 text-sky-200" />
               <span>دانلود فایل ربات تلگرام (telegram-bot.php برای public_html)</span>
-            </a>
+            </button>
+          </div>
+
+          {/* بخش خروجی‌های استاندارد وردپرس، ووکامرس و اکسل */}
+          <div className="mt-4 pt-4 border-t border-slate-200/80 space-y-2.5">
+            <div className="flex items-center gap-2 text-xs font-black text-slate-800">
+              <Sparkles className="w-4 h-4 text-amber-500" />
+              <span>خروجی‌های استاندارد فروشگاهی، حسابداری و مهاجرت اطلاعات (Export Data):</span>
+            </div>
+            <p className="text-xs text-slate-500 leading-relaxed">
+              جهت ورود اطلاعات به وردپرس، سیستم‌های مالی یا تحلیل حسابداری، از فایل‌های استاندارد زیر با کدگذاری UTF-8 استفاده کنید:
+            </p>
+            <div className="flex flex-wrap items-center gap-2.5 pt-1">
+              <button
+                type="button"
+                disabled={Boolean(downloadingExport)}
+                onClick={() => handleDownloadExport(
+                  '/api/admin/export/woocommerce-products.csv',
+                  `woocommerce-products-${new Date().toISOString().slice(0, 10)}.csv`,
+                  'محصولات استاندارد ووکامرس (CSV)'
+                )}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-purple-700 hover:bg-purple-800 disabled:opacity-50 text-white font-bold text-xs shadow-md shadow-purple-700/20 transition cursor-pointer"
+              >
+                <FileSpreadsheet className={`w-4 h-4 ${downloadingExport === '/api/admin/export/woocommerce-products.csv' ? 'animate-bounce' : 'text-purple-200'}`} />
+                <span>خروجی محصولات ووکامرس (WooCommerce Products CSV)</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={Boolean(downloadingExport)}
+                onClick={() => handleDownloadExport(
+                  '/api/admin/export/wordpress-wxr.xml',
+                  `wordpress-wxr-${new Date().toISOString().slice(0, 10)}.xml`,
+                  'خروجی جامع وردپرس (WXR XML)'
+                )}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-700 hover:bg-blue-800 disabled:opacity-50 text-white font-bold text-xs shadow-md shadow-blue-700/20 transition cursor-pointer"
+              >
+                <FileCode className={`w-4 h-4 ${downloadingExport === '/api/admin/export/wordpress-wxr.xml' ? 'animate-bounce' : 'text-blue-200'}`} />
+                <span>خروجی جامع وردپرس (WordPress WXR 1.2 XML)</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={Boolean(downloadingExport)}
+                onClick={() => handleDownloadExport(
+                  '/api/admin/export/paid-orders.csv',
+                  `paid-orders-${new Date().toISOString().slice(0, 10)}.csv`,
+                  'گزارش مالی سفارش‌های پرداخت‌شده (CSV)'
+                )}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-bold text-xs shadow-md shadow-emerald-700/20 transition cursor-pointer"
+              >
+                <Download className={`w-4 h-4 ${downloadingExport === '/api/admin/export/paid-orders.csv' ? 'animate-bounce' : 'text-emerald-200'}`} />
+                <span>گزارش مالی سفارش‌های پرداخت شده (Paid Orders CSV)</span>
+              </button>
+            </div>
           </div>
         </div>
 

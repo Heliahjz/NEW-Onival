@@ -1,6 +1,10 @@
 export interface ProductSize {
   name: string;
   price: number;
+  stock?: number;
+  specialOfferStock?: number;
+  isOutOfStock?: boolean;
+  sku?: string;
 }
 
 export type PublicationStatus = 'published' | 'draft';
@@ -28,6 +32,11 @@ export interface Product {
   discount?: number;
   discountPercent?: number;
   isAmazingOffer?: boolean;
+  isSpecialOffer?: boolean;
+  stock?: number;
+  isOutOfStock?: boolean;
+  specialOfferStock?: number;
+  specialOfferInitialStock?: number;
   features?: string[];
   type?: string;
   categoryId: number;
@@ -184,7 +193,7 @@ export interface ContactMessage {
   consultationDetails?: ConsultationDetails;
   orderId?: number;
   paymentStatus?: 'Unpaid' | 'PendingVerification' | 'Paid' | 'Failed';
-  paymentMethod?: 'card_to_card' | 'bale_bot' | 'gateway' | 'online_gateway';
+  paymentMethod?: 'card_to_card' | 'bale_bot' | 'bale_wallet' | 'gateway' | 'online_gateway';
   totalPrice?: number;
   receiptImage?: string;
   receiptImageUrl?: string;
@@ -210,7 +219,7 @@ export interface Order {
   totalPrice: number;
   status: 'Pending' | 'Processing' | 'Shipped' | 'Cancelled' | 'Completed';
   paymentStatus: 'Unpaid' | 'PendingVerification' | 'Paid' | 'Failed';
-  paymentMethod?: 'card_to_card' | 'bale_bot' | 'gateway' | 'online_gateway';
+  paymentMethod?: 'card_to_card' | 'bale_bot' | 'bale_wallet' | 'gateway' | 'online_gateway';
   receiptImageUrl?: string;
   receiptImage?: string;
   receiptNote?: string;
@@ -298,6 +307,7 @@ export interface TelegramConfig {
   baleBotUsername?: string;
   baleBaseUrl?: string;
   baleWebhookUrl?: string;
+  baleAdminWebhookUrl?: string;
   balePaymentMode?: 'test' | 'live';
   balePaymentTokenTest?: string;
   balePaymentTokenLive?: string;
@@ -379,17 +389,22 @@ export interface TopBanner {
   imageUrl: string;
   title?: string;
   subtitle?: string;
+  badge?: string;
+  buttonText?: string;
+  buttonLink?: string;
+  gradientOverlay?: string;
   linkUrl?: string;
-  enabled: boolean;
+  enabled?: boolean;
 }
 
 export interface TopBannerSettings {
   enabled: boolean;
   intervalSeconds: number; // e.g. 4 or 5 seconds
   autoRotate: boolean;
-  showDots: boolean;
-  showArrows: boolean;
-  banners: TopBanner[];
+  showDots?: boolean;
+  showArrows?: boolean;
+  height?: string;
+  banners?: TopBanner[];
 }
 
 export interface SiteContent {
@@ -468,7 +483,7 @@ export interface SiteContent {
   contactPhone: string;
   contactAddress: string;
   contactWorkingHours: string;
-  contactEmail: string;
+  contactEmail?: string;
   footerCopyright: string;
   footerFootnote?: string;
   enamadCode?: string;

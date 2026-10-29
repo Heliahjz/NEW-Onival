@@ -42,24 +42,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 // ==============================================================================
 $DEFAULT_CONFIG = [
     // توکن ربات مشتری بله (دریافت شده از BotFather@ در بله)
-    'baleBotToken'       => '1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34',
+    'baleBotToken'       => '',
 
     // نام کاربری ربات بله
     'baleBotUsername'    => 'Onivalbot',
 
     // توکن ربات ادمین بله
-    'baleAdminBotToken'  => '1692224424:rU91515j2K0H5o7O4K2cviw4g1n1lJ',
+    'baleAdminBotToken'  => '',
 
     // آیدی عددی چت ادمین در بله
-    'baleAdminChatId'    => '69451465',
+    'baleAdminChatId'    => '',
 
     // نام کاربری ادمین
-    'baleAdminUsername'  => 'hasti_hjz',
+    'baleAdminUsername'  => '',
 
-    // ⭐ توکن درگاه کیف‌پول بله (Wallet Provider Token)
-    // مقدار پیش‌فرض طبق درخواست بر روی ولت تست تنظیم است تا پرداخت فوری در دسترس باشد
-    // توکن تست رسمی بله: WALLET-TEST-1111111111111111
-    'baleProviderToken'  => 'WALLET-TEST-1111111111111111',
+    // توکن درگاه کیف‌پول بله (Wallet Provider Token)
+    'baleProviderToken'  => '',
 
     // شماره کارت فروشگاه جهت پرداخت کارت به کارت
     'cardNumber'         => '۶۰۳۷-۹۹۷۵-۹۹۱۲-۳۴۵۶',
@@ -135,42 +133,39 @@ $siteCfg = $db['siteContent'] ?? [];
 $payCfg = $siteCfg['paymentConfig'] ?? [];
 
 // همگام‌سازی توکن‌ها و اطلاعات ربات
-$BOT_TOKEN = trim(!empty($tgCfg['baleBotToken']) ? $tgCfg['baleBotToken'] : (!empty($tgCfg['botToken']) ? $tgCfg['botToken'] : $DEFAULT_CONFIG['baleBotToken']));
-$ADMIN_TOKEN = trim(!empty($tgCfg['baleAdminBotToken']) ? $tgCfg['baleAdminBotToken'] : $DEFAULT_CONFIG['baleAdminBotToken']);
-$ADMIN_CHAT_ID = trim(!empty($tgCfg['baleAdminChatId']) ? $tgCfg['baleAdminChatId'] : (!empty($tgCfg['adminChatId']) ? $tgCfg['adminChatId'] : $DEFAULT_CONFIG['baleAdminChatId']));
-$BOT_USERNAME = ltrim(trim(!empty($tgCfg['baleBotUsername']) ? $tgCfg['baleBotUsername'] : $DEFAULT_CONFIG['baleBotUsername']), '@');
-$ADMIN_USERNAME = ltrim(trim(!empty($tgCfg['baleAdminUsername']) ? $tgCfg['baleAdminUsername'] : $DEFAULT_CONFIG['baleAdminUsername']), '@');
-$STORE_URL = !empty($siteCfg['storeUrl']) ? $siteCfg['storeUrl'] : (!empty($DEFAULT_CONFIG['storeUrl']) ? $DEFAULT_CONFIG['storeUrl'] : $detectedBaseUrl);
+$BOT_TOKEN = trim((string)(!empty($tgCfg['baleBotToken']) ? $tgCfg['baleBotToken'] : (!empty($tgCfg['botToken']) ? $tgCfg['botToken'] : ($DEFAULT_CONFIG['baleBotToken'] ?? ''))));
+$ADMIN_TOKEN = trim((string)(!empty($tgCfg['baleAdminBotToken']) ? $tgCfg['baleAdminBotToken'] : ($DEFAULT_CONFIG['baleAdminBotToken'] ?? '')));
+$ADMIN_CHAT_ID = trim((string)(!empty($tgCfg['baleAdminChatId']) ? $tgCfg['baleAdminChatId'] : (!empty($tgCfg['adminChatId']) ? $tgCfg['adminChatId'] : ($DEFAULT_CONFIG['baleAdminChatId'] ?? ''))));
+$BOT_USERNAME = ltrim(trim((string)(!empty($tgCfg['baleBotUsername']) ? $tgCfg['baleBotUsername'] : ($DEFAULT_CONFIG['baleBotUsername'] ?? ''))), '@');
+$ADMIN_USERNAME = ltrim(trim((string)(!empty($tgCfg['baleAdminUsername']) ? $tgCfg['baleAdminUsername'] : ($DEFAULT_CONFIG['baleAdminUsername'] ?? ''))), '@');
+$STORE_URL = !empty($siteCfg['storeUrl']) ? (string)$siteCfg['storeUrl'] : (!empty($DEFAULT_CONFIG['storeUrl']) ? (string)$DEFAULT_CONFIG['storeUrl'] : (string)$detectedBaseUrl);
 
 // استخراج هوشمند و داینامیک توکن کیف‌پول بله (Wallet Provider Token)
-$baleMode = strtolower($tgCfg['balePaymentMode'] ?? 'test');
+$baleMode = strtolower((string)($tgCfg['balePaymentMode'] ?? 'test'));
 $PROVIDER_TOKEN = '';
 
 if ($baleMode === 'test') {
     if (!empty($tgCfg['balePaymentTokenTest'])) {
-        $PROVIDER_TOKEN = trim($tgCfg['balePaymentTokenTest']);
+        $PROVIDER_TOKEN = trim((string)$tgCfg['balePaymentTokenTest']);
     } else {
-        $PROVIDER_TOKEN = !empty($DEFAULT_CONFIG['baleProviderToken']) ? trim($DEFAULT_CONFIG['baleProviderToken']) : 'WALLET-TEST-1111111111111111';
+        $PROVIDER_TOKEN = !empty($DEFAULT_CONFIG['baleProviderToken']) ? trim((string)$DEFAULT_CONFIG['baleProviderToken']) : 'WALLET-TEST-1111111111111111';
     }
 } else {
     // حالت لایو
     if (!empty($tgCfg['balePaymentTokenLive'])) {
-        $PROVIDER_TOKEN = trim($tgCfg['balePaymentTokenLive']);
+        $PROVIDER_TOKEN = trim((string)$tgCfg['balePaymentTokenLive']);
     } elseif (!empty($tgCfg['balePaymentToken'])) {
-        $PROVIDER_TOKEN = trim($tgCfg['balePaymentToken']);
+        $PROVIDER_TOKEN = trim((string)$tgCfg['balePaymentToken']);
     } elseif (!empty($DEFAULT_CONFIG['baleProviderToken'])) {
-        $PROVIDER_TOKEN = trim($DEFAULT_CONFIG['baleProviderToken']);
+        $PROVIDER_TOKEN = trim((string)$DEFAULT_CONFIG['baleProviderToken']);
     } else {
-        $PROVIDER_TOKEN = 'WALLET-TEST-1111111111111111';
+        $PROVIDER_TOKEN = '';
     }
 }
-if (empty($PROVIDER_TOKEN)) {
-    $PROVIDER_TOKEN = 'WALLET-TEST-1111111111111111';
-}
 
-$CARD_NUMBER = !empty($payCfg['cardNumber']) ? $payCfg['cardNumber'] : $DEFAULT_CONFIG['cardNumber'];
-$CARD_HOLDER = !empty($payCfg['cardHolderName']) ? $payCfg['cardHolderName'] : $DEFAULT_CONFIG['cardHolder'];
-$BANK_NAME   = !empty($payCfg['bankName']) ? $payCfg['bankName'] : $DEFAULT_CONFIG['bankName'];
+$CARD_NUMBER = !empty($payCfg['cardNumber']) ? (string)$payCfg['cardNumber'] : (string)$DEFAULT_CONFIG['cardNumber'];
+$CARD_HOLDER = !empty($payCfg['cardHolderName']) ? (string)$payCfg['cardHolderName'] : (string)$DEFAULT_CONFIG['cardHolder'];
+$BANK_NAME   = !empty($payCfg['bankName']) ? (string)$payCfg['bankName'] : (string)$DEFAULT_CONFIG['bankName'];
 
 $BALE_API_BASE = 'https://tapi.bale.ai';
 
@@ -729,10 +724,8 @@ $text = trim($message['text'] ?? ($message['caption'] ?? ''));
 $keyboard = buildMainReplyKeyboard($STORE_URL);
 
 $isAdmin = (
-    (string)$chatId === (string)$ADMIN_CHAT_ID ||
-    (!empty($ADMIN_USERNAME) && strtolower($senderUsername) === strtolower($ADMIN_USERNAME)) ||
-    $chatId === 69451465 ||
-    $chatId === '69451465'
+    (!empty($ADMIN_CHAT_ID) && (string)$chatId === (string)$ADMIN_CHAT_ID) ||
+    (!empty($ADMIN_USERNAME) && strtolower($senderUsername) === strtolower($ADMIN_USERNAME))
 );
 
 // ------------------------------------------------------------------------------

@@ -247,34 +247,60 @@ export async function ensureHostSeededOnBoot(): Promise<{
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
 
     const token = getAdminSessionToken();
-    const res = await window.fetch('/api/host/export-state', {
-      method: 'GET',
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
+    if (token) {
+      const res = await window.fetch('/api/host/export-state', {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        signal: controller.signal,
+      }).catch(() => null);
+      clearTimeout(timeoutId);
 
-    const contentType = res.headers.get('content-type') || '';
-    if (res.ok && contentType.includes('application/json')) {
-      const serverState = await res.json();
-      if (serverState && Array.isArray(serverState.products) && serverState.products.length > 0) {
-        const normalized = normalizeState(serverState);
-        writeLocalBackup(normalized);
-        setConnectionStatus('connected');
-        return { state: normalized, wasSeededNow: false, source: 'host' };
+      if (res && res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const serverState = await res.json();
+          if (serverState && Array.isArray(serverState.products) && serverState.products.length > 0) {
+            const normalized = normalizeState(serverState);
+            writeLocalBackup(normalized);
+            setConnectionStatus('connected');
+            return { state: normalized, wasSeededNow: false, source: 'host' };
+          }
+        }
       }
-    }
+    } else {
+      // Unauthenticated visitor: fetch public catalog and content
+      const [prodRes, contentRes] = await Promise.all([
+        window.fetch('/api/products', { signal: controller.signal }).catch(() => null),
+        window.fetch('/api/site-content', { signal: controller.signal }).catch(() => null)
+      ]);
+      clearTimeout(timeoutId);
 
-    // اگر سرور پاسخ داد اما هنوز دیتایی نداشت، دیتای اولیه را برای سرور ارسال می‌کنیم
-    if (res.ok) {
-      await saveStateToHostServer(local);
-      setConnectionStatus('connected');
-      return { state: local, wasSeededNow: true, source: 'seeded' };
+      let hadData = false;
+      if (prodRes && prodRes.ok) {
+        const prodData = await prodRes.json().catch(() => null);
+        if (Array.isArray(prodData) && prodData.length > 0) {
+          local.products = prodData;
+          hadData = true;
+        }
+      }
+      if (contentRes && contentRes.ok) {
+        const contentData = await contentRes.json().catch(() => null);
+        if (contentData && typeof contentData === 'object') {
+          local.siteContent = { ...local.siteContent, ...contentData };
+          hadData = true;
+        }
+      }
+
+      if (hadData) {
+        writeLocalBackup(local);
+        setConnectionStatus('connected');
+        return { state: local, wasSeededNow: false, source: 'host' };
+      }
     }
   } catch {
     // اگر سرور در دسترس نبود یا هاست استاتیک بود
@@ -391,76 +417,13 @@ function handleLocalApiRoute(
   const cleanPath = path.split('?')[0].replace(/\/+$/, '') || '/';
   const urlParams = new URLSearchParams(path.includes('?') ? path.split('?')[1] : '');
 
-  // 1. ورود ادمین (Admin Login)
-  if (cleanPath === '/api/admin/login' && method === 'POST') {
-    const { username, password } = bodyData || {};
-    const u = String(username || '').trim().toLowerCase();
-    const p = String(password || '').trim();
-
-    const currentCreds = state.adminCredentials || DEFAULT_ADMIN_CREDENTIALS;
-    const validUser = (currentCreds.username || 'admin').trim().toLowerCase();
-    const validEmail = (currentCreds.email || 'admin@onival.com').trim().toLowerCase();
-    const validPass = (currentCreds.password || 'admin').trim();
-
-    const isUserMatch = u === validUser || u === validEmail;
-    const isPassMatch = isUserMatch && Boolean(validPass) && p === validPass;
-
-    if (isUserMatch && isPassMatch) {
-      const token = `local_session_${btoa(`${currentCreds.username}:${Date.now()}`).replace(/=/g, '')}`;
-      setAdminSessionToken(token);
-      return {
-        status: 200,
-        data: {
-          ok: true,
-          success: true,
-          token,
-          profile: {
-            username: currentCreds.username,
-            name: currentCreds.name,
-            email: currentCreds.email,
-          },
-          source: 'local_storage',
-          message: 'ورود به پنل مدیریت با موفقیت انجام شد.',
-        },
-      };
-    }
+  // 1. ورود ادمین و تغییر رمز منحصراً روی سرور هاست اجرا می‌شود
+  if (cleanPath === '/api/admin/login' || cleanPath === '/api/account/change-credentials') {
     return {
-      status: 401,
-      data: { ok: false, error: 'نام کاربری یا رمز عبور مدیریت اشتباه است.' },
-    };
-  }
-
-  // 2. تغییر مشخصات ورود ادمین (Change Credentials)
-  if (cleanPath === '/api/account/change-credentials' && method === 'POST') {
-    const { username, newUsername, newPassword, password, email, newEmail, name } = bodyData || {};
-    const targetUser = (username || newUsername || '').trim();
-    const targetPass = (newPassword || password || '').trim();
-    const targetEmail = (email || newEmail || '').trim();
-
-    if (!state.adminCredentials) {
-      state.adminCredentials = { ...DEFAULT_ADMIN_CREDENTIALS };
-    }
-
-    if (targetUser) state.adminCredentials.username = targetUser;
-    if (targetPass) state.adminCredentials.password = targetPass;
-    if (targetEmail) state.adminCredentials.email = targetEmail;
-    if (name) state.adminCredentials.name = String(name).trim();
-
-    writeLocalBackup(state);
-    const token = `local_session_${btoa(`${state.adminCredentials.username}:${Date.now()}`).replace(/=/g, '')}`;
-    setAdminSessionToken(token);
-    return {
-      status: 200,
+      status: 503,
       data: {
-        ok: true,
-        success: true,
-        token,
-        profile: {
-          username: state.adminCredentials.username,
-          email: state.adminCredentials.email,
-          name: state.adminCredentials.name,
-        },
-        message: 'مشخصات حساب مدیریت با موفقیت در دیتابیس محلی ذخیره شد.',
+        ok: false,
+        error: 'احراز هویت و تغییر رمز عبور منحصراً از طریق سرور هاست امکان‌پذیر است.'
       },
     };
   }
@@ -735,6 +698,50 @@ function handleLocalApiRoute(
         paymentStatus: bodyData?.paymentStatus || 'Unpaid',
         items: Array.isArray(bodyData?.items) ? bodyData.items : [],
       };
+
+      if (Array.isArray(newOrder.items)) {
+        for (const item of newOrder.items) {
+          const prodId = Number(item.productId || item.id);
+          const p = state.products.find((x) => x.id === prodId);
+          if (p) {
+            const qty = Number(item.quantity) || 1;
+            const itemSize = String(item.size || '');
+
+            // Deduct from specific size variant
+            if (itemSize && Array.isArray(p.sizes)) {
+              const matchedSize = p.sizes.find((s) => s.name === itemSize || (s as any).size === itemSize);
+              if (matchedSize) {
+                if (matchedSize.stock !== undefined) {
+                  matchedSize.stock = Math.max(0, matchedSize.stock - qty);
+                  matchedSize.isOutOfStock = matchedSize.stock <= 0;
+                }
+                if (matchedSize.specialOfferStock !== undefined && matchedSize.specialOfferStock > 0) {
+                  matchedSize.specialOfferStock = Math.max(0, matchedSize.specialOfferStock - qty);
+                }
+              }
+            }
+
+            // Deduct aggregate product stock
+            if (p.stock !== undefined) {
+              p.stock = Math.max(0, p.stock - qty);
+              if (p.stock === 0) {
+                p.isOutOfStock = true;
+                p.availability = 'OutOfStock';
+              }
+            }
+            if (p.specialOfferStock !== undefined && p.specialOfferStock > 0) {
+              p.specialOfferStock = Math.max(0, p.specialOfferStock - qty);
+              if (p.specialOfferStock === 0) {
+                p.isAmazingOffer = false;
+                p.isSpecialOffer = false;
+                p.discount = 0;
+                p.discountPercent = 0;
+              }
+            }
+          }
+        }
+      }
+
       state.orders.unshift(newOrder);
       writeLocalBackup(state);
       return {
@@ -773,63 +780,168 @@ function handleLocalApiRoute(
     }
   }
 
-  const uploadReceiptMatch = cleanPath.match(/^\/api\/orders\/([^/]+)\/upload-receipt$/);
+  const uploadReceiptMatch = cleanPath.match(/^\/api\/orders\/([^/]+)\/(?:upload-receipt|receipt)$/);
   if (uploadReceiptMatch && method === 'POST') {
-    const trackingCode = decodeURIComponent(uploadReceiptMatch[1]);
-    const idx = state.orders.findIndex((o) => o.trackingCode === trackingCode);
+    const trackingCode = decodeURIComponent(uploadReceiptMatch[1]).trim();
+    // Anti-IDOR guard: reject sequential numeric ids or short codes
+    if (/^\d+$/.test(trackingCode) || trackingCode.length < 6) {
+      return { status: 400, data: { error: 'جهت بارگذاری فیش واریزی، ارائه کد رهگیری یکتا و معتبر الزامی است. شناسه عددی پذیرفته نمی‌شود.' } };
+    }
+    const idx = state.orders.findIndex((o) => (o.trackingCode || '').toUpperCase() === trackingCode.toUpperCase());
     if (idx !== -1) {
-      state.orders[idx].receiptImage = bodyData.receiptImage;
+      if (state.orders[idx].paymentStatus === 'Paid' || state.orders[idx].status === 'Completed') {
+        return { status: 400, data: { error: 'این سفارش قبلاً تسویه یا تکمیل گردیده است و فیش جدید نمی‌پذیرد.' } };
+      }
+      state.orders[idx].receiptImage = bodyData.receiptImage || bodyData.receiptImageUrl;
       state.orders[idx].paymentStatus = 'PendingVerification';
       state.orders[idx].status = 'Pending';
       writeLocalBackup(state);
-      return { status: 200, data: { ok: true, message: 'فیش واریزی با موفقیت ثبت شد.' } };
+
+      const safeReceiptConfirmation = {
+        trackingCode: state.orders[idx].trackingCode,
+        status: state.orders[idx].status,
+        paymentStatus: state.orders[idx].paymentStatus,
+        paymentMethod: state.orders[idx].paymentMethod,
+        hasReceipt: true
+      };
+
+      return {
+        status: 200,
+        data: {
+          ok: true,
+          success: true,
+          order: safeReceiptConfirmation,
+          trackingCode: state.orders[idx].trackingCode,
+          paymentStatus: state.orders[idx].paymentStatus,
+          message: 'تصویر فیش واریزی به همراه شماره فاکتور با موفقیت ثبت شد و جهت تایید برای مدیریت ارسال گردید.'
+        }
+      };
     }
-    return { status: 404, data: { error: 'سفارش یافت نشد' } };
+    return { status: 404, data: { error: 'سفارش با مشخصات ارائه‌شده یافت نشد.' } };
   }
 
   const confirmGatewayMatch = cleanPath.match(/^\/api\/orders\/([^/]+)\/confirm-(gateway|bale)-payment$/);
   if (confirmGatewayMatch && method === 'POST') {
-    const trackingCode = decodeURIComponent(confirmGatewayMatch[1]);
-    const idx = state.orders.findIndex((o) => o.trackingCode === trackingCode);
+    const trackingCode = decodeURIComponent(confirmGatewayMatch[1]).trim();
+    if (/^\d+$/.test(trackingCode) || trackingCode.length < 6) {
+      return { status: 400, data: { error: 'جهت تایید پرداخت، ارائه کد رهگیری یکتا و معتبر الزامی است.' } };
+    }
+    const idx = state.orders.findIndex((o) => (o.trackingCode || '').toUpperCase() === trackingCode.toUpperCase());
     if (idx !== -1) {
       state.orders[idx].status = 'Processing';
       state.orders[idx].paymentStatus = 'Paid';
-      state.orders[idx].paymentMethod = confirmGatewayMatch[2] === 'bale' ? 'bale_bot' : 'gateway';
+      state.orders[idx].paymentMethod = confirmGatewayMatch[2] === 'bale' ? 'bale_wallet' : 'online_gateway';
       writeLocalBackup(state);
-      return { status: 200, data: { ok: true, message: 'پرداخت با موفقیت ثبت شد.' } };
+      const safeConfirmation = {
+        trackingCode: state.orders[idx].trackingCode,
+        status: state.orders[idx].status,
+        paymentStatus: state.orders[idx].paymentStatus,
+        paymentMethod: state.orders[idx].paymentMethod
+      };
+      return { status: 200, data: { ok: true, success: true, order: safeConfirmation, message: 'پرداخت با موفقیت ثبت شد.' } };
     }
+    return { status: 404, data: { error: 'سفارش یافت نشد' } };
   }
 
   const trackMatch = cleanPath.match(/^\/api\/orders\/track\/([^/]+)$/);
   if (trackMatch && method === 'GET') {
-    const code = decodeURIComponent(trackMatch[1]).trim().toLowerCase();
+    const code = decodeURIComponent(trackMatch[1]).trim().toUpperCase();
     const order = state.orders.find(
-      (o) => (o.trackingCode || '').toLowerCase() === code || String(o.id) === code
+      (o) => (o.trackingCode || '').toUpperCase() === code
     );
     if (order) {
-      return { status: 200, data: { ok: true, order } };
+      const maskPhone = (p?: string) => {
+        if (!p) return '';
+        const clean = p.trim();
+        if (clean.length >= 10) return clean.slice(0, 4) + '***' + clean.slice(-3);
+        return clean.slice(0, 2) + '***';
+      };
+      const maskAddr = (a?: string) => {
+        if (!a) return '';
+        const parts = a.split(/[،,-]/);
+        if (parts.length > 1) return `${parts[0].trim()}، *** (تحویل پستی)`;
+        return a.slice(0, 14) + '... (تحویل پستی)';
+      };
+
+      const safeOrder = {
+        ...order,
+        phoneNumber: maskPhone(order.phoneNumber),
+        userAddress: maskAddr(order.userAddress)
+      };
+
+      return { status: 200, data: { ok: true, found: true, type: 'order', data: safeOrder, order: safeOrder } };
     }
-    return { status: 404, data: { ok: false, error: 'سفارشی با این کد رهگیری یافت نشد.' } };
+    return { status: 404, data: { ok: false, found: false, error: 'سفارشی با این کد رهگیری یافت نشد.' } };
   }
 
   // 12. رزرو مشاوره (Consultation Booking)
   if (cleanPath === '/api/consultations/book' && method === 'POST') {
+    const rawBody = bodyData || {};
+    const fullName = String(rawBody.fullName || rawBody.name || 'متقاضی مشاوره').trim();
+    const phoneNumber = String(rawBody.phoneNumber || rawBody.contactValue || '').trim();
+    const topicTitle = String(rawBody.topicTitle || 'مشاوره تخصصی سلامت').trim();
+    const trackingCode = rawBody.trackingCode || `ONV-CNS-${Math.floor(1000 + Math.random() * 9000)}`;
+    const resolvedPrice = Number(rawBody.price) || 0;
+
+    const newOrderId = state.orders.length > 0 ? Math.max(...state.orders.map(o => Number(o.id) || 0)) + 1 : 101;
+    const newOrder: Order = {
+      id: newOrderId,
+      userFullName: fullName,
+      phoneNumber,
+      userAddress: `مشاوره آنلاین در ${rawBody.socialPlatform || 'پیام‌رسان بله'} | آیدی: ${rawBody.socialContactId || phoneNumber} | زمان: ${rawBody.preferredDate || 'فردا'} - ${rawBody.preferredTimeSlot || 'نوبت عصر'}`,
+      totalPrice: resolvedPrice,
+      status: resolvedPrice > 0 ? 'Pending' : 'Processing',
+      paymentStatus: resolvedPrice > 0 ? 'Unpaid' : 'Paid',
+      paymentMethod: 'card_to_card',
+      trackingCode,
+      creationTime: new Date().toLocaleDateString('fa-IR'),
+      isConsultation: true,
+      consultationDetails: {
+        topicId: rawBody.topicId || 'custom',
+        topicTitle,
+        preferredDate: rawBody.preferredDate || 'فردا',
+        preferredTimeSlot: rawBody.preferredTimeSlot || 'نوبت عصر (۱۶:۰۰ الی ۱۹:۰۰)',
+        socialPlatform: rawBody.socialPlatform || 'پیام‌رسان بله',
+        socialContactId: rawBody.socialContactId || phoneNumber,
+        price: resolvedPrice,
+        durationMinutes: rawBody.durationMinutes || 30,
+        question: rawBody.question || '',
+        consultationStatus: resolvedPrice > 0 ? 'PendingPayment' : 'Scheduled'
+      },
+      items: [
+        {
+          id: 1,
+          productId: 9000,
+          productName: `رزرو مشاوره تخصصی: ${topicTitle}`,
+          size: `${rawBody.preferredDate || 'فردا'} | ${rawBody.preferredTimeSlot || 'نوبت عصر'} (${rawBody.socialPlatform || 'بله'})`,
+          quantity: 1,
+          unitPrice: resolvedPrice,
+          totalPrice: resolvedPrice
+        }
+      ]
+    };
+    state.orders.unshift(newOrder);
+
     const maxId = state.contactMessages.reduce((acc, m) => Math.max(acc, Number(m.id) || 0), 0);
     const consultationMsg: ContactMessage = {
       id: maxId + 1,
-      fullName: bodyData.name || 'متقاضی مشاوره',
-      name: bodyData.name || 'متقاضی مشاوره',
-      phoneNumber: bodyData.phoneNumber || bodyData.contactValue || '',
-      trackingCode: bodyData.trackingCode || `ONV-CNS-${Date.now().toString().slice(-4)}`,
-      message: `درخواست مشاوره ثبت شد. موضوع: ${bodyData.topicTitle || 'عمومی'} - مبلغ: ${bodyData.amount || 0} تومان`,
+      fullName,
+      phoneNumber,
+      trackingCode,
+      message: `[رزرو مشاوره تخصصی - موضوع: ${topicTitle}]\n📅 زمان انتخابی: ${rawBody.preferredDate || 'فردا'} | ${rawBody.preferredTimeSlot || 'عصر'}\n📱 شبکه اجتماعی: ${rawBody.socialPlatform || 'بله'} - آیدی: ${rawBody.socialContactId || ''}\n💳 هزینه: ${resolvedPrice.toLocaleString('fa-IR')} تومان`,
       creationTime: new Date().toLocaleDateString('fa-IR'),
       isRead: false,
       isResponded: false,
       isConsultation: true,
+      orderId: newOrderId,
+      paymentStatus: newOrder.paymentStatus,
+      paymentMethod: newOrder.paymentMethod,
+      totalPrice: resolvedPrice,
+      consultationDetails: newOrder.consultationDetails
     };
     state.contactMessages.unshift(consultationMsg);
     writeLocalBackup(state);
-    return { status: 200, data: { ok: true, message: 'رزرو مشاوره با موفقیت ثبت شد.' } };
+    return { status: 201, data: { success: true, trackingCode, order: newOrder, consultation: consultationMsg } };
   }
 
   // 13. ربات و اعلان‌ها (Bot Settings & Logs)
@@ -1054,14 +1166,32 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
 
     // اگر سرور پاسخ داد ولی صفحه HTML برگرداند (مورد شایع در هاست‌های بدون Node.js)
     console.warn(
-      `[Onival Resilient Fallback] API endpoint ${urlStr} returned status ${serverResponse.status} (content-type: ${contentType}). Switching to self-contained client-side data engine.`
+      `[Onival Resilient Fallback] API endpoint ${urlStr} returned status ${serverResponse.status} (content-type: ${contentType}).`
     );
   } catch (netErr) {
     // خطای شبکه یا قطعی اینترنت
     console.warn(
-      `[Onival Resilient Fallback] Network request to ${urlStr} failed. Activating instant LocalStorage fallback.`,
+      `[Onival Resilient Fallback] Network request to ${urlStr} failed.`,
       netErr
     );
+  }
+
+  // احراز هویت، نشست‌ها و مدیریت ربات هرگز نباید به دیتابیس محلی یا توکن‌های ساختگی سوئیچ شوند
+  if (
+    urlStr.startsWith('/api/admin/') ||
+    urlStr.startsWith('/api/account/change-credentials') ||
+    urlStr.startsWith('/api/account/profile') ||
+    urlStr.startsWith('/api/bot/')
+  ) {
+    return new Response(JSON.stringify({
+      ok: false,
+      error: 'خطا در ارتباط با سرور هاست. لطفاً وضعیت دسترسی به سرور و اتصال اینترنت را بررسی فرمایید.'
+    }), {
+      status: 503,
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+      },
+    });
   }
 
   // سوئیچ خودکار به موتور پردازش داده کلاینت و بازگرداندن Response استاندارد مرورگر

@@ -45,16 +45,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 // ==============================================================================
 $DEFAULT_CONFIG = [
     // توکن ربات تلگرام (دریافت شده از BotFather@ در تلگرام)
-    'telegramBotToken'     => '1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34',
+    'telegramBotToken'     => '',
 
     // نام کاربری ربات تلگرام
     'telegramBotUsername'  => 'Onivalbot',
 
     // آیدی عددی چت ادمین در تلگرام (برای دریافت نوتیفیکیشن سفارش‌های پرداخت‌شده)
-    'adminChatId'          => '69451465',
+    'adminChatId'          => '',
 
     // نام کاربری ادمین
-    'adminUsername'        => 'hasti_hjz',
+    'adminUsername'        => '',
 
     // آدرس وب‌سایت فروشگاه (در صورت خالی بودن خودکار تشخیص داده می‌شود)
     'storeUrl'             => '',

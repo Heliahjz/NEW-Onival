@@ -675,11 +675,53 @@
   },
   "adminCredentials": {
     "username": "admin",
-    "password": "6db4e37df1c2abbfca3529f83b23d5e17fad82dab3a4d8b12964d3c95295001b",
+    "password": "scrypt:173fcac496b7e4f1dcc297687c563dc6:d99a6594687ef6346c765a7c46512402cce9e0158e1e9827806c41a3295b60f53198c266fc39eec60e285658d521c76fd90750f80b0a348fcfaa126db0b2a734",
     "email": "admin@onival.com",
     "name": "مدیریت اونیوال (ONIVAL Admin)"
   },
   "botActivityLogs": [
+    {
+      "id": 1793271558690,
+      "time": "۱۰:۵۹",
+      "type": "default_command_start",
+      "platform": "bale",
+      "text": "پیام خوش‌آمدگویی و منوی دسترسی سریع توسط ربات مشتری به کاربر (12345) ارسال شد.",
+      "status": "success",
+      "rawPayload": {
+        "command": "سلام",
+        "chatId": "12345"
+      },
+      "rawResponse": {
+        "ok": false,
+        "status": 401,
+        "error": "توکن ربات نامعتبر است (401 Unauthorized)"
+      }
+    },
+    {
+      "id": 1792829249858,
+      "time": "۰۸:۰۷:۲۹",
+      "type": "admin_notification_failed",
+      "platform": "bale",
+      "text": "خطا در ارسال اعلان «new_order_placed» به ربات ادمین: Unauthorized",
+      "status": "warning",
+      "rawPayload": {
+        "adminChat": "69451465",
+        "eventType": "new_order_placed"
+      },
+      "rawResponse": {
+        "ok": false,
+        "error_code": 401,
+        "description": "Unauthorized"
+      }
+    },
+    {
+      "id": 1792829249763,
+      "time": "۰۸:۰۷",
+      "type": "new_order_placed",
+      "platform": "bale",
+      "text": "فاکتور جدید ONV-ORD-7DB8EB8D صادر و جهت پرداخت/تایید به ربات بله ارجاع شد. مبلغ: ۳۰۶٬۰۰۰ تومان",
+      "status": "success"
+    },
     {
       "id": 1792573365202,
       "time": "۰۹:۰۲",
@@ -1229,6 +1271,103 @@
   ],
   "orders": [
     {
+      "id": 107,
+      "userFullName": "مهدی رستمی",
+      "phoneNumber": "۰۹۱۲۳۴۵۶۷۸۹",
+      "userAddress": "مشاوره آنلاین در بله (Bale) | آیدی/شماره: @rostami_onival | زمان: ۱۴۰۴/۰۱/۱۵ - ساعت ۱۶ تا ۱۸",
+      "totalPrice": 120000,
+      "status": "Pending",
+      "paymentStatus": "Unpaid",
+      "paymentMethod": "card_to_card",
+      "trackingCode": "ONV-CNS-C3CB6A7E",
+      "creationTime": "۱۴۰۵/۸/۷",
+      "balePaymentUrl": "https://ble.ir/Onivalbot?start=pay_ONV-CNS-C3CB6A7E",
+      "isConsultation": true,
+      "consultationDetails": {
+        "topicId": "site_setup",
+        "topicTitle": "طراحی و سئو فروشگاه",
+        "preferredDate": "۱۴۰۴/۰۱/۱۵",
+        "preferredTimeSlot": "ساعت ۱۶ تا ۱۸",
+        "socialPlatform": "بله (Bale)",
+        "socialContactId": "@rostami_onival",
+        "price": 120000,
+        "durationMinutes": 30,
+        "question": "درخواست مشاوره برای اتصال درگاه و ربات بله",
+        "consultationStatus": "PendingPayment"
+      },
+      "items": [
+        {
+          "id": 1,
+          "productId": 9000,
+          "productName": "رزرو مشاوره تخصصی: طراحی و سئو فروشگاه",
+          "size": "۱۴۰۴/۰۱/۱۵ | ساعت ۱۶ تا ۱۸ (بله (Bale))",
+          "quantity": 1,
+          "unitPrice": 120000,
+          "totalPrice": 120000
+        }
+      ]
+    },
+    {
+      "id": 106,
+      "userFullName": "تست کاربر",
+      "phoneNumber": "09123456789",
+      "userAddress": "مشاوره آنلاین در پیام‌رسان بله | آیدی/شماره: @test | زمان: فردا - عصر",
+      "totalPrice": 120000,
+      "status": "Pending",
+      "paymentStatus": "Unpaid",
+      "paymentMethod": "card_to_card",
+      "trackingCode": "ONV-CNS-1E46B798",
+      "creationTime": "۱۴۰۵/۸/۷",
+      "balePaymentUrl": "https://ble.ir/Onivalbot?start=pay_ONV-CNS-1E46B798",
+      "isConsultation": true,
+      "consultationDetails": {
+        "topicId": "nutrition",
+        "topicTitle": "مشاوره تغذیه و سلامت",
+        "preferredDate": "فردا",
+        "preferredTimeSlot": "عصر",
+        "socialPlatform": "پیام‌رسان بله",
+        "socialContactId": "@test",
+        "price": 120000,
+        "durationMinutes": 30,
+        "question": "تست",
+        "consultationStatus": "PendingPayment"
+      },
+      "items": [
+        {
+          "id": 1,
+          "productId": 9000,
+          "productName": "رزرو مشاوره تخصصی: مشاوره تغذیه و سلامت",
+          "size": "فردا | عصر (پیام‌رسان بله)",
+          "quantity": 1,
+          "unitPrice": 120000,
+          "totalPrice": 120000
+        }
+      ]
+    },
+    {
+      "id": 105,
+      "userFullName": "تست کننده امنیتی",
+      "phoneNumber": "09121112233",
+      "userAddress": "تهران، خیابان آزادی",
+      "totalPrice": 306000,
+      "status": "Pending",
+      "paymentStatus": "Unpaid",
+      "paymentMethod": "card_to_card",
+      "trackingCode": "ONV-ORD-7DB8EB8D",
+      "creationTime": "۱۴۰۵/۸/۲",
+      "balePaymentUrl": "https://ble.ir/Onivalbot?start=pay_ONV-ORD-7DB8EB8D",
+      "items": [
+        {
+          "productId": 1,
+          "quantity": 2,
+          "productName": "عسل کوهستان",
+          "unitPrice": 153000,
+          "price": 153000,
+          "totalPrice": 306000
+        }
+      ]
+    },
+    {
       "id": 104,
       "userFullName": "مریم شریفی",
       "customerName": "مریم شریفی",
@@ -1262,7 +1401,7 @@
       "userAddress": "تهران، خیابان ولیعصر، نرسیده به میدان ونک، پلاک ۴۲، واحد ۳",
       "totalPrice": 800000,
       "status": "Processing",
-      "paymentStatus": "Paid",
+      "paymentStatus": "PendingVerification",
       "trackingCode": "ONV-ORD-101",
       "creationTime": "1403/06/23",
       "balePaymentUrl": "https://ble.ir/onival_bot?start=pay_ONV-ORD-101",
@@ -1285,7 +1424,13 @@
           "unitPrice": 450000,
           "totalPrice": 450000
         }
-      ]
+      ],
+      "receiptImageUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      "receiptImage": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      "receiptNote": "",
+      "receiptSubmittedAt": "۱۴۰۵/۸/۵ - ۰۷:۱۳",
+      "receiptUploadedAt": "۱۴۰۵/۸/۵ - ۰۷:۱۳",
+      "paymentMethod": "card_to_card"
     },
     {
       "id": 102,
@@ -1350,6 +1495,60 @@
   ],
   "contactMessages": [
     {
+      "id": 6,
+      "fullName": "مهدی رستمی",
+      "phoneNumber": "۰۹۱۲۳۴۵۶۷۸۹",
+      "trackingCode": "ONV-CNS-C3CB6A7E",
+      "message": "[رزرو مشاوره تخصصی - موضوع: طراحی و سئو فروشگاه]\n📅 زمان انتخابی: ۱۴۰۴/۰۱/۱۵ | ساعت ۱۶ تا ۱۸\n📱 شبکه اجتماعی انتخابی: بله (Bale) - آیدی/شماره: @rostami_onival\n💳 هزینه مشاوره: ۱۲۰٬۰۰۰ تومان\n📝 شرح پرسش: درخواست مشاوره برای اتصال درگاه و ربات بله",
+      "isRead": false,
+      "isResponded": false,
+      "creationTime": "۱۴۰۵/۸/۷ - ۱۰:۱۶",
+      "isConsultation": true,
+      "orderId": 107,
+      "paymentStatus": "Unpaid",
+      "paymentMethod": "card_to_card",
+      "totalPrice": 120000,
+      "consultationDetails": {
+        "topicId": "site_setup",
+        "topicTitle": "طراحی و سئو فروشگاه",
+        "preferredDate": "۱۴۰۴/۰۱/۱۵",
+        "preferredTimeSlot": "ساعت ۱۶ تا ۱۸",
+        "socialPlatform": "بله (Bale)",
+        "socialContactId": "@rostami_onival",
+        "price": 120000,
+        "durationMinutes": 30,
+        "question": "درخواست مشاوره برای اتصال درگاه و ربات بله",
+        "consultationStatus": "PendingPayment"
+      }
+    },
+    {
+      "id": 5,
+      "fullName": "تست کاربر",
+      "phoneNumber": "09123456789",
+      "trackingCode": "ONV-CNS-1E46B798",
+      "message": "[رزرو مشاوره تخصصی - موضوع: مشاوره تغذیه و سلامت]\n📅 زمان انتخابی: فردا | عصر\n📱 شبکه اجتماعی انتخابی: پیام‌رسان بله - آیدی/شماره: @test\n💳 هزینه مشاوره: ۱۲۰٬۰۰۰ تومان\n📝 شرح پرسش: تست",
+      "isRead": false,
+      "isResponded": false,
+      "creationTime": "۱۴۰۵/۸/۷ - ۱۰:۰۴",
+      "isConsultation": true,
+      "orderId": 106,
+      "paymentStatus": "Unpaid",
+      "paymentMethod": "card_to_card",
+      "totalPrice": 120000,
+      "consultationDetails": {
+        "topicId": "nutrition",
+        "topicTitle": "مشاوره تغذیه و سلامت",
+        "preferredDate": "فردا",
+        "preferredTimeSlot": "عصر",
+        "socialPlatform": "پیام‌رسان بله",
+        "socialContactId": "@test",
+        "price": 120000,
+        "durationMinutes": 30,
+        "question": "تست",
+        "consultationStatus": "PendingPayment"
+      }
+    },
+    {
       "id": 1,
       "fullName": "امیرحسین رضایی",
       "phoneNumber": "09123456789",
@@ -1409,5 +1608,5 @@
       }
     }
   ],
-  "updatedAt": "2026-10-23T09:31:23.017Z"
+  "updatedAt": "2026-10-29T10:59:18.690Z"
 }

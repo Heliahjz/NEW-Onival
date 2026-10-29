@@ -5,41 +5,29 @@ import { apiFetch } from './dataService';
 export const LOCAL_STORAGE_BOT_CONFIG_KEY = 'onival_bot_config';
 
 /**
- * Retrieves the currently active Bale / Bot configuration from LocalStorage,
- * falling back to initial seed data or passed fallback.
+ * Retrieves the currently active Bale / Bot configuration from server state or fallback.
+ * Strictly avoids storing or reading sensitive bot tokens in browser localStorage.
  */
 export function getActiveBotConfig(fallback?: TelegramConfig): TelegramConfig {
-  let cached: Partial<TelegramConfig> = {};
-  if (typeof window !== 'undefined') {
-    try {
-      const raw = localStorage.getItem(LOCAL_STORAGE_BOT_CONFIG_KEY);
-      if (raw) {
-        cached = JSON.parse(raw);
-      }
-    } catch (e) {
-      console.warn('Failed to parse onival_bot_config from localStorage:', e);
-    }
-  }
-
   const base = fallback || DEFAULT_TELEGRAM_CONFIG;
   return {
     ...base,
-    ...cached,
-    botToken: (cached.botToken || cached.baleBotToken || base.botToken || base.baleBotToken || '').trim(),
-    adminChatId: (cached.adminChatId || cached.baleAdminChatId || base.adminChatId || base.baleAdminChatId || '').trim(),
-    botUsername: (cached.botUsername || cached.baleBotUsername || base.botUsername || base.baleBotUsername || 'Onivalbot').replace(/^@/, ''),
-    baleBotUsername: (cached.baleBotUsername || cached.botUsername || base.baleBotUsername || base.botUsername || 'Onivalbot').replace(/^@/, ''),
-    baleAdminUsername: cached.baleAdminUsername || base.baleAdminUsername || '@hasti_hjz',
-    balePaymentMode: cached.balePaymentMode || base.balePaymentMode || 'live',
-    balePaymentTokenLive: cached.balePaymentTokenLive || base.balePaymentTokenLive || 'WALLET-v5gqSc1W1kaBUo2B',
-    balePaymentTokenTest: cached.balePaymentTokenTest || base.balePaymentTokenTest || 'WALLET-TEST-1111111111111111',
-    baseUrl: cached.baseUrl || cached.baleBaseUrl || base.baseUrl || 'https://tapi.bale.ai',
-    baleBaseUrl: cached.baleBaseUrl || cached.baseUrl || base.baleBaseUrl || 'https://tapi.bale.ai',
+    botToken: (base.botToken || base.baleBotToken || '').trim(),
+    adminChatId: (base.adminChatId || base.baleAdminChatId || '').trim(),
+    botUsername: (base.botUsername || base.baleBotUsername || 'Onivalbot').replace(/^@/, ''),
+    baleBotUsername: (base.baleBotUsername || base.botUsername || 'Onivalbot').replace(/^@/, ''),
+    baleAdminUsername: base.baleAdminUsername || '',
+    balePaymentMode: base.balePaymentMode || 'live',
+    balePaymentTokenLive: base.balePaymentTokenLive || '',
+    balePaymentTokenTest: base.balePaymentTokenTest || '',
+    baseUrl: base.baseUrl || base.baleBaseUrl || 'https://tapi.bale.ai',
+    baleBaseUrl: base.baleBaseUrl || base.baseUrl || 'https://tapi.bale.ai',
   };
 }
 
 /**
- * Saves bot configuration to LocalStorage and syncs with the server API.
+ * Saves bot configuration directly and securely to the server API (persisted to server-data/onival-persistent-data.json).
+ * Sensitive tokens are never stored in browser localStorage.
  */
 export async function saveActiveBotConfig(config: TelegramConfig): Promise<{ ok: boolean; savedAt: string }> {
   const savedAt = new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -49,24 +37,19 @@ export async function saveActiveBotConfig(config: TelegramConfig): Promise<{ ok:
     _lastUpdated: Date.now()
   };
 
+  // Ensure any legacy sensitive bot tokens are purged from browser localStorage
   if (typeof window !== 'undefined') {
     try {
-      localStorage.setItem(LOCAL_STORAGE_BOT_CONFIG_KEY, JSON.stringify(payloadToStore));
-      window.dispatchEvent(new CustomEvent('onival_bot_config_updated', { detail: payloadToStore }));
-    } catch (e) {
-      console.error('Error saving to localStorage:', e);
-    }
+      localStorage.removeItem(LOCAL_STORAGE_BOT_CONFIG_KEY);
+      localStorage.removeItem('onival_saved_bot_config_v1');
+    } catch {}
   }
 
-  try {
-    await apiFetch('/api/bot/config', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payloadToStore)
-    });
-  } catch (err) {
-    console.warn('Server sync error for bot config (localStorage remains updated):', err);
-  }
+  await apiFetch('/api/bot/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payloadToStore)
+  });
 
   return { ok: true, savedAt };
 }
@@ -99,7 +82,7 @@ export async function sendBaleAdminWelcomeTest(options?: {
 }): Promise<TestAdminWelcomeResult> {
   const currentConfig = getActiveBotConfig();
   const token = (options?.botToken || currentConfig.botToken || currentConfig.baleBotToken || DEFAULT_TELEGRAM_CONFIG.botToken || '').trim();
-  const chatId = (options?.chatId || currentConfig.adminChatId || currentConfig.baleAdminChatId || DEFAULT_TELEGRAM_CONFIG.adminChatId || '69451465').trim();
+  const chatId = (options?.chatId || currentConfig.adminChatId || currentConfig.baleAdminChatId || DEFAULT_TELEGRAM_CONFIG.adminChatId || '').trim();
   const baseUrl = (options?.baseUrl || currentConfig.baleBaseUrl || currentConfig.baseUrl || 'https://tapi.bale.ai').replace(/\/+$/, '');
 
   if (!token) {

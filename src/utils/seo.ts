@@ -93,6 +93,8 @@ export interface ResolvedPageSeo {
     | 'tracking'
     | 'checkout'
     | 'admin'
+    | 'terms'
+    | 'refund'
     | 'not_found';
   matchedProduct?: Product;
   matchedCategory?: ProductCategory;

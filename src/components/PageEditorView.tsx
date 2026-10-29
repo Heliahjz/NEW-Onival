@@ -215,7 +215,8 @@ export const PageEditorView: React.FC<PageEditorViewProps> = ({
       badge: 'پیشنهاد ویژه',
       buttonText: 'مشاهده و خرید آنلاین',
       buttonLink: '#products',
-      gradientOverlay: 'from-amber-950/80 via-slate-900/60 to-transparent'
+      gradientOverlay: 'from-amber-950/80 via-slate-900/60 to-transparent',
+      enabled: true,
     };
     setContent(prev => ({
       ...prev,

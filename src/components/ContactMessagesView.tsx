@@ -62,11 +62,14 @@ export const ContactMessagesView: React.FC<ContactMessagesViewProps> = ({
     }
   };
 
+  const q = (searchTerm || '').trim().toLowerCase();
   const filteredMessages = messages.filter((m) => {
-    const matchSearch =
-      m.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      m.trackingCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      m.message.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchSearch = !q || (
+      (m.fullName || '').toLowerCase().includes(q) ||
+      (m.trackingCode || '').toLowerCase().includes(q) ||
+      (m.message || '').toLowerCase().includes(q) ||
+      (m.phoneNumber || '').toLowerCase().includes(q)
+    );
 
     if (filter === 'unanswered') return matchSearch && !m.isResponded;
     if (filter === 'answered') return matchSearch && m.isResponded;

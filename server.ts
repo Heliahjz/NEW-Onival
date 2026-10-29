@@ -15,7 +15,7 @@ import {
 import { SlugRedirect } from './src/types';
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 // Ensure database path is secure within server data directory
 const DATA_DIR = path.join(process.cwd(), 'server-data');
@@ -28,6 +28,44 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 const PERSIST_FILE_PATH = path.join(DATA_DIR, 'onival-persistent-data.json');
 const LEGACY_PERSIST_FILE_PATH = path.join(process.cwd(), 'onival-persistent-data.json');
+const RECEIPTS_DIR = path.join(DATA_DIR, 'receipts');
+if (!fs.existsSync(RECEIPTS_DIR)) {
+  try {
+    fs.mkdirSync(RECEIPTS_DIR, { recursive: true });
+  } catch {
+    // fallback
+  }
+}
+
+// Global PII Masking Utilities
+function maskPhone(p?: string): string {
+  if (!p) return '';
+  const clean = p.trim();
+  if (clean.length >= 10) return clean.slice(0, 4) + '***' + clean.slice(-3);
+  if (clean.length >= 4) return clean.slice(0, 2) + '***' + clean.slice(-2);
+  return '***';
+}
+
+function maskAddr(a?: string): string {
+  if (!a) return '';
+  const parts = a.split(/[،,-]/);
+  if (parts.length > 1) return `${parts[0].trim()}، *** (تحویل پستی)`;
+  return a.slice(0, 14) + '... (تحویل پستی)';
+}
+
+// Sanitize bot API baseUrl to prevent SSRF (Server-Side Request Forgery) attacks
+function sanitizeBotBaseUrl(platform: string, inputUrl?: string): string {
+  if (platform === 'telegram') {
+    return 'https://api.telegram.org';
+  }
+  if (typeof inputUrl === 'string') {
+    const trimmed = inputUrl.trim().toLowerCase();
+    if (trimmed.includes('tapi.bale.ai') || trimmed.includes('api.bale.ai')) {
+      return 'https://tapi.bale.ai';
+    }
+  }
+  return 'https://tapi.bale.ai';
+}
 
 // 1. Security Headers (Anti-XSS, Anti-Clickjacking, MIME-Sniffing Prevention)
 app.disable('x-powered-by');
@@ -97,8 +135,8 @@ app.use(cors({
           return callback(null, true);
         }
       }
-      // Allow preview / dev domain matching same host
-      callback(null, true);
+      // Reject unauthorized external origins
+      callback(null, false);
     } catch {
       callback(null, false);
     }
@@ -108,8 +146,8 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Admin-Token']
 }));
 
-app.use(express.json({ limit: '25mb' }));
-app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+app.use(express.json({ limit: '5mb' }));
+app.use(express.urlencoded({ extended: true, limit: '5mb' }));
 
 // In-Memory Data Store replicating Onival.Domain & Onival.Infrastructure
 let productCategories = [
@@ -502,21 +540,21 @@ let orders: any[] = [
 let telegramConfig: any = {
   // Two-Bot Dedicated Architecture:
   // 1) Customer & Payment Bot (ربات اختصاصی مشتری و پرداخت)
-  customerBotToken: '1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34',
-  customerBotUsername: 'Onivalbot',
+  customerBotToken: '',
+  customerBotUsername: '',
   customerBotEnabled: true,
   customerBotWebhookUrl: '',
 
   // 2) Admin & Management Bot (ربات اختصاصی ادمین و مدیریت فروش)
-  adminBotToken: '1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34',
-  adminBotUsername: 'OnivalAdminBot',
-  adminChatId: '69451465',
+  adminBotToken: '',
+  adminBotUsername: '',
+  adminChatId: '',
   adminBotEnabled: true,
   adminBotWebhookUrl: '',
 
   // Primary / Bale Bot compatibility fields
-  botToken: '1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34',
-  botUsername: 'Onivalbot',
+  botToken: '',
+  botUsername: '',
   baseUrl: 'https://tapi.bale.ai',
   panelBaseUrl: 'http://localhost:3000',
   antiSpamSeconds: 5,
@@ -524,16 +562,16 @@ let telegramConfig: any = {
 
   // Explicit Bale Bot Settings
   baleEnabled: true,
-  baleBotToken: '1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34',
-  baleAdminChatId: '69451465',
-  baleAdminUsername: '@hasti_hjz',
-  baleBotUsername: 'Onivalbot',
+  baleBotToken: '',
+  baleAdminChatId: '',
+  baleAdminUsername: '',
+  baleBotUsername: '',
   baleBaseUrl: 'https://tapi.bale.ai',
   baleWebhookUrl: '',
-  balePaymentMode: 'test',
-  balePaymentTokenTest: 'WALLET-TEST-1111111111111111',
-  balePaymentTokenLive: 'WALLET-v5gqSc1W1kaBUo2B',
-  balePaymentToken: 'WALLET-TEST-1111111111111111',
+  balePaymentMode: 'live',
+  balePaymentTokenTest: '',
+  balePaymentTokenLive: '',
+  balePaymentToken: '',
   baleAutoSendInvoice: true,
   baleAutoNotifyAdminAllTransactions: true,
   baleAdminDirectApproval: true,
@@ -541,12 +579,12 @@ let telegramConfig: any = {
   // Explicit Telegram Bot Settings
   telegramEnabled: true,
   telegramBotEnabled: true,
-  telegramBotToken: '7192837465:AAH8xK9lP2mN4vB6cX8zQ1wE3rT5yU7iO9p',
-  telegramAdminChatId: '923387796',
-  telegramBotUsername: 'onival_shop_bot',
+  telegramBotToken: '',
+  telegramAdminChatId: '',
+  telegramBotUsername: '',
   telegramBaseUrl: 'https://api.telegram.org',
   telegramWebhookUrl: '',
-  webhookSecretToken: 'ONIVAL_SEC_2025_9981',
+  webhookSecretToken: '',
 
   // Customer Support Channels & Floating Support Widget
   baleSupportId: '@onival_bale_support',
@@ -846,12 +884,106 @@ async function dispatchBotNotification(text: string, eventType: string) {
     }
   }
 
-  return { nowTime, results };
+  return results;
+}
+
+// ================= ADMIN SECURITY, TOKEN SECRET & CRYPTOGRAPHIC HASHING =================
+const SESSION_SECRET_FILE = path.join(DATA_DIR, '.session_secret');
+function getAdminTokenSecret(): string {
+  if (process.env.ADMIN_TOKEN_SECRET && process.env.ADMIN_TOKEN_SECRET.trim().length >= 16) {
+    return process.env.ADMIN_TOKEN_SECRET.trim();
+  }
+  try {
+    if (fs.existsSync(SESSION_SECRET_FILE)) {
+      const existing = fs.readFileSync(SESSION_SECRET_FILE, 'utf-8').trim();
+      if (existing.length >= 32) return existing;
+    }
+    const fresh = crypto.randomBytes(32).toString('hex');
+    fs.writeFileSync(SESSION_SECRET_FILE, fresh, { encoding: 'utf-8', mode: 0o600 });
+    return fresh;
+  } catch {
+    // Generate fresh random 32-byte secret in memory if filesystem is non-writable, never a predictable static key
+    return crypto.randomBytes(32).toString('hex');
+  }
+}
+const ADMIN_TOKEN_SECRET = getAdminTokenSecret();
+
+// Hash password with scrypt + 16-byte random salt
+function hashPasswordWithScrypt(password: string, saltHex?: string): string {
+  const salt = saltHex ? Buffer.from(saltHex, 'hex') : crypto.randomBytes(16);
+  const hash = crypto.scryptSync(password.trim(), salt, 64);
+  return `scrypt:${salt.toString('hex')}:${hash.toString('hex')}`;
+}
+
+// Backward compatibility helper
+function hashPassword(password: string): string {
+  return hashPasswordWithScrypt(password);
+}
+
+// Timing-safe password verification preventing timing-based attacks
+function verifyAdminPassword(inputPassword: string, storedPasswordOrHash: string): boolean {
+  if (!inputPassword || !storedPasswordOrHash) return false;
+  const trimmedInput = inputPassword.trim();
+  const trimmedStored = storedPasswordOrHash.trim();
+
+  // 1. Scrypt format: scrypt:<saltHex>:<hashHex>
+  if (trimmedStored.startsWith('scrypt:')) {
+    const parts = trimmedStored.split(':');
+    if (parts.length === 3) {
+      try {
+        const saltBuf = Buffer.from(parts[1], 'hex');
+        const expectedHashBuf = Buffer.from(parts[2], 'hex');
+        const computedHash = crypto.scryptSync(trimmedInput, saltBuf, 64);
+        if (computedHash.length === expectedHashBuf.length) {
+          return crypto.timingSafeEqual(computedHash, expectedHashBuf);
+        }
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  // 2. Legacy HMAC SHA-256 match
+  const legacyHash = crypto.createHmac('sha256', 'onival_salt_2025_sec').update(trimmedInput).digest('hex');
+  if (legacyHash.length === trimmedStored.length) {
+    try {
+      if (crypto.timingSafeEqual(Buffer.from(legacyHash), Buffer.from(trimmedStored))) {
+        return true;
+      }
+    } catch {
+      // continue
+    }
+  }
+
+  // 3. Direct plaintext match (timing-safe)
+  const inputBuf = Buffer.from(trimmedInput);
+  const storedBuf = Buffer.from(trimmedStored);
+  if (inputBuf.length === storedBuf.length) {
+    try {
+      return crypto.timingSafeEqual(inputBuf, storedBuf);
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
+}
+
+// Dynamic Site Public URL resolver without any hardcoded external test hosts
+function getSitePublicUrl(): string {
+  if (telegramConfig?.panelBaseUrl && !telegramConfig.panelBaseUrl.includes('localhost') && !telegramConfig.panelBaseUrl.includes('ais-dev')) {
+    return telegramConfig.panelBaseUrl.replace(/\/+$/, '');
+  }
+  if (process.env.APP_URL && process.env.APP_URL.trim() !== '') {
+    return process.env.APP_URL.trim().replace(/\/+$/, '');
+  }
+  return `http://localhost:${PORT}`;
 }
 
 let adminCredentials = {
   username: 'admin',
-  password: 'admin',
+  password: hashPasswordWithScrypt('admin'),
   email: 'admin@onival.com',
   name: 'مدیریت اونیوال (ONIVAL Admin)'
 };
@@ -1116,11 +1248,11 @@ function loadPersistedState() {
           ...parsed.telegramConfig,
           botUsername: cleanBot(parsed.telegramConfig.botUsername),
           baleBotUsername: cleanBot(parsed.telegramConfig.baleBotUsername),
-          baleAdminUsername: parsed.telegramConfig.baleAdminUsername || '@hasti_hjz',
+          baleAdminUsername: parsed.telegramConfig.baleAdminUsername || '',
           balePaymentMode: parsed.telegramConfig.balePaymentMode || 'live',
-          balePaymentTokenTest: parsed.telegramConfig.balePaymentTokenTest || 'WALLET-TEST-1111111111111111',
-          balePaymentTokenLive: parsed.telegramConfig.balePaymentTokenLive || 'WALLET-v5gqSc1W1kaBUo2B',
-          balePaymentToken: parsed.telegramConfig.balePaymentToken || 'WALLET-v5gqSc1W1kaBUo2B',
+          balePaymentTokenTest: parsed.telegramConfig.balePaymentTokenTest || '',
+          balePaymentTokenLive: parsed.telegramConfig.balePaymentTokenLive || '',
+          balePaymentToken: parsed.telegramConfig.balePaymentToken || '',
           baleAutoSendInvoice: parsed.telegramConfig.baleAutoSendInvoice ?? true,
           baleAutoNotifyAdminAllTransactions: parsed.telegramConfig.baleAutoNotifyAdminAllTransactions ?? true,
           baleAdminDirectApproval: parsed.telegramConfig.baleAdminDirectApproval ?? true
@@ -1154,7 +1286,23 @@ function loadPersistedState() {
         };
       }
       if (parsed.adminCredentials && typeof parsed.adminCredentials === 'object') {
-        adminCredentials = { ...adminCredentials, ...parsed.adminCredentials };
+        let loadedPass = String(parsed.adminCredentials.password || 'admin').trim();
+        if (loadedPass === '6db4e37df1c2abbfca3529f83b23d5e17fad82dab3a4d8b12964d3c95295001b' || loadedPass === 'admin') {
+          loadedPass = hashPasswordWithScrypt('admin');
+        } else if (!loadedPass.startsWith('scrypt:')) {
+          loadedPass = hashPasswordWithScrypt(loadedPass);
+        }
+        adminCredentials = {
+          username: String(parsed.adminCredentials.username || 'admin').trim(),
+          password: loadedPass,
+          email: String(parsed.adminCredentials.email || 'admin@onival.com').trim(),
+          name: String(parsed.adminCredentials.name || 'مدیریت اونیوال (ONIVAL Admin)').trim()
+        };
+      }
+
+      // Guarantee secure random webhook secret token if not configured
+      if (!telegramConfig.webhookSecretToken || String(telegramConfig.webhookSecretToken).trim() === '') {
+        telegramConfig.webhookSecretToken = `ONV_SEC_${crypto.randomBytes(16).toString('hex')}`;
       }
       if (Array.isArray(parsed.botActivityLogs) && parsed.botActivityLogs.length > 0) {
         botActivityLogs = parsed.botActivityLogs;
@@ -1197,62 +1345,44 @@ function savePersistedState() {
       updatedAt: new Date().toISOString()
     };
     const jsonStr = JSON.stringify(dataToSave, null, 2);
-    fs.writeFileSync(PERSIST_FILE_PATH, jsonStr, 'utf-8');
-
-    // Also mirror to public/server-data/onival-persistent-data.json for PHP host synchronization
-    try {
-      const publicDataDir = path.join(process.cwd(), 'public', 'server-data');
-      if (!fs.existsSync(publicDataDir)) {
-        fs.mkdirSync(publicDataDir, { recursive: true });
-      }
-      fs.writeFileSync(path.join(publicDataDir, 'onival-persistent-data.json'), jsonStr, 'utf-8');
-    } catch {
-      // ignore mirror failure
-    }
+    // Atomic write to prevent file corruption on unexpected crashes or concurrent writes
+    const tempFile = path.join(DATA_DIR, `.onival-save-${Date.now()}-${crypto.randomBytes(3).toString('hex')}.tmp`);
+    fs.writeFileSync(tempFile, jsonStr, 'utf-8');
+    fs.renameSync(tempFile, PERSIST_FILE_PATH);
   } catch (err) {
-    console.error('Failed to save persisted state:', err);
+    console.error('CRITICAL: Failed to save persisted state to disk:', err);
+    throw err;
   }
 }
 
 loadPersistedState();
 
-// ================= ADMIN SECURITY, RATE LIMITING & CRYPTOGRAPHIC HASHING =================
-// Strong fallback secret generation ensuring tokens cannot be forged even if process.env.ADMIN_TOKEN_SECRET is missing
-const SERVER_INSTANCE_ENTROPY = 'c57a9f24b810d32e6a147e80f9bb1682390a1f05d46ce23b8f2d59ae12a0f8b1';
-const ADMIN_TOKEN_SECRET = (process.env.ADMIN_TOKEN_SECRET && process.env.ADMIN_TOKEN_SECRET.trim().length >= 16)
-  ? process.env.ADMIN_TOKEN_SECRET.trim()
-  : SERVER_INSTANCE_ENTROPY;
+// ================= ADMIN SECURITY, SESSIONS & RATE LIMITING =================
 
-// Hash password with salt using SHA-256
-function hashPassword(password: string, salt: string = 'onival_salt_2025_sec'): string {
-  return crypto.createHmac('sha256', salt).update(password.trim()).digest('hex');
+// Active session token store with 24-hour expiration
+interface AdminSession {
+  token: string;
+  username: string;
+  createdAt: number;
+  expiresAt: number;
 }
-
-// Timing-safe password verification preventing timing-based attacks
-function verifyAdminPassword(inputPassword: string, storedPasswordOrHash: string): boolean {
-  if (!inputPassword || !storedPasswordOrHash) return false;
-  const trimmedInput = inputPassword.trim();
-  const trimmedStored = storedPasswordOrHash.trim();
-
-  // 1. Direct plaintext match (for initial default or legacy credentials)
-  if (trimmedInput === trimmedStored) return true;
-
-  // 2. Hash match
-  const hashedInput = hashPassword(trimmedInput);
-  try {
-    if (hashedInput.length === trimmedStored.length) {
-      return crypto.timingSafeEqual(Buffer.from(hashedInput), Buffer.from(trimmedStored));
-    }
-  } catch {
-    // fallback
-  }
-
-  return hashedInput === trimmedStored;
-}
+const activeAdminSessions = new Map<string, AdminSession>();
+const ADMIN_SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 function generateAdminSessionToken(username: string, passwordOrHash: string): string {
-  const payload = `${username.trim().toLowerCase()}:${passwordOrHash.trim()}`;
-  return crypto.createHmac('sha256', ADMIN_TOKEN_SECRET).update(payload).digest('hex');
+  const randomPart = crypto.randomBytes(24).toString('hex');
+  const hmacPart = crypto.createHmac('sha256', ADMIN_TOKEN_SECRET)
+    .update(`${username.trim().toLowerCase()}:${passwordOrHash.trim()}:${randomPart}`)
+    .digest('hex');
+  const sessionToken = `${randomPart}${hmacPart}`;
+  const now = Date.now();
+  activeAdminSessions.set(sessionToken, {
+    token: sessionToken,
+    username: username.trim().toLowerCase(),
+    createdAt: now,
+    expiresAt: now + ADMIN_SESSION_TTL_MS
+  });
+  return sessionToken;
 }
 
 // In-Memory Rate Limiter for Login Endpoint (Max 5 failed attempts per 15 minutes per IP)
@@ -1268,8 +1398,11 @@ const BLOCK_DURATION_MS = 15 * 60 * 1000; // 15 minutes
 const ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
 
 function getClientIp(req: Request): string {
-  const forwarded = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim();
-  return forwarded || req.socket.remoteAddress || '127.0.0.1';
+  if (process.env.TRUST_PROXY === 'true') {
+    const forwarded = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim();
+    if (forwarded) return forwarded;
+  }
+  return req.socket.remoteAddress || '127.0.0.1';
 }
 
 function checkLoginRateLimit(req: Request): { allowed: boolean; remainingAttempts: number; retryAfterSeconds: number } {
@@ -1324,6 +1457,59 @@ function clearLoginAttempts(req: Request): void {
   loginRateLimitMap.delete(ip);
 }
 
+// General Endpoint Rate Limiter to prevent DoS, spam, and brute force
+interface GenericBucket {
+  count: number;
+  resetAt: number;
+}
+const genericRateLimitMap = new Map<string, GenericBucket>();
+
+function checkEndpointRateLimit(req: Request, bucketName: string, maxRequests: number, windowMs: number): boolean {
+  const ip = getClientIp(req);
+  const key = `${bucketName}:${ip}`;
+  const now = Date.now();
+  const bucket = genericRateLimitMap.get(key);
+
+  if (!bucket || now > bucket.resetAt) {
+    genericRateLimitMap.set(key, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+
+  if (bucket.count >= maxRequests) {
+    return false;
+  }
+
+  bucket.count += 1;
+  return true;
+}
+
+// Periodic cleanup of rate limits, expired admin sessions, and bot activity logs to prevent memory leaks
+setInterval(() => {
+  const now = Date.now();
+  // 1. Generic rate limit buckets
+  for (const [key, val] of genericRateLimitMap.entries()) {
+    if (now > val.resetAt) {
+      genericRateLimitMap.delete(key);
+    }
+  }
+  // 2. Login rate limit records
+  for (const [ip, record] of loginRateLimitMap.entries()) {
+    if (now > record.blockedUntil && (now - record.lastAttempt > 30 * 60 * 1000)) {
+      loginRateLimitMap.delete(ip);
+    }
+  }
+  // 3. Expired admin sessions
+  for (const [token, session] of activeAdminSessions.entries()) {
+    if (now >= session.expiresAt) {
+      activeAdminSessions.delete(token);
+    }
+  }
+  // 4. Cap in-memory bot activity logs to prevent unbounded RAM growth
+  if (botActivityLogs.length > 100) {
+    botActivityLogs.length = 100;
+  }
+}, 10 * 60 * 1000);
+
 function isRequestAdminAuthorized(req: Request): boolean {
   const authHeader = req.headers.authorization || '';
   const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
@@ -1331,33 +1517,14 @@ function isRequestAdminAuthorized(req: Request): boolean {
   const token = bearerToken || headerToken;
   if (!token) return false;
 
-  const validUser = (adminCredentials.username || 'admin').trim().toLowerCase();
-  const validEmail = (adminCredentials.email || 'admin@onival.com').trim().toLowerCase();
-  const validPass = (adminCredentials.password || 'admin').trim();
-
-  // 1. Validate session token generated via HMAC with current valid credentials
-  const expectedPrimary = generateAdminSessionToken(validUser, validPass);
-  const expectedEmail = generateAdminSessionToken(validEmail, validPass);
-  if (token === expectedPrimary || token === expectedEmail) return true;
-
-  // 2. Also verify with hashed password if stored was plaintext
-  const hashedPass = hashPassword(validPass);
-  const expectedHashedPrimary = generateAdminSessionToken(validUser, hashedPass);
-  const expectedHashedEmail = generateAdminSessionToken(validEmail, hashedPass);
-  if (token === expectedHashedPrimary || token === expectedHashedEmail) return true;
-
-  // 3. Accept local session tokens ONLY if encoded username matches active valid admin username or email
-  if (token.startsWith('local_session_') || token.startsWith('host_auth_session_')) {
-    try {
-      const b64 = token.replace(/^(local_session_|host_auth_session_)/, '');
-      const decoded = Buffer.from(b64, 'base64').toString('utf8');
-      const u = decoded.split(':')[0]?.trim().toLowerCase();
-      if (u && (u === validUser || u === validEmail)) {
-        return true;
-      }
-    } catch {
-      // ignore parsing error
+  const now = Date.now();
+  const session = activeAdminSessions.get(token);
+  if (session) {
+    if (now < session.expiresAt) {
+      return true;
     }
+    activeAdminSessions.delete(token);
+    return false;
   }
 
   return false;
@@ -1373,12 +1540,33 @@ function requireAdminAuth(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
-// Protect all administrative write/CRUD and private data routes
+// Protected webhook paths list
+const PUBLIC_WEBHOOK_PATHS = [
+  '/api/webhook/bale',
+  '/api/bot/webhook/bale',
+  '/api/webhook/bale/customer',
+  '/api/webhook/bale/admin',
+  '/api/webhook/telegram',
+  '/api/bot/webhook/telegram',
+  '/api/webhook.php',
+  '/api/bale-webhook.php',
+  '/api/telegram-webhook.php',
+  '/api/bale-bot.php',
+  '/api/telegram-bot.php',
+  '/bale-bot.php',
+  '/telegram-bot.php',
+  '/api/webhook'
+];
+
+// Protect administrative write/CRUD, bot management and private data routes
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   const p = req.path;
   const m = req.method.toUpperCase();
 
-  // Public read endpoints needed by the storefront and diagnostics
+  const fullPath = req.originalUrl ? req.originalUrl.split('?')[0] : ('/api' + p);
+  const isWebhookPath = PUBLIC_WEBHOOK_PATHS.includes(p) || PUBLIC_WEBHOOK_PATHS.includes(fullPath) || PUBLIC_WEBHOOK_PATHS.includes('/api' + p);
+
+  // Public read endpoints needed by storefront visitors and search engines
   if (m === 'GET' && (
     p === '/health' ||
     p === '/ping' ||
@@ -1389,42 +1577,28 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
     p === '/post-categories' ||
     p === '/site-content' ||
     p.startsWith('/orders/track/') ||
-    p === '/host/export-state' ||
-    p === '/firebase/export-state' ||
     p === '/torob/products' ||
     p.startsWith('/torob') ||
     p.startsWith('/emalls') ||
-    p === '/bot/logs' ||
-    p.includes('webhook')
+    isWebhookPath
   )) {
     return next();
   }
 
-  // Public customer actions and Webhook/Simulator endpoints
+  // Public customer action endpoints (Order creation, contact, booking, receipt upload, and bot webhooks)
   if (m === 'POST' && (
     p === '/admin/login' ||
     p === '/orders' ||
     p === '/contact' ||
     p === '/consultations/book' ||
-    p.includes('webhook') ||
-    p.startsWith('/bot/webhook') ||
-    p === '/bot/test-admin-welcome' ||
-    p === '/bot/test-connection' ||
-    p === '/bot/send-real-message' ||
-    p === '/bot/send-test-message' ||
-    p === '/bot/test-send-invoice' ||
-    p === '/bot/test-command' ||
-    p === '/bot/simulate-bale-payment-cycle' ||
-    /^\/orders\/[^/]+\/(upload-receipt|confirm-bale-payment|confirm-gateway-payment)$/.test(p)
+    /^\/orders\/[^/]+\/upload-receipt$/.test(p) ||
+    isWebhookPath
   )) {
     return next();
   }
 
-  if (m === 'DELETE' && p === '/bot/logs') {
-    return next();
-  }
-
-  // Everything else under /api requires valid admin authorization
+  // Everything else under /api (bot management, logs, payment confirmation, export-state, credentials, etc.)
+  // STRICTLY requires admin authorization
   return requireAdminAuth(req, res, next);
 });
 
@@ -1520,8 +1694,25 @@ app.post('/api/products', (req: Request, res: Response) => {
 
   const cat = productCategories.find(c => c.id === Number(categoryId));
   const parsedSizes = Array.isArray(sizes) && sizes.length > 0
-    ? sizes.map((s: any) => ({ name: String(s.name || ''), price: Number(s.price) || 0 }))
+    ? sizes.map((s: any) => ({
+        name: String(s.name || ''),
+        price: Number(s.price) || 0,
+        stock: s.stock !== undefined ? Math.max(0, Number(s.stock)) : 10,
+        specialOfferStock: s.specialOfferStock !== undefined && s.specialOfferStock !== null && String(s.specialOfferStock).trim() !== ''
+          ? Math.max(0, Number(s.specialOfferStock))
+          : undefined,
+        isOutOfStock: Boolean(s.isOutOfStock || (s.stock !== undefined && Number(s.stock) <= 0)),
+        sku: s.sku ? String(s.sku) : undefined
+      }))
     : undefined;
+
+  const computedProductStock = parsedSizes && parsedSizes.length > 0
+    ? parsedSizes.reduce((acc: number, s: any) => acc + (s.stock || 0), 0)
+    : (req.body.stock !== undefined ? Math.max(0, Number(req.body.stock)) : 20);
+
+  const computedProductOfferStock = parsedSizes && parsedSizes.length > 0
+    ? parsedSizes.reduce((acc: number, s: any) => acc + (s.specialOfferStock || 0), 0)
+    : (req.body.specialOfferStock !== undefined ? Math.max(0, Number(req.body.specialOfferStock)) : (discount ? 3 : 0));
 
   const resolvedPrice = parsedSizes && parsedSizes.length > 0
     ? parsedSizes[0].price
@@ -1559,7 +1750,13 @@ app.post('/api/products', (req: Request, res: Response) => {
     publishedAt: publishedAt || nowIso,
     updatedAt: nowIso,
     status: status === 'draft' ? 'draft' : 'published',
-    availability: availability || 'InStock',
+    availability: computedProductStock <= 0 ? 'OutOfStock' : (availability || 'InStock'),
+    stock: computedProductStock,
+    isOutOfStock: computedProductStock <= 0,
+    specialOfferStock: computedProductOfferStock,
+    specialOfferInitialStock: req.body.specialOfferInitialStock !== undefined ? Number(req.body.specialOfferInitialStock) : computedProductOfferStock,
+    isAmazingOffer: Boolean(req.body.isAmazingOffer || req.body.isSpecialOffer),
+    isSpecialOffer: Boolean(req.body.isAmazingOffer || req.body.isSpecialOffer),
     sku: sku || `ONV-PRD-${nextId}`,
     seoTitle: seoTitle || '',
     seoDescription: seoDescription || '',
@@ -1646,8 +1843,25 @@ app.put('/api/products/:id', (req: Request, res: Response) => {
   const cat = productCategories.find(c => c.id === Number(categoryId ?? existing.categoryId));
 
   const parsedSizes = Array.isArray(sizes)
-    ? sizes.map((s: any) => ({ name: String(s.name || ''), price: Number(s.price) || 0 }))
+    ? sizes.map((s: any) => ({
+        name: String(s.name || ''),
+        price: Number(s.price) || 0,
+        stock: s.stock !== undefined ? Math.max(0, Number(s.stock)) : 10,
+        specialOfferStock: s.specialOfferStock !== undefined && s.specialOfferStock !== null && String(s.specialOfferStock).trim() !== ''
+          ? Math.max(0, Number(s.specialOfferStock))
+          : undefined,
+        isOutOfStock: Boolean(s.isOutOfStock || (s.stock !== undefined && Number(s.stock) <= 0)),
+        sku: s.sku ? String(s.sku) : undefined
+      }))
     : existing.sizes;
+
+  const computedProductStock = parsedSizes && parsedSizes.length > 0
+    ? parsedSizes.reduce((acc: number, s: any) => acc + (s.stock || 0), 0)
+    : (req.body.stock !== undefined ? Math.max(0, Number(req.body.stock)) : existing.stock);
+
+  const computedProductOfferStock = parsedSizes && parsedSizes.length > 0
+    ? parsedSizes.reduce((acc: number, s: any) => acc + (s.specialOfferStock || 0), 0)
+    : (req.body.specialOfferStock !== undefined ? Math.max(0, Number(req.body.specialOfferStock)) : existing.specialOfferStock);
 
   const resolvedPrice = parsedSizes && parsedSizes.length > 0
     ? parsedSizes[0].price
@@ -1681,7 +1895,13 @@ app.put('/api/products/:id', (req: Request, res: Response) => {
     content: content ?? existing.content,
     updatedAt: new Date().toISOString(),
     status: status ?? existing.status ?? 'published',
-    availability: availability ?? existing.availability ?? 'InStock',
+    availability: availability ?? (computedProductStock <= 0 ? 'OutOfStock' : (existing.availability ?? 'InStock')),
+    stock: computedProductStock,
+    isOutOfStock: computedProductStock <= 0,
+    specialOfferStock: computedProductOfferStock,
+    specialOfferInitialStock: req.body.specialOfferInitialStock !== undefined ? Number(req.body.specialOfferInitialStock) : (existing.specialOfferInitialStock ?? computedProductOfferStock),
+    isAmazingOffer: req.body.isAmazingOffer !== undefined ? Boolean(req.body.isAmazingOffer) : existing.isAmazingOffer,
+    isSpecialOffer: req.body.isSpecialOffer !== undefined ? Boolean(req.body.isSpecialOffer) : existing.isSpecialOffer,
     sku: sku ?? existing.sku,
     seoTitle: seoTitle ?? existing.seoTitle,
     seoDescription: seoDescription ?? existing.seoDescription,
@@ -2037,6 +2257,10 @@ app.get('/api/contact', (req: Request, res: Response) => {
 
 // Dedicated Consultation Booking Endpoint (Creates both Official Invoice Order + Consultation Message Record)
 app.post('/api/consultations/book', (req: Request, res: Response) => {
+  if (!checkEndpointRateLimit(req, 'consultation_book', 10, 10 * 60 * 1000)) {
+    return res.status(429).json({ error: 'تعداد درخواست‌های رزرو مشاوره شما بیش از حد مجاز است. لطفاً کمی بعد تلاش کنید.' });
+  }
+
   const {
     fullName,
     phoneNumber,
@@ -2055,8 +2279,15 @@ app.post('/api/consultations/book', (req: Request, res: Response) => {
     return res.status(400).json({ error: 'نام، شماره تماس و موضوع مشاوره الزامی است.' });
   }
 
-  const resolvedPrice = typeof price === 'number' ? price : (siteContent.consultationConfig?.basePrice ?? 120000);
-  const trackingCode = `ONV-CNS-${Math.floor(100 + Math.random() * 900)}`;
+  // SERVER-SIDE PRICE DERIVATION: Never trust client-supplied price
+  let resolvedPrice = siteContent.consultationConfig?.basePrice ?? 120000;
+  if (topicId && Array.isArray(siteContent.consultationConfig?.topics)) {
+    const matchedTopic = siteContent.consultationConfig.topics.find((t: any) => t.id === topicId);
+    if (matchedTopic && typeof matchedTopic.price === 'number') {
+      resolvedPrice = Math.max(0, matchedTopic.price);
+    }
+  }
+  const trackingCode = `ONV-CNS-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
   const botUser = (telegramConfig.baleBotUsername || telegramConfig.botUsername || 'Onivalbot').replace(/^@/, '');
   const balePaymentUrl = `https://ble.ir/${botUser}?start=pay_${trackingCode}`;
   const nowDate = new Date().toLocaleDateString('fa-IR');
@@ -2165,14 +2396,21 @@ app.post('/api/consultations/book', (req: Request, res: Response) => {
 });
 
 app.post('/api/contact', (req: Request, res: Response) => {
-  const { fullName, phoneNumber, message, isConsultation, consultationDetails } = req.body;
+  if (!checkEndpointRateLimit(req, 'contact_submit', 10, 10 * 60 * 1000)) {
+    return res.status(429).json({ error: 'تعداد پیام‌های ارسالی شما بیش از حد مجاز است. لطفاً کمی بعد مجدداً اقدام فرمایید.' });
+  }
+
+  const { isConsultation, consultationDetails } = req.body;
+  const fullName = String(req.body.fullName || '').trim().slice(0, 150);
+  const phoneNumber = String(req.body.phoneNumber || '').trim().slice(0, 30);
+  const message = String(req.body.message || '').trim().slice(0, 1500);
   if (!fullName || !message) return res.status(400).json({ error: 'نام و متن پیام الزامی است' });
 
-  const trackingCode = req.body.trackingCode || `ONV-${Math.floor(1000 + Math.random() * 9000)}`;
+  const trackingCode = req.body.trackingCode || `ONV-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
   const newMsg: any = {
     id: contactMessages.length > 0 ? Math.max(...contactMessages.map(m => m.id)) + 1 : 1,
     fullName,
-    phoneNumber: phoneNumber || '',
+    phoneNumber,
     trackingCode,
     message,
     adminResponse: undefined,
@@ -2269,12 +2507,16 @@ app.get('/api/orders', (req: Request, res: Response) => {
 });
 
 app.get('/api/orders/track/:code', (req: Request, res: Response) => {
+  if (!checkEndpointRateLimit(req, 'order_track', 30, 60 * 1000)) {
+    return res.status(429).json({ found: false, error: 'تعداد استعلام‌های رهگیری بیش از حد مجاز است. لطفاً یک دقیقه دیگر تلاش فرمایید.' });
+  }
+
   const code = (req.params.code || '').trim().toUpperCase();
   const order: any = orders.find(o => o.trackingCode.toUpperCase() === code);
   const msg: any = contactMessages.find(m => m.trackingCode.toUpperCase() === code);
+  const isAdmin = isRequestAdminAuthorized(req);
 
   if (order) {
-    // Enrich consultation order with any latest adminResponse from contactMessages
     if (msg) {
       order.adminResponse = msg.adminResponse || order.consultationDetails?.adminResponse;
       order.respondedAt = msg.respondedAt || order.consultationDetails?.respondedAt;
@@ -2283,21 +2525,238 @@ app.get('/api/orders/track/:code', (req: Request, res: Response) => {
         order.consultationDetails.respondedAt = msg.respondedAt;
       }
     }
-    return res.json({ found: true, type: 'order', data: order, messageData: msg || null });
+
+    // Public sanitized order view protecting customer PII and disk/network payload
+    const safeOrder = isAdmin ? order : {
+      id: order.id,
+      trackingCode: order.trackingCode,
+      userFullName: order.userFullName,
+      phoneNumber: maskPhone(order.phoneNumber),
+      userAddress: maskAddr(order.userAddress),
+      totalPrice: order.totalPrice,
+      status: order.status,
+      paymentStatus: order.paymentStatus,
+      paymentMethod: order.paymentMethod,
+      creationTime: order.creationTime,
+      balePaymentUrl: order.balePaymentUrl,
+      items: order.items,
+      hasReceipt: Boolean(order.receiptImageUrl || order.receiptImage),
+      receiptSubmittedAt: order.receiptSubmittedAt || order.receiptUploadedAt,
+      isConsultation: order.isConsultation,
+      consultationDetails: order.consultationDetails ? {
+        topicTitle: order.consultationDetails.topicTitle,
+        preferredDate: order.consultationDetails.preferredDate,
+        preferredTimeSlot: order.consultationDetails.preferredTimeSlot,
+        socialPlatform: order.consultationDetails.socialPlatform,
+        consultationStatus: order.consultationDetails.consultationStatus,
+        adminResponse: order.consultationDetails.adminResponse,
+        respondedAt: order.consultationDetails.respondedAt
+      } : undefined
+    };
+
+    const safeMsg = msg ? (isAdmin ? msg : {
+      id: msg.id,
+      trackingCode: msg.trackingCode,
+      fullName: msg.fullName,
+      creationTime: msg.creationTime,
+      isResponded: msg.isResponded,
+      adminResponse: msg.adminResponse,
+      respondedAt: msg.respondedAt
+    }) : null;
+
+    return res.json({ found: true, type: 'order', data: safeOrder, messageData: safeMsg });
   }
+
   if (msg) {
-    return res.json({ found: true, type: 'message', data: msg });
+    const safeMsg = isAdmin ? msg : {
+      id: msg.id,
+      trackingCode: msg.trackingCode,
+      fullName: msg.fullName,
+      creationTime: msg.creationTime,
+      isResponded: msg.isResponded,
+      adminResponse: msg.adminResponse,
+      respondedAt: msg.respondedAt
+    };
+    return res.json({ found: true, type: 'message', data: safeMsg });
   }
+
   res.status(404).json({ found: false, error: 'سفارشی یا پیامی با این کد رهگیری یافت نشد' });
 });
 
+// Single-execution inventory and special-offer quota deduction upon confirmed payment
+function deductOrderInventoryOnPayment(order: any): void {
+  if (!order || order.inventoryDeducted) return;
+  if (!Array.isArray(order.items)) return;
+
+  for (const it of order.items) {
+    const prodId = Number(it.productId || it.id);
+    const matched = products.find(p => p.id === prodId && !p.isDelete);
+    const qty = Math.max(1, Math.min(100, Number(it.quantity) || 1));
+    if (!matched) continue;
+
+    let matchedSize: any = null;
+    if (it.size && Array.isArray(matched.sizes)) {
+      matchedSize = matched.sizes.find((s: any) => s.size === it.size || s.name === it.size);
+    }
+
+    // Deduct specific packaging variant stock & quota
+    if (matchedSize) {
+      if (matchedSize.stock !== undefined) {
+        matchedSize.stock = Math.max(0, matchedSize.stock - qty);
+        if (matchedSize.stock === 0) {
+          matchedSize.isOutOfStock = true;
+        }
+      }
+      if (matchedSize.specialOfferStock !== undefined && matchedSize.specialOfferStock > 0) {
+        matchedSize.specialOfferStock = Math.max(0, matchedSize.specialOfferStock - qty);
+      }
+    }
+
+    // Deduct aggregate product inventory stock
+    if (matched.stock !== undefined) {
+      matched.stock = Math.max(0, matched.stock - qty);
+      if (matched.stock === 0) {
+        matched.isOutOfStock = true;
+        matched.availability = 'OutOfStock';
+      }
+    }
+
+    // Deduct aggregate special offer quota
+    if (matched.specialOfferStock !== undefined && matched.specialOfferStock > 0) {
+      matched.specialOfferStock = Math.max(0, matched.specialOfferStock - qty);
+      if (matched.specialOfferStock === 0) {
+        matched.isAmazingOffer = false;
+        matched.isSpecialOffer = false;
+        matched.discount = 0;
+        matched.discountPercent = 0;
+      }
+    }
+  }
+
+  order.inventoryDeducted = true;
+  savePersistedState();
+}
+
+// Restore inventory stock and quota when an order is cancelled
+function restoreOrderInventoryOnCancel(order: any): void {
+  if (!order || !order.inventoryDeducted) return;
+  if (!Array.isArray(order.items)) return;
+
+  for (const it of order.items) {
+    const prodId = Number(it.productId || it.id);
+    const matched = products.find(p => p.id === prodId && !p.isDelete);
+    const qty = Math.max(1, Math.min(100, Number(it.quantity) || 1));
+    if (!matched) continue;
+
+    let matchedSize: any = null;
+    if (it.size && Array.isArray(matched.sizes)) {
+      matchedSize = matched.sizes.find((s: any) => s.size === it.size || s.name === it.size);
+    }
+
+    if (matchedSize) {
+      if (matchedSize.stock !== undefined) {
+        matchedSize.stock = matchedSize.stock + qty;
+        matchedSize.isOutOfStock = false;
+      }
+      if (matchedSize.specialOfferStock !== undefined) {
+        matchedSize.specialOfferStock = matchedSize.specialOfferStock + qty;
+      }
+    }
+
+    if (matched.stock !== undefined) {
+      matched.stock = matched.stock + qty;
+      matched.isOutOfStock = false;
+      matched.availability = 'InStock';
+    }
+
+    if (matched.specialOfferStock !== undefined) {
+      matched.specialOfferStock = matched.specialOfferStock + qty;
+      if (matched.discount && Number(matched.discount) > 0) {
+        matched.isSpecialOffer = true;
+      }
+    }
+  }
+
+  order.inventoryDeducted = false;
+  savePersistedState();
+}
+
 app.post('/api/orders', (req: Request, res: Response) => {
-  const { userFullName, phoneNumber, userAddress, totalPrice, items, trackingCode } = req.body;
+  if (!checkEndpointRateLimit(req, 'create_order', 15, 10 * 60 * 1000)) {
+    return res.status(429).json({ error: 'تعداد سفارش‌های ثبت شده شما در این بازه زمانی بیش از حد مجاز است.' });
+  }
+
+  const userFullName = String(req.body.userFullName || '').trim().slice(0, 150);
+  const phoneNumber = String(req.body.phoneNumber || '').trim().slice(0, 30);
+  const userAddress = String(req.body.userAddress || '').trim().slice(0, 500);
+  const { items, paymentMethod } = req.body;
   if (!userFullName || !phoneNumber || !userAddress) {
     return res.status(400).json({ error: 'اطلاعات گیرنده و آدرس الزامی است' });
   }
 
-  const generatedCode = trackingCode || `ONV-ORD-${Math.floor(100 + Math.random() * 900)}`;
+  // Server-Authoritative Price Calculation from Database
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: 'سبد خرید خالی است. لطفاً حداقل یک محصول را برای ثبت سفارش انتخاب نمایید.' });
+  }
+
+  let calculatedTotal = 0;
+  const verifiedItems: any[] = [];
+
+  for (const it of items) {
+    const prodId = Number(it.productId || it.id);
+    const matched = products.find(p => p.id === prodId && !p.isDelete);
+    if (!matched) {
+      return res.status(400).json({ error: `محصول انتخابی (شناسه: ${prodId}) در فروشگاه موجود نیست یا غیرفعال گردیده است.` });
+    }
+
+    const qty = Math.max(1, Math.min(100, Number(it.quantity) || 1));
+    let unitPrice = Number(matched.price) || 0;
+    let matchedSize: any = null;
+
+    if (it.size && Array.isArray(matched.sizes) && matched.sizes.length > 0) {
+      matchedSize = matched.sizes.find((s: any) => s.size === it.size || s.name === it.size);
+      if (matchedSize && matchedSize.price) {
+        unitPrice = Number(matchedSize.price);
+      }
+    }
+
+    // Stock availability verification before order acceptance
+    if (matchedSize) {
+      if (matchedSize.isOutOfStock || (matchedSize.stock !== undefined && matchedSize.stock < qty)) {
+        return res.status(400).json({
+          error: `موجودی بسته «${matchedSize.name || matchedSize.size}» از محصول «${matched.title}» کافی نیست (موجودی فعلی: ${matchedSize.stock ?? 0} عدد).`
+        });
+      }
+    } else if (matched.isOutOfStock || (matched.stock !== undefined && matched.stock < qty)) {
+      return res.status(400).json({
+        error: `موجودی محصول «${matched.title}» کافی نیست (موجودی فعلی: ${matched.stock ?? 0} عدد).`
+      });
+    }
+
+    const isOfferActive = matched.discount && Number(matched.discount) > 0 &&
+      (matchedSize?.specialOfferStock !== undefined
+        ? matchedSize.specialOfferStock > 0
+        : (matched.specialOfferStock === undefined || matched.specialOfferStock > 0));
+
+    if (isOfferActive) {
+      unitPrice = Math.round(unitPrice * (100 - Number(matched.discount)) / 100);
+    }
+
+    calculatedTotal += unitPrice * qty;
+    verifiedItems.push({
+      ...it,
+      productId: prodId,
+      productName: matched.title,
+      unitPrice,
+      price: unitPrice,
+      quantity: qty,
+      totalPrice: unitPrice * qty
+    });
+  }
+
+  const finalTotalPrice = calculatedTotal;
+  const generatedCode = `ONV-ORD-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+
   const botUser = (telegramConfig.baleBotUsername || telegramConfig.botUsername || 'Onivalbot').replace(/^@/, '');
   const balePaymentUrl = `https://ble.ir/${botUser}?start=pay_${generatedCode}`;
 
@@ -2306,17 +2765,17 @@ app.post('/api/orders', (req: Request, res: Response) => {
     userFullName,
     phoneNumber,
     userAddress,
-    totalPrice: totalPrice || 0,
+    totalPrice: finalTotalPrice,
     status: 'Pending' as const,
     paymentStatus: 'Unpaid' as const,
-    paymentMethod: req.body.paymentMethod || siteContent.paymentConfig?.defaultMethod || 'card_to_card',
+    paymentMethod: paymentMethod || siteContent.paymentConfig?.defaultMethod || 'card_to_card',
     receiptImageUrl: undefined,
     receiptNote: undefined,
     receiptSubmittedAt: undefined,
     trackingCode: generatedCode,
     creationTime: new Date().toLocaleDateString('fa-IR'),
     balePaymentUrl,
-    items: items || []
+    items: verifiedItems
   };
 
   orders.unshift(newOrder);
@@ -2335,7 +2794,7 @@ app.post('/api/orders', (req: Request, res: Response) => {
       `💳 روش پرداخت انتخابی: ${isCardToCard ? 'کارت به کارت (منتظر فیش)' : 'کیف پول بله (Bale Wallet)'}\n` +
       `👤 خریدار: ${userFullName}\n` +
       `📞 شماره تماس: ${phoneNumber}\n` +
-      `💰 مبلغ قابل پرداخت: ${Number(totalPrice || 0).toLocaleString('fa-IR')} تومان\n` +
+      `💰 مبلغ قابل پرداخت: ${Number(finalTotalPrice).toLocaleString('fa-IR')} تومان\n` +
       `📍 آدرس تحویل: ${userAddress}\n\n` +
       `📦 اقلام فاکتور:\n${itemsSummary}\n\n` +
       `🔗 لینک اختصاصی پرداخت مشتری در بله:\n${balePaymentUrl}\n\n` +
@@ -2357,7 +2816,16 @@ app.post('/api/orders', (req: Request, res: Response) => {
 });
 
 app.post('/api/orders/:id/confirm-bale-payment', (req: Request, res: Response) => {
-  const param = req.params.id;
+  const param = (req.params.id || '').trim();
+  const isAdmin = isRequestAdminAuthorized(req);
+
+  if (!isAdmin) {
+    return res.status(401).json({
+      ok: false,
+      error: 'دسترسی غیرمجاز: تایید مستقیم و دستی پرداخت فقط توسط مدیر احراز هویت شده امکان‌پذیر است.'
+    });
+  }
+
   const order: any = orders.find(o => o.id === Number(param) || o.trackingCode.toUpperCase() === param.toUpperCase());
   if (!order) return res.status(404).json({ error: 'سفارش یافت نشد' });
 
@@ -2367,6 +2835,9 @@ app.post('/api/orders/:id/confirm-bale-payment', (req: Request, res: Response) =
   if (order.consultationDetails) {
     order.consultationDetails.consultationStatus = 'Scheduled';
   }
+
+  // Deduct inventory and special-offer quota once upon confirmed payment
+  deductOrderInventoryOnPayment(order);
 
   const linkedMsg: any = contactMessages.find(m => m.trackingCode.toUpperCase() === order.trackingCode.toUpperCase());
   if (linkedMsg) {
@@ -2386,13 +2857,51 @@ app.post('/api/orders/:id/confirm-bale-payment', (req: Request, res: Response) =
     status: 'success'
   });
 
-  res.json({ success: true, order, message: 'پرداخت در ربات بله تایید شد و وضعیت به در حال آماده‌سازی تغییر کرد' });
+  const safeConfirmation = {
+    trackingCode: order.trackingCode,
+    status: order.status,
+    paymentStatus: order.paymentStatus,
+    paymentMethod: order.paymentMethod
+  };
+
+  res.json({
+    success: true,
+    order: isAdmin ? order : safeConfirmation,
+    message: 'پرداخت در ربات بله تایید شد و وضعیت به در حال آماده‌سازی تغییر کرد'
+  });
 });
 
 app.post('/api/orders/:id/upload-receipt', (req: Request, res: Response) => {
+  // Strict rate limit: max 6 receipt uploads per 15 minutes per IP
+  if (!checkEndpointRateLimit(req, 'upload_receipt', 6, 15 * 60 * 1000)) {
+    return res.status(429).json({ error: 'تعداد درخواست‌های بارگذاری فیش بیش از حد مجاز است. لطفاً پس از ۱۵ دقیقه مجدداً تلاش فرمایید.' });
+  }
+
   const param = (req.params.id || '').trim();
-  const order: any = orders.find(o => o.id === Number(param) || o.trackingCode.toUpperCase() === param.toUpperCase());
-  if (!order) return res.status(404).json({ error: 'فاکتور مورد نظر یافت نشد' });
+  const isAdmin = isRequestAdminAuthorized(req);
+
+  // CRITICAL ANTI-IDOR & ANTI-ENUMERATION GUARD:
+  // Public non-admin requests MUST strictly provide the random tracking code (e.g. ONV-ORD-..., ONV-CNS-...).
+  // They MUST NEVER be permitted to lookup by sequential numeric ID (e.g. 101, 102).
+  if (!isAdmin && (/^\d+$/.test(param) || param.length < 6)) {
+    return res.status(400).json({
+      error: 'جهت بارگذاری فیش واریزی، ارائه کد رهگیری یکتا و معتبر الزامی است (استفاده از شناسه عددی مجاز نمی‌باشد).'
+    });
+  }
+
+  const order: any = orders.find(o => {
+    if (isAdmin && o.id === Number(param)) return true;
+    return o.trackingCode.toUpperCase() === param.toUpperCase();
+  });
+
+  if (!order) {
+    return res.status(404).json({ error: 'فاکتور با کد رهگیری ارائه شده یافت نشد.' });
+  }
+
+  // Prevent modifying already completed or settled orders
+  if (order.paymentStatus === 'Paid' || order.status === 'Completed') {
+    return res.status(400).json({ error: 'این سفارش قبلاً تسویه گردیده و امکان تغییر فیش آن وجود ندارد.' });
+  }
 
   const receiptImg = req.body.receiptImageUrl || req.body.receiptImage;
   const { receiptNote } = req.body;
@@ -2400,10 +2909,38 @@ app.post('/api/orders/:id/upload-receipt', (req: Request, res: Response) => {
     return res.status(400).json({ error: 'لطفاً تصویر فیش واریزی را انتخاب نمایید' });
   }
 
+  if (typeof receiptImg !== 'string' || (!receiptImg.startsWith('data:image/') && !/^https?:\/\//i.test(receiptImg))) {
+    return res.status(400).json({ error: 'فرمت تصویر فیش واریزی نامعتبر است.' });
+  }
+
+  // Image size limit check: Max 2MB (~2.8MB base64 representation)
+  if (typeof receiptImg === 'string' && receiptImg.length > 2.8 * 1024 * 1024) {
+    return res.status(400).json({ error: 'حجم تصویر فیش واریزی بیش از حد مجاز (حداکثر ۲ مگابایت) است. لطفاً تصویر کم‌حجم‌تری انتخاب فرمایید.' });
+  }
+
+  let storedImageUrl = receiptImg;
+  if (receiptImg.startsWith('data:image/')) {
+    try {
+      const match = receiptImg.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+      if (match) {
+        const rawExt = match[1].toLowerCase();
+        const ext = rawExt === 'jpeg' ? 'jpg' : rawExt.replace(/[^a-z0-9]/g, '');
+        const buffer = Buffer.from(match[2], 'base64');
+        const cleanTrack = order.trackingCode.replace(/[^A-Za-z0-9_-]/g, '');
+        const filename = `receipt-${cleanTrack}-${Date.now()}.${ext || 'jpg'}`;
+        const filePath = path.join(RECEIPTS_DIR, filename);
+        fs.writeFileSync(filePath, buffer);
+        storedImageUrl = `/api/admin/receipts/${filename}`;
+      }
+    } catch (e) {
+      console.warn('Failed to save receipt to disk, using memory fallback:', e);
+    }
+  }
+
   const timestamp = `${new Date().toLocaleDateString('fa-IR')} - ${new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}`;
-  order.receiptImageUrl = receiptImg;
-  order.receiptImage = receiptImg;
-  order.receiptNote = receiptNote || '';
+  order.receiptImageUrl = storedImageUrl;
+  delete order.receiptImage;
+  order.receiptNote = typeof receiptNote === 'string' ? receiptNote.slice(0, 500) : '';
   order.receiptSubmittedAt = timestamp;
   order.receiptUploadedAt = timestamp;
   order.paymentMethod = 'card_to_card';
@@ -2414,9 +2951,9 @@ app.post('/api/orders/:id/upload-receipt', (req: Request, res: Response) => {
 
   const linkedMsg: any = contactMessages.find(m => m.trackingCode.toUpperCase() === order.trackingCode.toUpperCase());
   if (linkedMsg) {
-    linkedMsg.receiptImage = receiptImg;
-    linkedMsg.receiptImageUrl = receiptImg;
-    linkedMsg.receiptNote = receiptNote || '';
+    linkedMsg.receiptImageUrl = storedImageUrl;
+    delete linkedMsg.receiptImage;
+    linkedMsg.receiptNote = order.receiptNote;
     linkedMsg.receiptUploadedAt = timestamp;
     linkedMsg.paymentMethod = 'card_to_card';
     linkedMsg.paymentStatus = 'PendingVerification';
@@ -2431,7 +2968,7 @@ app.post('/api/orders/:id/upload-receipt', (req: Request, res: Response) => {
     time: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
     type: 'receipt_uploaded',
     platform: 'bale',
-    text: `فیش واریزی کارت به کارت برای فاکتور ${order.trackingCode} توسط ${order.userFullName} بارگذاری شد و منتظر تایید مدیر است.`,
+    text: `فیش واریزی کارت به کارت برای فاکتور ${order.trackingCode} بارگذاری شد و منتظر تایید است.`,
     status: 'success'
   });
 
@@ -2441,22 +2978,40 @@ app.post('/api/orders/:id/upload-receipt', (req: Request, res: Response) => {
       `🧾 شماره فاکتور: ${order.trackingCode}\n` +
       `👤 مشتری: ${order.userFullName} (${order.phoneNumber})\n` +
       `💰 مبلغ فاکتور: ${Number(order.totalPrice || 0).toLocaleString('fa-IR')} تومان\n` +
-      `📝 توضیحات مشتری: ${receiptNote || 'ندارد'}\n` +
+      `📝 توضیحات مشتری: ${order.receiptNote || 'ندارد'}\n` +
       `⏱ زمان ثبت: ${timestamp}\n\n` +
       `👇 جهت تایید فوری فیش و آغاز بسته‌بندی مرسوله، دستور زیر را ارسال فرمایید:\n` +
       `/confirm_${order.trackingCode}`;
     dispatchBotNotification(notifyText, 'receipt_uploaded').catch(() => {});
   }
 
+  // ZERO PII LEAK GUARD:
+  // Under NO circumstances return customer PII (full name, phone, address, purchased items, medical notes) to public callers!
   res.json({
     success: true,
-    order,
+    trackingCode: order.trackingCode,
+    paymentStatus: order.paymentStatus,
     message: 'تصویر فیش واریزی به همراه شماره فاکتور با موفقیت ثبت شد و جهت تایید برای مدیریت ارسال گردید.'
   });
 });
 
+// Protected Receipt Image Viewer for Admin Panel
+app.get('/api/admin/receipts/:filename', requireAdminAuth, (req: Request, res: Response) => {
+  const filename = path.basename(req.params.filename || '');
+  const filePath = path.join(RECEIPTS_DIR, filename);
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'تصویر فیش واریزی در سرور یافت نشد.' });
+  }
+  res.sendFile(filePath);
+});
+
 app.post('/api/orders/:id/verify-receipt', (req: Request, res: Response) => {
   const param = (req.params.id || '').trim();
+  const isAdmin = isRequestAdminAuthorized(req);
+  if (!isAdmin) {
+    return res.status(403).json({ error: 'دسترسی غیرمجاز. فقط مدیر سیستم مجاز به تایید یا رد فیش واریزی است.' });
+  }
+
   const order: any = orders.find(o => o.id === Number(param) || o.trackingCode.toUpperCase() === param.toUpperCase());
   if (!order) return res.status(404).json({ error: 'سفارش یافت نشد' });
 
@@ -2469,6 +3024,9 @@ app.post('/api/orders/:id/verify-receipt', (req: Request, res: Response) => {
     if (order.consultationDetails) {
       order.consultationDetails.consultationStatus = 'Scheduled';
     }
+    // Deduct stock once when payment is confirmed
+    deductOrderInventoryOnPayment(order);
+
     botActivityLogs.unshift({
       id: Date.now(),
       time: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
@@ -2504,6 +3062,15 @@ app.post('/api/orders/:id/verify-receipt', (req: Request, res: Response) => {
 
 app.post('/api/orders/:id/confirm-gateway-payment', (req: Request, res: Response) => {
   const param = (req.params.id || '').trim();
+  const isAdmin = isRequestAdminAuthorized(req);
+
+  if (!isAdmin) {
+    return res.status(401).json({
+      ok: false,
+      error: 'دسترسی غیرمجاز: تایید مستقیم و دستی پرداخت فقط توسط مدیر احراز هویت شده امکان‌پذیر است.'
+    });
+  }
+
   const order: any = orders.find(o => o.id === Number(param) || o.trackingCode.toUpperCase() === param.toUpperCase());
   if (!order) return res.status(404).json({ error: 'سفارش یافت نشد' });
 
@@ -2513,6 +3080,9 @@ app.post('/api/orders/:id/confirm-gateway-payment', (req: Request, res: Response
   if (order.consultationDetails) {
     order.consultationDetails.consultationStatus = 'Scheduled';
   }
+
+  // Deduct stock once when payment is confirmed
+  deductOrderInventoryOnPayment(order);
 
   const linkedMsg: any = contactMessages.find(m => m.trackingCode.toUpperCase() === order.trackingCode.toUpperCase());
   if (linkedMsg) {
@@ -2532,7 +3102,14 @@ app.post('/api/orders/:id/confirm-gateway-payment', (req: Request, res: Response
     status: 'success'
   });
 
-  res.json({ success: true, order });
+  const safeConfirmation = {
+    trackingCode: order.trackingCode,
+    status: order.status,
+    paymentStatus: order.paymentStatus,
+    paymentMethod: order.paymentMethod
+  };
+
+  res.json({ success: true, order: isAdmin ? order : safeConfirmation });
 });
 
 app.put('/api/orders/:id/status', (req: Request, res: Response) => {
@@ -2541,8 +3118,20 @@ app.put('/api/orders/:id/status', (req: Request, res: Response) => {
   const order: any = orders.find(o => o.id === id);
   if (!order) return res.status(404).json({ error: 'سفارش یافت نشد' });
 
-  if (status) order.status = status;
-  if (paymentStatus) order.paymentStatus = paymentStatus;
+  if (status) {
+    order.status = status;
+    if (status === 'Cancelled') {
+      restoreOrderInventoryOnCancel(order);
+    }
+  }
+  if (paymentStatus) {
+    order.paymentStatus = paymentStatus;
+    if (paymentStatus === 'Paid') {
+      deductOrderInventoryOnPayment(order);
+    } else if (paymentStatus === 'Cancelled') {
+      restoreOrderInventoryOnCancel(order);
+    }
+  }
   if (order.consultationDetails) {
     if (consultationStatus) {
       order.consultationDetails.consultationStatus = consultationStatus;
@@ -2582,6 +3171,100 @@ app.put('/api/orders/:id/status', (req: Request, res: Response) => {
   res.json(order);
 });
 
+function generateBotPhpScript(filename: string): string {
+  const cleanName = filename.toLowerCase().replace(/[^a-z0-9_.-]/g, '');
+  const templatePath = path.join(process.cwd(), 'public', cleanName);
+
+  if (cleanName === 'bale-bot.php') {
+    let content = '';
+    if (fs.existsSync(templatePath)) {
+      content = fs.readFileSync(templatePath, 'utf8');
+    }
+    const defaultBlock = `// ==============================================================================
+// بخش ۱: تنظیمات اختصاصی ربات بله (سازگار با PHP 8.5 - استخراج خودکار از پنل مدیریت)
+// ==============================================================================
+$DEFAULT_CONFIG = [
+    // توکن ربات مشتری بله
+    'baleBotToken'       => ${JSON.stringify(telegramConfig.baleBotToken || telegramConfig.botToken || '')},
+
+    // نام کاربری ربات بله
+    'baleBotUsername'    => ${JSON.stringify((telegramConfig.baleBotUsername || 'Onivalbot').replace(/^@/, ''))},
+
+    // توکن ربات ادمین بله
+    'baleAdminBotToken'  => ${JSON.stringify(telegramConfig.adminBotToken || '')},
+
+    // آیدی عددی چت ادمین در بله
+    'baleAdminChatId'    => ${JSON.stringify(telegramConfig.baleAdminChatId || telegramConfig.adminChatId || '')},
+
+    // نام کاربری ادمین
+    'baleAdminUsername'  => ${JSON.stringify((telegramConfig.baleAdminUsername || '').replace(/^@/, ''))},
+
+    // توکن درگاه کیف‌پول بله (Wallet Provider Token)
+    'baleProviderToken'  => ${JSON.stringify(telegramConfig.balePaymentTokenLive || '')},
+
+    // توکن امنیتی وب‌هوک
+    'webhookSecretToken' => ${JSON.stringify(telegramConfig.webhookSecretToken || '')},
+
+    // شماره کارت فروشگاه جهت پرداخت کارت به کارت
+    'cardNumber'         => ${JSON.stringify(siteContent?.paymentConfig?.cardNumber || '۶۰۳۷-۹۹۷۵-۹۹۱۲-۳۴۵۶')},
+    'cardHolder'         => ${JSON.stringify(siteContent?.paymentConfig?.cardHolderName || 'مجموعه تخصصی فرآورده‌های ارگانیک اونیوال')},
+    'bankName'           => ${JSON.stringify(siteContent?.paymentConfig?.bankName || 'بانک ملی ایران')},
+
+    // آدرس وب‌سایت فروشگاه
+    'storeUrl'           => ${JSON.stringify(telegramConfig.panelBaseUrl || '')},
+    'storeName'          => 'فروشگاه تخصصی محصولات ارگانیک اونیوال'
+];`;
+
+    if (content.includes('$DEFAULT_CONFIG = [')) {
+      content = content.replace(/\$DEFAULT_CONFIG\s*=\s*\[[\s\S]*?\];/, () => defaultBlock);
+    } else {
+      content = `<?php\n${defaultBlock}\n`;
+    }
+    return content;
+  }
+
+  if (cleanName === 'telegram-bot.php') {
+    let content = '';
+    if (fs.existsSync(templatePath)) {
+      content = fs.readFileSync(templatePath, 'utf8');
+    }
+    const defaultBlock = `// ==============================================================================
+// بخش ۱: تنظیمات اختصاصی ربات تلگرام (سازگار با PHP 8.5 - استخراج خودکار از پنل مدیریت)
+// ==============================================================================
+$DEFAULT_CONFIG = [
+    // توکن ربات تلگرام
+    'telegramBotToken'     => ${JSON.stringify(telegramConfig.telegramBotToken || '')},
+
+    // نام کاربری ربات تلگرام
+    'telegramBotUsername'  => ${JSON.stringify((telegramConfig.telegramBotUsername || '').replace(/^@/, ''))},
+
+    // آیدی عددی چت ادمین در تلگرام
+    'adminChatId'          => ${JSON.stringify(telegramConfig.telegramAdminChatId || '')},
+
+    // نام کاربری ادمین
+    'adminUsername'        => '',
+
+    // توکن امنیتی وب‌هوک
+    'webhookSecretToken'   => ${JSON.stringify(telegramConfig.webhookSecretToken || '')},
+
+    // آدرس وب‌سایت فروشگاه
+    'storeUrl'             => ${JSON.stringify(telegramConfig.panelBaseUrl || '')},
+
+    // نام فروشگاه
+    'storeName'            => 'فروشگاه تخصصی محصولات ارگانیک اونیوال'
+];`;
+
+    if (content.includes('$DEFAULT_CONFIG = [')) {
+      content = content.replace(/\$DEFAULT_CONFIG\s*=\s*\[[\s\S]*?\];/, () => defaultBlock);
+    } else {
+      content = `<?php\n${defaultBlock}\n`;
+    }
+    return content;
+  }
+
+  throw new Error('فایل درخواستی معتبر نیست.');
+}
+
 // Telegram & Bale Bot settings, real connection testers, webhook manager & simulator
 app.get('/api/bot/config', (req: Request, res: Response) => {
   res.json({
@@ -2590,39 +3273,91 @@ app.get('/api/bot/config', (req: Request, res: Response) => {
   });
 });
 
+app.get('/api/bot/php-code/:filename', (req: Request, res: Response) => {
+  try {
+    const filename = req.params.filename || '';
+    const code = generateBotPhpScript(filename);
+    res.json({ ok: true, filename, code });
+  } catch (err: any) {
+    res.status(400).json({ ok: false, error: err.message || 'خطا در تولید فایل PHP' });
+  }
+});
+
+app.get('/api/bot/download-php/:filename', (req: Request, res: Response) => {
+  try {
+    const filename = req.params.filename || '';
+    const code = generateBotPhpScript(filename);
+    res.setHeader('Content-Type', 'application/x-httpd-php; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(code);
+  } catch (err: any) {
+    res.status(400).send(`Error: ${err.message}`);
+  }
+});
+
 const handleSaveBotConfig = (req: Request, res: Response) => {
   const incoming = req.body || {};
 
-  const rawToken = incoming.baleBotToken || incoming.botToken || telegramConfig.baleBotToken || telegramConfig.botToken || '';
-  const resolvedBaleToken = String(rawToken).trim();
-  const rawChatId = incoming.baleAdminChatId || incoming.adminChatId || telegramConfig.baleAdminChatId || telegramConfig.adminChatId || '';
+  const resolvedBaleToken = incoming.baleBotToken !== undefined
+    ? String(incoming.baleBotToken).trim()
+    : (incoming.botToken !== undefined ? String(incoming.botToken).trim() : String(telegramConfig.baleBotToken || telegramConfig.botToken || '').trim());
+
+  const resolvedCustomerToken = incoming.customerBotToken !== undefined
+    ? String(incoming.customerBotToken).trim()
+    : (incoming.baleCustomerBotToken !== undefined ? String(incoming.baleCustomerBotToken).trim() : (telegramConfig.customerBotToken || resolvedBaleToken));
+
+  const resolvedAdminToken = incoming.adminBotToken !== undefined
+    ? String(incoming.adminBotToken).trim()
+    : (incoming.baleAdminBotToken !== undefined ? String(incoming.baleAdminBotToken).trim() : (telegramConfig.adminBotToken || ''));
+
+  const resolvedTelegramBotToken = incoming.telegramBotToken !== undefined
+    ? String(incoming.telegramBotToken).trim()
+    : String(telegramConfig.telegramBotToken || '').trim();
+
+  const rawChatId = incoming.baleAdminChatId !== undefined
+    ? incoming.baleAdminChatId
+    : (incoming.adminChatId !== undefined ? incoming.adminChatId : (telegramConfig.baleAdminChatId || telegramConfig.adminChatId || ''));
   const resolvedBaleChatId = String(rawChatId).trim();
-  const resolvedBaleAdminUser = String(incoming.baleAdminUsername || telegramConfig.baleAdminUsername || '@hasti_hjz').trim();
-  const rawUsername = incoming.baleBotUsername || incoming.botUsername || telegramConfig.baleBotUsername || telegramConfig.botUsername || 'Onivalbot';
+  const resolvedBaleAdminUser = String(incoming.baleAdminUsername !== undefined ? incoming.baleAdminUsername : (telegramConfig.baleAdminUsername || '')).trim();
+  const rawUsername = incoming.baleBotUsername !== undefined
+    ? incoming.baleBotUsername
+    : (incoming.botUsername !== undefined ? incoming.botUsername : (telegramConfig.baleBotUsername || telegramConfig.botUsername || 'Onivalbot'));
   const resolvedBaleUsername = String(rawUsername).replace(/^@/, '').trim();
-  const resolvedBaleBaseUrl = (incoming.baleBaseUrl || incoming.baseUrl || telegramConfig.baleBaseUrl || telegramConfig.baseUrl || 'https://tapi.bale.ai').replace(/\/+$/, '');
+  const resolvedBaleBaseUrl = sanitizeBotBaseUrl('bale', incoming.baleBaseUrl || incoming.baseUrl || telegramConfig.baleBaseUrl || 'https://tapi.bale.ai');
+  const resolvedTgBaseUrl = sanitizeBotBaseUrl('telegram', incoming.telegramBaseUrl || telegramConfig.telegramBaseUrl || 'https://api.telegram.org');
   const resolvedBaleActive = incoming.active !== undefined ? Boolean(incoming.active) : (incoming.baleEnabled !== undefined ? Boolean(incoming.baleEnabled) : telegramConfig.active);
 
+  const resolvedWebhookSecret = (incoming.webhookSecretToken && String(incoming.webhookSecretToken).trim().length >= 16)
+    ? String(incoming.webhookSecretToken).trim()
+    : (telegramConfig.webhookSecretToken || `ONV_SEC_${crypto.randomBytes(16).toString('hex')}`);
+
   const resolvedPaymentMode = incoming.balePaymentMode || telegramConfig.balePaymentMode || 'live';
-  const resolvedTokenLive = String(incoming.balePaymentTokenLive || telegramConfig.balePaymentTokenLive || 'WALLET-v5gqSc1W1kaBUo2B').trim();
-  const resolvedTokenTest = String(incoming.balePaymentTokenTest || telegramConfig.balePaymentTokenTest || 'WALLET-TEST-1111111111111111').trim();
+  const resolvedTokenLive = incoming.balePaymentTokenLive !== undefined ? String(incoming.balePaymentTokenLive).trim() : String(telegramConfig.balePaymentTokenLive || '').trim();
+  const resolvedTokenTest = incoming.balePaymentTokenTest !== undefined ? String(incoming.balePaymentTokenTest).trim() : String(telegramConfig.balePaymentTokenTest || '').trim();
   const resolvedActiveToken = resolvedPaymentMode === 'test' ? resolvedTokenTest : resolvedTokenLive;
 
   const resolvedTgEnabled = incoming.telegramBotEnabled !== undefined
     ? Boolean(incoming.telegramBotEnabled)
     : (incoming.telegramEnabled !== undefined ? Boolean(incoming.telegramEnabled) : telegramConfig.telegramBotEnabled);
-  const resolvedTgUsername = String(incoming.telegramBotUsername || telegramConfig.telegramBotUsername || 'onival_shop_bot').replace(/^@/, '').trim();
+  const resolvedTgUsername = String(incoming.telegramBotUsername !== undefined ? incoming.telegramBotUsername : (telegramConfig.telegramBotUsername || 'onival_shop_bot')).replace(/^@/, '').trim();
 
-  const resolvedTgSupport = incoming.telegramSupportId || incoming.telegramSupportUsername || telegramConfig.telegramSupportId;
-  const resolvedBaleSupport = incoming.baleSupportId || incoming.baleSupportUsername || telegramConfig.baleSupportId;
-  const resolvedWorkingHours = incoming.workingHours || incoming.supportHours || telegramConfig.workingHours;
+  const resolvedTgSupport = incoming.telegramSupportId !== undefined ? incoming.telegramSupportId : telegramConfig.telegramSupportId;
+  const resolvedBaleSupport = incoming.baleSupportId !== undefined ? incoming.baleSupportId : telegramConfig.baleSupportId;
+  const resolvedWorkingHours = incoming.workingHours !== undefined ? incoming.workingHours : telegramConfig.workingHours;
 
   telegramConfig = {
     ...telegramConfig,
     ...incoming,
+    // Strictly preserve and protect Webhook Secret Token from being wiped
+    webhookSecretToken: resolvedWebhookSecret,
     // Keep primary & explicit Bale fields 100% synced
     botToken: resolvedBaleToken,
     baleBotToken: resolvedBaleToken,
+    customerBotToken: resolvedCustomerToken,
+    baleCustomerBotToken: resolvedCustomerToken,
+    adminBotToken: resolvedAdminToken,
+    baleAdminBotToken: resolvedAdminToken,
+    telegramBotToken: resolvedTelegramBotToken,
     adminChatId: resolvedBaleChatId,
     baleAdminChatId: resolvedBaleChatId,
     baleAdminUsername: resolvedBaleAdminUser,
@@ -2630,6 +3365,7 @@ const handleSaveBotConfig = (req: Request, res: Response) => {
     baleBotUsername: resolvedBaleUsername,
     baseUrl: resolvedBaleBaseUrl,
     baleBaseUrl: resolvedBaleBaseUrl,
+    telegramBaseUrl: resolvedTgBaseUrl,
     active: resolvedBaleActive,
     baleEnabled: resolvedBaleActive,
 
@@ -2732,10 +3468,11 @@ app.post('/api/bot/test-connection', async (req: Request, res: Response) => {
     ''
   ).trim();
 
-  const resolvedBaseUrl = (
+  const rawBase = (
     baseUrl ||
     (platform === 'telegram' ? telegramConfig.telegramBaseUrl || 'https://api.telegram.org' : telegramConfig.baleBaseUrl || telegramConfig.baseUrl || 'https://tapi.bale.ai')
   ).replace(/\/+$/, '');
+  const resolvedBaseUrl = sanitizeBotBaseUrl(platform, rawBase);
 
   const platformName = platform === 'telegram' ? 'تلگرام (Telegram)' : 'بله (Bale)';
   const time = new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -2859,22 +3596,24 @@ const handleSendLiveBotMessage = async (req: Request, res: Response) => {
   }> = [];
 
   if (platform === 'bale' || platform === 'both') {
+    const rawBaleBase = (baseUrl || telegramConfig.baleBaseUrl || telegramConfig.baseUrl || 'https://tapi.bale.ai').replace(/\/+$/, '');
     targets.push({
       platform: 'bale',
       name: 'بله (Bale)',
       token: (botToken || telegramConfig.baleBotToken || telegramConfig.botToken || '').trim(),
       chatId: (chatId || telegramConfig.baleAdminChatId || telegramConfig.adminChatId || '').trim(),
-      baseUrl: (baseUrl || telegramConfig.baleBaseUrl || telegramConfig.baseUrl || 'https://tapi.bale.ai').replace(/\/+$/, '')
+      baseUrl: sanitizeBotBaseUrl('bale', rawBaleBase)
     });
   }
 
   if (platform === 'telegram' || platform === 'both') {
+    const rawTgBase = (baseUrl || telegramConfig.telegramBaseUrl || 'https://api.telegram.org').replace(/\/+$/, '');
     targets.push({
       platform: 'telegram',
       name: 'تلگرام (Telegram)',
       token: (botToken || telegramConfig.telegramBotToken || '').trim(),
       chatId: (chatId || telegramConfig.telegramAdminChatId || telegramConfig.adminChatId || '').trim(),
-      baseUrl: (baseUrl || telegramConfig.telegramBaseUrl || 'https://api.telegram.org').replace(/\/+$/, '')
+      baseUrl: sanitizeBotBaseUrl('telegram', rawTgBase)
     });
   }
 
@@ -2992,9 +3731,10 @@ app.post('/api/bot/send-test-message', handleSendLiveBotMessage);
 // Test Bale Connection & Send Official Welcome Message to Admin
 app.post(['/api/bot/test-admin-welcome', '/api/bale/test-admin-welcome'], async (req: Request, res: Response) => {
   const { botToken, chatId, baseUrl } = req.body || {};
-  const activeToken = (botToken || telegramConfig.baleBotToken || telegramConfig.botToken || '1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34').trim();
-  const activeChatId = (chatId || telegramConfig.baleAdminChatId || telegramConfig.adminChatId || '69451465').trim();
-  const activeBaseUrl = (baseUrl || telegramConfig.baleBaseUrl || telegramConfig.baseUrl || 'https://tapi.bale.ai').replace(/\/+$/, '');
+  const activeToken = (botToken || telegramConfig.baleBotToken || telegramConfig.botToken || '').trim();
+  const activeChatId = (chatId || telegramConfig.baleAdminChatId || telegramConfig.adminChatId || '').trim();
+  const rawBase = (baseUrl || telegramConfig.baleBaseUrl || telegramConfig.baseUrl || 'https://tapi.bale.ai').replace(/\/+$/, '');
+  const activeBaseUrl = sanitizeBotBaseUrl('bale', rawBase);
 
   // If new values were provided in the test, save them to active config
   if (botToken) {
@@ -3011,7 +3751,6 @@ app.post(['/api/bot/test-admin-welcome', '/api/bale/test-admin-welcome'], async 
       ok: false,
       delivered: false,
       status: 400,
-      usedToken: '',
       usedChatId: activeChatId,
       message: 'توکن ربات بله وارد نشده است.',
       description: 'لطفاً توکن ربات دریافتی از @BotFather را در کادر تنظیمات وارد کنید.'
@@ -3023,7 +3762,6 @@ app.post(['/api/bot/test-admin-welcome', '/api/bale/test-admin-welcome'], async 
       ok: false,
       delivered: false,
       status: 400,
-      usedToken: activeToken,
       usedChatId: '',
       message: 'شناسه عددی چت ادمین (Chat ID) وارد نشده است.',
       description: 'شناسه عددی چت ادمین برای ارسال پیام لازم است.'
@@ -3070,7 +3808,6 @@ app.post(['/api/bot/test-admin-welcome', '/api/bale/test-admin-welcome'], async 
         messageId: data.result?.message_id,
         message: 'پیام «اتصال ربات به هاست با موفقیت انجام شد. شما به عنوان ادمین شناسایی شدید» با موفقیت به بله شما تحویل داده شد.',
         rawResponse: data,
-        usedToken: activeToken,
         usedChatId: activeChatId,
         logs: botActivityLogs.slice(0, 30)
       });
@@ -3104,7 +3841,6 @@ app.post(['/api/bot/test-admin-welcome', '/api/bale/test-admin-welcome'], async 
           ? 'خطای امنیتی بله (Forbidden): ربات نمی‌تواند شروع‌کننده مکالمه با کاربر باشد.'
           : `پاسخ وب‌سرویس بله: ${desc}`,
         rawResponse: data,
-        usedToken: activeToken,
         usedChatId: activeChatId,
         hint: isForbiddenStart
           ? `مدیر گرامی، ربات‌های بله و تلگرام به دلایل امنیتی تا زمانی که دکمه «شروع» یا /start را در ربات نزده باشید، اجازه ارسال پیام به شما را ندارند. لطفاً ابتدا روی لینک ربات (ble.ir/${cleanBotName}) کلیک کرده و دکمه «شروع» (Start) را لمس فرمایید، سپس مجدداً دکمه تست را بزنید.`
@@ -3124,7 +3860,6 @@ app.post(['/api/bot/test-admin-welcome', '/api/bale/test-admin-welcome'], async 
       latencyMs,
       description: errMsg,
       message: `خطای شبکه در اتصال به بله: ${errMsg}`,
-      usedToken: activeToken,
       usedChatId: activeChatId,
       hint: 'ارتباط مستقیم با سرور بله برقرار نشد. وضعیت اینترنت هاست یا سرور بله را بررسی کنید.'
     });
@@ -3139,10 +3874,11 @@ app.post('/api/bot/webhook-action', async (req: Request, res: Response) => {
     (platform === 'telegram' ? telegramConfig.telegramBotToken : telegramConfig.baleBotToken || telegramConfig.botToken) ||
     ''
   ).trim();
-  const resolvedBaseUrl = (
+  const rawBase = (
     baseUrl ||
     (platform === 'telegram' ? telegramConfig.telegramBaseUrl || 'https://api.telegram.org' : telegramConfig.baleBaseUrl || telegramConfig.baseUrl || 'https://tapi.bale.ai')
   ).replace(/\/+$/, '');
+  const resolvedBaseUrl = sanitizeBotBaseUrl(platform, rawBase);
   const platformName = platform === 'telegram' ? 'تلگرام' : 'بله';
   const time = new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
@@ -3168,10 +3904,15 @@ app.post('/api/bot/webhook-action', async (req: Request, res: Response) => {
       } else {
         telegramConfig.baleWebhookUrl = targetUrl;
       }
+      const secretTokenToRegister = (telegramConfig.webhookSecretToken || '').trim();
+      const webhookPayload: any = { url: targetUrl };
+      if (secretTokenToRegister) {
+        webhookPayload.secret_token = secretTokenToRegister;
+      }
       fetchOptions = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: targetUrl }),
+        body: JSON.stringify(webhookPayload),
         signal: controller.signal
       };
     } else if (action === 'delete') {
@@ -3422,10 +4163,10 @@ function extractTrackingCodeFromText(text: string): string | null {
 function findOrderByTrackingOrCode(code: string): any {
   if (!code) return null;
   const rawCode = String(code).trim();
+  if (rawCode.length < 4) return null;
   const cleanSearch = rawCode.replace(/[^A-Z0-9]/gi, '').toUpperCase();
   const normalizedCode = rawCode.replace(/-/g, '_').toUpperCase();
   const hyphenCode = rawCode.replace(/_/g, '-').toUpperCase();
-  const searchDigits = rawCode.match(/\d+/)?.[0];
 
   // 1. Search in memory
   let found = orders.find(o => {
@@ -3433,15 +4174,11 @@ function findOrderByTrackingOrCode(code: string): any {
     const oClean = oRaw.replace(/[^A-Z0-9]/gi, '');
     const oNorm = oRaw.replace(/-/g, '_');
     const oHyphen = oRaw.replace(/_/g, '-');
-    const oDigits = oRaw.match(/\d+/)?.[0];
     return oRaw === rawCode.toUpperCase() ||
            oNorm === normalizedCode ||
            oHyphen === hyphenCode ||
-           oClean === cleanSearch ||
-           String(o.id) === rawCode ||
-           String(o.orderNumber || '') === rawCode ||
-           (searchDigits && oDigits && searchDigits === oDigits) ||
-           (cleanSearch.length >= 3 && oClean.includes(cleanSearch));
+           (cleanSearch.length >= 6 && oClean === cleanSearch) ||
+           (o.orderNumber && String(o.orderNumber).toUpperCase() === rawCode.toUpperCase());
   });
 
   if (found) return found;
@@ -3464,12 +4201,11 @@ function findOrderByTrackingOrCode(code: string): any {
             const oClean = oRaw.replace(/[^A-Z0-9]/gi, '');
             const oNorm = oRaw.replace(/-/g, '_');
             const oHyphen = oRaw.replace(/_/g, '-');
-            return oRaw === code.toUpperCase() ||
+            return oRaw === rawCode.toUpperCase() ||
                    oNorm === normalizedCode ||
                    oHyphen === hyphenCode ||
-                   oClean === cleanSearch ||
-                   String(o.id) === code ||
-                   (cleanSearch.length >= 3 && oClean.includes(cleanSearch));
+                   (cleanSearch.length >= 6 && oClean === cleanSearch) ||
+                   (o.orderNumber && String(o.orderNumber).toUpperCase() === rawCode.toUpperCase());
           });
           if (found) {
             if (!orders.some(existing => existing.id === found.id)) {
@@ -3483,6 +4219,7 @@ function findOrderByTrackingOrCode(code: string): any {
       }
     }
   }
+
   return null;
 }
 
@@ -3581,6 +4318,9 @@ async function processIncomingBotUpdate(update: any, botOrigin: 'customer' | 'ad
         order.consultationDetails.consultationStatus = 'Scheduled';
       }
 
+      // Deduct inventory and special offer quota on confirmed payment
+      deductOrderInventoryOnPayment(order);
+
       const linkedMsg: any = contactMessages.find(m => m.trackingCode.toUpperCase() === order.trackingCode.toUpperCase());
       if (linkedMsg) {
         linkedMsg.paymentStatus = 'Paid';
@@ -3642,31 +4382,13 @@ async function processIncomingBotUpdate(update: any, botOrigin: 'customer' | 'ad
   if (msg) {
     const text = (msg.text || msg.caption || '').trim();
     const sender = msg.from || {};
-    const senderUsername = (sender.username || '').replace(/^@/, '').toLowerCase();
     const senderChatId = String(msg.chat?.id || '');
+    const senderUsername = sender.username || msg.chat?.username || '';
 
-    const isAdmin = (senderUsername && senderUsername === configuredAdminUser) ||
-                    (senderChatId && senderChatId === configuredAdminChat) ||
-                    senderChatId === '69451465' ||
-                    text === '/start admin' ||
-                    text === '/admin';
-
-    // Auto-link personal account if admin interacts with the bot
-    if ((isAdmin || (senderUsername && senderUsername === configuredAdminUser) || text === '/start admin' || senderChatId === '69451465') && senderChatId) {
-      if (telegramConfig.baleAdminChatId !== senderChatId || telegramConfig.adminChatId !== senderChatId) {
-        telegramConfig.baleAdminChatId = senderChatId;
-        telegramConfig.adminChatId = senderChatId;
-        savePersistedState();
-        botActivityLogs.unshift({
-          id: Date.now(),
-          time,
-          type: 'admin_chat_linked',
-          platform: 'bale',
-          text: `اکانت شخصی ادمین شناسایی و چت آیدی آن با موفقیت در سیستم ذخیره شد: ${senderChatId}`,
-          status: 'success'
-        });
-      }
-    }
+    // Strictly verify if sender is the configured admin by numeric Chat ID match only
+    const isAdmin = Boolean(
+      configuredAdminChat && senderChatId && senderChatId === String(configuredAdminChat)
+    );
 
     // CHECK FOR RECEIPT PHOTO / DOCUMENT UPLOAD
     const hasPhoto = Array.isArray(msg.photo) && msg.photo.length > 0;
@@ -3677,9 +4399,7 @@ async function processIncomingBotUpdate(update: any, botOrigin: 'customer' | 'ad
       const detectedCode = extractTrackingCodeFromText(text);
       let targetOrder = detectedCode ? findOrderByTrackingOrCode(detectedCode) : null;
       if (!targetOrder) {
-        targetOrder = orders.find(o => o.paymentStatus !== 'Paid' && (o.baleChatId === senderChatId || o.chatId === senderChatId)) ||
-                      orders.find(o => o.paymentStatus !== 'Paid') ||
-                      orders[0];
+        targetOrder = orders.find(o => o.paymentStatus !== 'Paid' && (o.baleChatId === senderChatId || o.chatId === senderChatId)) || null;
       }
 
       if (targetOrder) {
@@ -3765,7 +4485,7 @@ async function processIncomingBotUpdate(update: any, botOrigin: 'customer' | 'ad
       // Ensure siteUrl is HTTPS for Bale inline buttons
       const originBase = (telegramConfig.panelBaseUrl && !telegramConfig.panelBaseUrl.includes('localhost'))
         ? telegramConfig.panelBaseUrl.replace(/\/+$/, '')
-        : (process.env.APP_URL || 'https://ais-dev-uy5bcdp7o5x4p2wvng2rjs-701810134340.europe-west2.run.app');
+        : getSitePublicUrl();
       const siteTrackUrl = `${originBase}/?track=${targetOrder.trackingCode}`;
 
       const buyerName = targetOrder.userFullName || targetOrder.customerName || targetOrder.fullName || 'مشتری گرامی';
@@ -3849,24 +4569,6 @@ async function processIncomingBotUpdate(update: any, botOrigin: 'customer' | 'ad
             startParameter: `pay_${targetOrder.trackingCode.replace(/-/g, '_')}`,
             totalPriceRial: orderTotalToman * 10
           });
-
-          // If failed with configured wallet token, retry with fallback wallet token
-          if (!invoiceResult.ok && invoiceResult.status !== 401) {
-            const retryRes = await sendBaleInvoice({
-              baseUrl: baleBase,
-              token: baleToken,
-              chatId: isNaN(Number(senderChatId)) ? senderChatId : Number(senderChatId),
-              title: `فاکتور ${targetOrder.trackingCode}`.slice(0, 32),
-              description: `پرداخت سفارش ${targetOrder.trackingCode} فروشگاه اونیوال`.slice(0, 255),
-              payload: `order_${targetOrder.trackingCode}`,
-              providerToken: 'WALLET-v5gqSc1W1kaBUo2B',
-              startParameter: `pay_${targetOrder.trackingCode.replace(/-/g, '_')}`,
-              totalPriceRial: orderTotalToman * 10
-            }).catch(() => null);
-            if (retryRes) {
-              invoiceResult = { ...retryRes, retriedWithTestToken: true };
-            }
-          }
         }
 
         // Send persistent quick buttons to customer
@@ -3920,7 +4622,7 @@ async function processIncomingBotUpdate(update: any, botOrigin: 'customer' | 'ad
     // Shared default URLs for interactive bot response buttons
     const originBase = (telegramConfig.panelBaseUrl && !telegramConfig.panelBaseUrl.includes('localhost'))
       ? telegramConfig.panelBaseUrl.replace(/\/+$/, '')
-      : (process.env.APP_URL || 'https://ais-dev-uy5bcdp7o5x4p2wvng2rjs-701810134340.europe-west2.run.app');
+      : getSitePublicUrl();
     const storeUrl = originBase;
     const supportUsername = (telegramConfig.baleSupportId || telegramConfig.baleBotUsername || 'onival_bale_support').replace(/^@/, '');
     const supportUrl = `https://ble.ir/${supportUsername}`;
@@ -3935,35 +4637,15 @@ async function processIncomingBotUpdate(update: any, botOrigin: 'customer' | 'ad
       const code = detectedCode.toUpperCase();
       let order = findOrderByTrackingOrCode(code);
 
-      // Auto-register order in persistence if not found so the customer is NEVER blocked
       if (!order) {
-        const latestExisting = orders.find(o => o.paymentStatus !== 'Paid') || orders[0];
-        const defaultTotal = latestExisting?.totalPrice || 180000;
-        const botUser = (telegramConfig.baleBotUsername || telegramConfig.botUsername || 'Onivalbot').replace(/^@/, '');
-        order = {
-          id: orders.length > 0 ? Math.max(...orders.map(o => o.id)) + 1 : 101,
-          userFullName: latestExisting?.userFullName || 'مشتری گرامی',
-          phoneNumber: latestExisting?.phoneNumber || '۰۹۱۲۳۴۵۶۷۸۹',
-          userAddress: latestExisting?.userAddress || 'تهران، تحویل پستی',
-          totalPrice: defaultTotal,
-          status: 'Pending',
-          paymentStatus: 'Unpaid',
-          paymentMethod: 'bale_bot',
-          trackingCode: code,
-          creationTime: new Date().toLocaleDateString('fa-IR'),
-          balePaymentUrl: `https://ble.ir/${botUser}?start=pay_${code.replace(/-/g, '_')}`,
-          items: latestExisting?.items?.length ? latestExisting.items : [
-            {
-              productName: 'فرآورده‌های ارگانیک اونیوال',
-              size: 'استاندارد',
-              quantity: 1,
-              price: defaultTotal,
-              totalPrice: defaultTotal
-            }
-          ]
-        };
-        orders.unshift(order);
-        savePersistedState();
+        if (activeToken && senderChatId) {
+          const notFoundText =
+            `⚠️ فاکتور یا سفارشی با کد «${code}» در سامانه اونیوال یافت نشد.\n\n` +
+            `▫️ لطفاً کد رهگیری دقیق فاکتور (مانند ONV-ORD-XXX) را ارسال فرمایید.\n` +
+            `▫️ در صورت نیاز به راهنمایی بیشتر می‌توانید با پشتیبانی ما در ارتباط باشید.`;
+          await sendBaleMessage(baleBase, activeToken, senderChatId, notFoundText);
+        }
+        return;
       }
 
       await deliverOrderInvoice(order);
@@ -4049,14 +4731,14 @@ async function processIncomingBotUpdate(update: any, botOrigin: 'customer' | 'ad
 
     // 3. Track Order Button (پیگیری سفارش)
     if (/^(📦|🔍)?\s*(پیگیری.*|رهگیری.*|وضعیت سفارش.*|track|tracking)$/iu.test(text) || text === '/track') {
-      const activePending = orders.find(o => o.paymentStatus !== 'Paid') || orders[0];
+      const activePending = orders.find(o => o.paymentStatus !== 'Paid' && (o.baleChatId === senderChatId || o.chatId === senderChatId));
       let trackText =
         `📦 سامانه هوشمند پیگیری سفارشات اونیوال:\n\n` +
-        `جهت بررسی وضعیت آماده‌سازی، کد رهگیری پستی و تاییدیه فاکتور، کافیست شماره فاکتور خود را ارسال فرمایید (مثال: ONV-ORD-949 یا فقط عدد آن مانند 949).\n\n`;
+        `جهت بررسی وضعیت آماده‌سازی، کد رهگیری پستی و تاییدیه فاکتور، کافیست شماره فاکتور خود را ارسال فرمایید (مثال: ONV-ORD-949).\n\n`;
 
       if (activePending) {
         trackText +=
-          `💡 آخرین فاکتور فعال در سیستم:\n` +
+          `💡 آخرین فاکتور فعال شما:\n` +
           `▫️ کد رهگیری: ${activePending.trackingCode}\n` +
           `▫️ خریدار: ${activePending.userFullName}\n` +
           `▫️ مبلغ: ${Number(activePending.totalPrice || 0).toLocaleString('fa-IR')} تومان\n` +
@@ -4133,9 +4815,19 @@ async function processIncomingBotUpdate(update: any, botOrigin: 'customer' | 'ad
 
     // 5. My Latest Invoice Button (استعلام و پرداخت فاکتور من)
     if (/^(🧾)?\s*(استعلام.*|فاکتور.*|صورتحساب.*|سفارش.*|پرداخت.*|invoice|pay)$/iu.test(text) || text === '/invoice' || text === '/pay') {
-      const targetOrder = orders.find(o => o.paymentStatus !== 'Paid') || orders[0];
+      const targetOrder = orders.find(o => o.paymentStatus !== 'Paid' && (o.baleChatId === senderChatId || o.chatId === senderChatId));
       if (targetOrder) {
         await deliverOrderInvoice(targetOrder, 'مشخصات آخرین فاکتور سفارش شما در سامانه اونیوال:');
+        return;
+      } else {
+        if (activeToken && senderChatId) {
+          await sendBaleMessage(
+            baleBase,
+            activeToken,
+            senderChatId,
+            'جهت مشاهده و پرداخت فاکتور، لطفاً کد رهگیری سفارش خود (مانند ONV-ORD-XXX) را ارسال فرمایید یا از وب‌سایت اقدام فرمایید.'
+          );
+        }
         return;
       }
     }
@@ -4144,9 +4836,36 @@ async function processIncomingBotUpdate(update: any, botOrigin: 'customer' | 'ad
     // STEP C: ADMIN SPECIFIC COMMANDS (/orders, /confirm_...)
     // Handled when interacting with Admin Bot or explicitly requested by admin
     // =========================================================================
-    const isAdminBotScope = botOrigin === 'admin' || (isAdmin && (text.startsWith('/orders') || text.startsWith('/confirm_') || text === '/admin'));
+    const isAdminCommand =
+      text.startsWith('/orders') ||
+      text.startsWith('/confirm_') ||
+      text.startsWith('/تایید_') ||
+      text === '/admin' ||
+      text === 'سفارشات' ||
+      text === 'لیست سفارشات';
 
-    if (isAdminBotScope) {
+    if (isAdminCommand) {
+      if (!isAdmin) {
+        botActivityLogs.unshift({
+          id: Date.now(),
+          time,
+          type: 'unauthorized_admin_command_attempt',
+          platform: 'bale',
+          text: `تلاش غیرمجاز برای دسترسی به دستورات مدیریتی (${text}) از فرستنده ناشناس با چت‌آیدی ${senderChatId}.`,
+          status: 'warning'
+        });
+        savePersistedState();
+        if (activeToken && senderChatId) {
+          await sendBaleMessage(
+            baleBase,
+            activeToken,
+            senderChatId,
+            `⛔ دسترسی غیرمجاز: شناسه چت شما (${senderChatId}) به عنوان مدیر فروشگاه ثبت نشده است.`
+          );
+        }
+        return;
+      }
+
       if (text === '/orders' || text === 'سفارشات' || text === 'لیست سفارشات') {
         const pendingList = orders.slice(0, 8);
         let reply = `📋 آخرین وضعیت سفارشات فروشگاه اونیوال:\n\n`;
@@ -4173,6 +4892,7 @@ async function processIncomingBotUpdate(update: any, botOrigin: 'customer' | 'ad
         if (order) {
           order.paymentStatus = 'Paid';
           order.status = 'Processing';
+          deductOrderInventoryOnPayment(order);
           savePersistedState();
           botActivityLogs.unshift({
             id: Date.now(),
@@ -4215,49 +4935,61 @@ async function processIncomingBotUpdate(update: any, botOrigin: 'customer' | 'ad
         }
         return;
       }
+    }
 
-      if (botOrigin === 'admin' && (text === '/start' || text === '/admin' || text === 'شروع')) {
-        const adminGreeting =
-          `سلام مدیر گرامی 👑\n\n` +
-          `این «ربات اختصاصی ادمین و مدیریت فروشگاه اونیوال» است.\n` +
-          `شناسه عددی چت شما: ${senderChatId}\n\n` +
-          `📌 تمامی اعلان‌های سفارشات جدید، فیش‌های کارت‌به‌کارت و پرداخت‌های کیف پول بله به این چت ارسال می‌شوند.\n\n` +
-          `دستورات کاربردی مدیریت:\n` +
-          `📋 /orders : مشاهده آخرین سفارشات\n` +
-          `✅ /confirm_کدفاکتور : تایید و تسویه فوری سفارش`;
-
-        const adminKb = {
-          inline_keyboard: [
-            [{ text: '🌐 ورود به پنل مدیریت سایت', url: storeUrl }],
-            [{ text: '🛍️ مشاهده فروشگاه', url: storeUrl }]
-          ]
-        };
-        if (adminToken && senderChatId) {
-          await sendBaleMessage(baleBase, adminToken, senderChatId, adminGreeting, adminKb);
+    if (botOrigin === 'admin' && (text === '/start' || text === '/admin' || text === 'شروع')) {
+      if (!isAdmin) {
+        const unauthorizedMsg =
+          `⚠️ این ربات اختصاصی مدیریت و اعلانات فروشگاه اونیوال است.\n\n` +
+          `شناسه عددی چت شما: ${senderChatId}\n` +
+          `وضعیت: احراز هویت نشده\n\n` +
+          `جهت دریافت اعلانات سفارشات و فیش‌ها، لطفاً وارد پنل مدیریت وب شده و در بخش «تنظیمات ربات» شناسه چت خود را وارد فرمایید. تغییر شناسه مدیر صرفاً از داخل پنل مدیریت وب امکان‌پذیر است.`;
+        if (activeToken && senderChatId) {
+          await sendBaleMessage(baleBase, activeToken, senderChatId, unauthorizedMsg);
         }
         return;
       }
+
+      const adminGreeting =
+        `سلام مدیر گرامی 👑\n\n` +
+        `این «ربات اختصاصی ادمین و مدیریت فروشگاه اونیوال» است.\n` +
+        `شناسه عددی چت شما: ${senderChatId}\n\n` +
+        `📌 تمامی اعلان‌های سفارشات جدید، فیش‌های کارت‌به‌کارت و پرداخت‌های کیف پول بله به این چت ارسال می‌شوند.\n\n` +
+        `دستورات کاربردی مدیریت:\n` +
+        `📋 /orders : مشاهده آخرین سفارشات\n` +
+        `✅ /confirm_کدفاکتور : تایید و تسویه فوری سفارش`;
+
+      const adminKb = {
+        inline_keyboard: [
+          [{ text: '🌐 ورود به پنل مدیریت سایت', url: storeUrl }],
+          [{ text: '🛍️ مشاهده فروشگاه', url: storeUrl }]
+        ]
+      };
+      if (adminToken && senderChatId) {
+        await sendBaleMessage(baleBase, adminToken, senderChatId, adminGreeting, adminKb);
+      }
+      return;
     }
 
     // =========================================================================
     // STEP D: START / GENERAL MESSAGES FOR CUSTOMER BOT (/start, شروع, سلام)
-    // Welcomes the customer and presents quick action buttons & latest invoice
+    // Welcomes the customer and presents quick action buttons
     // =========================================================================
     const targetToken = customerToken || activeToken || adminToken;
-    const latestPendingOrder = orders.find(o => o.paymentStatus !== 'Paid') || orders[0];
+    const userPendingOrder = orders.find(o => o.paymentStatus !== 'Paid' && (o.baleChatId === senderChatId || o.chatId === senderChatId));
     const isStartWord = /^[\/!#]?(start|help|شروع|راهنما|سلام|hello|hi)$/iu.test(text);
 
     if (targetToken && senderChatId) {
-      // If customer pressed /start or sent a start greeting, IMMEDIATELY deliver their active invoice!
-      if (latestPendingOrder && (isStartWord || latestPendingOrder.paymentStatus !== 'Paid')) {
-        await deliverOrderInvoice(latestPendingOrder, 'فاکتور سفارش فعال شما آماده پرداخت است:');
+      // If customer has their OWN active pending order and greeted, deliver their invoice
+      if (userPendingOrder && (isStartWord || userPendingOrder.paymentStatus !== 'Paid')) {
+        await deliverOrderInvoice(userPendingOrder, 'فاکتور سفارش فعال شما آماده پرداخت است:');
         return;
       }
 
       // Customer Welcome Message with Navigation Links
       const welcomeText =
         `سلام! 🍯 به ربات رسمی پرداخت و فروشگاه تخصصی فرآورده‌های ارگانیک اونیوال خوش آمدید.\n\n` +
-        `جهت تسویه یا مشاهده پیش‌فاکتور، کافیست شماره فاکتور خود (مانند ONV-ORD-949 یا فقط عدد آن) را ارسال فرمایید یا از گزینه‌های زیر استفاده نمایید:`;
+        `جهت تسویه یا مشاهده پیش‌فاکتور، کافیست شماره فاکتور خود (مانند ONV-ORD-XXX) را ارسال فرمایید یا از گزینه‌های زیر استفاده نمایید:`;
 
       const welcomeKb = {
         inline_keyboard: [
@@ -4265,9 +4997,9 @@ async function processIncomingBotUpdate(update: any, botOrigin: 'customer' | 'ad
             { text: '🛍️ ورود به فروشگاه آنلاین', url: storeUrl },
             { text: '📞 تماس با ما و پشتیبانی', url: supportUrl }
           ],
-          ...(latestPendingOrder ? [[
-            { text: `💳 پرداخت فاکتور (${latestPendingOrder.trackingCode})`, url: `${storeUrl}/?track=${latestPendingOrder.trackingCode}` },
-            { text: '🔍 پیگیری سفارش در سایت', url: `${storeUrl}/?track=${latestPendingOrder.trackingCode}` }
+          ...(userPendingOrder ? [[
+            { text: `💳 پرداخت فاکتور (${userPendingOrder.trackingCode})`, url: `${storeUrl}/?track=${userPendingOrder.trackingCode}` },
+            { text: '🔍 پیگیری سفارش در سایت', url: `${storeUrl}/?track=${userPendingOrder.trackingCode}` }
           ]] : [])
         ]
       };
@@ -4472,9 +5204,15 @@ const WEBHOOK_PATHS = [
   '/api/telegram-bot.php',
   '/bale-bot.php',
   '/telegram-bot.php',
-  '/bot-config.php',
   '/api/webhook'
 ];
+
+app.all(['/bot-config.php', '/api/bot-config.php'], (_req: Request, res: Response) => {
+  res.status(403).json({
+    ok: false,
+    error: 'دسترسی مستقیم به این فایل مسدود است. تنظیمات ربات صرفاً از طریق پنل مدیریت وب انجام می‌شود.'
+  });
+});
 
 app.get(WEBHOOK_PATHS, (req: Request, res: Response) => {
   const isTg = req.path.includes('telegram') || req.query.platform === 'telegram';
@@ -4482,18 +5220,46 @@ app.get(WEBHOOK_PATHS, (req: Request, res: Response) => {
     ok: true,
     status: 'active',
     service: 'ONIVAL Webhook Gateway',
-    version: '1.1.0',
+    version: '1.2.0',
     platform: isTg ? 'telegram' : 'bale',
     timestamp: new Date().toISOString(),
     baleCustomerBot: `@${(telegramConfig.baleBotUsername || 'Onivalbot').replace(/^@/, '')}`,
-    baleAdminBot: `@${(telegramConfig.baleAdminUsername || 'hasti_hjz').replace(/^@/, '')}`,
-    adminChatId: telegramConfig.baleAdminChatId || telegramConfig.adminChatId || '69451465',
+    baleAdminBot: `@${(telegramConfig.baleAdminUsername || 'OnivalAdminBot').replace(/^@/, '')}`,
     paymentMode: telegramConfig.balePaymentMode || 'live',
     message: 'درگاه وب‌هوک ربات فعال و آماده دریافت به‌روزرسانی‌های پرداخت و پیام‌ها است.'
   });
 });
 
 app.post(WEBHOOK_PATHS, async (req: Request, res: Response) => {
+  // Enforce webhook secret token strictly to prevent spoofing
+  let configuredSecret = (telegramConfig.webhookSecretToken || '').trim();
+  if (!configuredSecret) {
+    telegramConfig.webhookSecretToken = crypto.randomBytes(24).toString('hex');
+    configuredSecret = telegramConfig.webhookSecretToken;
+    savePersistedState();
+  }
+
+  const receivedSecret = (
+    req.headers['x-telegram-bot-api-secret-token'] ||
+    req.headers['x-bale-bot-api-secret-token'] ||
+    req.headers['x-bot-api-secret-token'] ||
+    req.headers['x-webhook-secret-token'] ||
+    ''
+  ).toString().trim();
+
+  let isSecretValid = false;
+  if (receivedSecret && configuredSecret) {
+    const recBuf = Buffer.from(receivedSecret);
+    const confBuf = Buffer.from(configuredSecret);
+    if (recBuf.length === confBuf.length && crypto.timingSafeEqual(recBuf, confBuf)) {
+      isSecretValid = true;
+    }
+  }
+
+  if (!isSecretValid) {
+    return res.status(403).json({ ok: false, error: 'احراز هویت وب‌هوک ناموفق بود: توکن امنیتی وب‌هوک نامعتبر است یا ارسال نشده است.' });
+  }
+
   const update = req.body || {};
   const isExplicitAdmin = req.path.includes('/admin') || req.query.bot === 'admin';
   try {
@@ -4586,6 +5352,53 @@ async function startBaleBotPolling() {
         }
       } catch (err: any) {
         await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
+  })();
+}
+
+// Background Long Polling for Telegram Bot
+let isTelegramPollingRunning = false;
+async function startTelegramBotPolling() {
+  if (isTelegramPollingRunning) return;
+  isTelegramPollingRunning = true;
+  console.log('[Telegram Polling] Background long-polling started for Telegram Bot.');
+
+  (async () => {
+    let tgOffset = 0;
+    while (isTelegramPollingRunning) {
+      const tgToken = (telegramConfig.telegramBotToken || '').trim();
+      const tgEnabled = Boolean(telegramConfig.telegramBotEnabled ?? telegramConfig.telegramEnabled);
+      const tgBase = (telegramConfig.telegramBaseUrl || 'https://api.telegram.org').replace(/\/+$/, '');
+
+      if (!tgEnabled || !tgToken) {
+        await new Promise((r) => setTimeout(r, 10000));
+        continue;
+      }
+
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 20000);
+        const res = await fetch(`${tgBase}/bot${tgToken}/getUpdates?offset=${tgOffset}&timeout=10`, {
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        if (res.ok) {
+          const data: any = await res.json().catch(() => null);
+          if (data?.ok && Array.isArray(data.result)) {
+            for (const item of data.result) {
+              if (item.update_id) {
+                tgOffset = Math.max(tgOffset, item.update_id + 1);
+              }
+              await processIncomingBotUpdate(item, 'customer').catch((e) => console.warn('processIncomingBotUpdate tg err:', e));
+            }
+          }
+        } else {
+          await new Promise((r) => setTimeout(r, res.status === 409 ? 15000 : 5000));
+        }
+      } catch {
+        await new Promise((r) => setTimeout(r, 3000));
       }
     }
   })();
@@ -4838,11 +5651,13 @@ app.post('/api/account/change-credentials', (req: Request, res: Response) => {
 
   if (isChangingPassword) {
     const trimmedPass = String(newPassword).trim();
-    if (trimmedPass.length < 4) {
-      return res.status(400).json({ ok: false, error: 'رمز عبور جدید باید حداقل ۴ کاراکتر باشد.' });
+    if (trimmedPass.length < 6) {
+      return res.status(400).json({ ok: false, error: 'رمز عبور جدید باید حداقل ۶ کاراکتر باشد.' });
     }
-    // Store cryptographically hashed password
-    adminCredentials.password = hashPassword(trimmedPass);
+    // Store cryptographically hashed password with scrypt + random 16-byte salt
+    adminCredentials.password = hashPasswordWithScrypt(trimmedPass);
+    // Invalidate all previous active admin sessions to prevent session hijacking
+    activeAdminSessions.clear();
   }
 
   if (username && String(username).trim()) {
@@ -4889,9 +5704,21 @@ app.post('/api/account/change-credentials', (req: Request, res: Response) => {
     },
     siteContent,
     message: isChangingPassword
-      ? 'نام کاربری و رمز عبور جدید مدیریت با موفقیت ذخیره شد. از این پس فقط با مشخصات جدید می‌توانید وارد شوید.'
+      ? 'نام کاربری و رمز عبور جدید مدیریت با موفقیت با الگوریتم امنیتی رمزنگاری و ذخیره شد. از این پس فقط با مشخصات جدید می‌توانید وارد شوید.'
       : 'تنظیمات حساب مدیریت با موفقیت ذخیره شد.'
   });
+});
+
+// Admin Logout endpoint (terminates active session token)
+app.post('/api/admin/logout', (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization || '';
+  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+  const headerToken = (req.headers['x-admin-token'] as string || '').trim();
+  const token = bearerToken || headerToken;
+  if (token) {
+    activeAdminSessions.delete(token);
+  }
+  res.json({ success: true, message: 'خروج از حساب مدیریت با موفقیت انجام شد.' });
 });
 
 app.get('/api/admin/verify-session', (req: Request, res: Response) => {
@@ -5029,10 +5856,22 @@ const handleExportHostState = (req: Request, res: Response) => {
     postCategories,
     contactMessages,
     orders,
-    telegramConfig,
+    telegramConfig: {
+      ...telegramConfig,
+      botToken: telegramConfig.botToken ? '***PROTECTED***' : '',
+      baleBotToken: telegramConfig.baleBotToken ? '***PROTECTED***' : '',
+      adminBotToken: telegramConfig.adminBotToken ? '***PROTECTED***' : '',
+      customerBotToken: telegramConfig.customerBotToken ? '***PROTECTED***' : '',
+      telegramBotToken: telegramConfig.telegramBotToken ? '***PROTECTED***' : ''
+    },
     botActivityLogs,
     siteContent,
-    adminCredentials,
+    adminCredentials: {
+      username: adminCredentials.username,
+      email: adminCredentials.email,
+      name: adminCredentials.name
+      // Note: password is never exported to protect host security
+    },
     slugRedirects
   });
 };
@@ -5061,7 +5900,14 @@ const handleImportHostState = (req: Request, res: Response) => {
     orders = incoming.orders;
   }
   if (incoming.telegramConfig && typeof incoming.telegramConfig === 'object') {
-    telegramConfig = { ...telegramConfig, ...incoming.telegramConfig };
+    // Preserve active sensitive tokens if masked
+    const filteredConfig = { ...incoming.telegramConfig };
+    ['botToken', 'baleBotToken', 'adminBotToken', 'customerBotToken', 'telegramBotToken'].forEach(k => {
+      if (filteredConfig[k] === '***PROTECTED***' || !filteredConfig[k]) {
+        filteredConfig[k] = telegramConfig[k];
+      }
+    });
+    telegramConfig = { ...telegramConfig, ...filteredConfig };
   }
   if (Array.isArray(incoming.botActivityLogs) && incoming.botActivityLogs.length > 0) {
     botActivityLogs = incoming.botActivityLogs;
@@ -5069,9 +5915,7 @@ const handleImportHostState = (req: Request, res: Response) => {
   if (incoming.siteContent && typeof incoming.siteContent === 'object') {
     siteContent = { ...siteContent, ...incoming.siteContent };
   }
-  if (incoming.adminCredentials && typeof incoming.adminCredentials === 'object') {
-    adminCredentials = { ...adminCredentials, ...incoming.adminCredentials };
-  }
+  // adminCredentials can ONLY be changed via dedicated /api/account/change-credentials with current password verification
   if (Array.isArray(incoming.slugRedirects)) {
     slugRedirects = incoming.slugRedirects;
   }
@@ -5082,9 +5926,549 @@ const handleImportHostState = (req: Request, res: Response) => {
 app.get('/api/host/export-state', handleExportHostState);
 app.post('/api/host/import-state', handleImportHostState);
 
+// Dedicated Authenticated Host Database Backup Download
+app.get('/api/admin/backup/download', requireAdminAuth, (req: Request, res: Response) => {
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const filename = `onival-host-backup-${dateStr}.json`;
+
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+  const snapshot = {
+    exportedAt: new Date().toISOString(),
+    version: '1.2.0',
+    products,
+    productCategories,
+    posts,
+    postCategories,
+    contactMessages,
+    orders,
+    telegramConfig: {
+      ...telegramConfig,
+      botToken: telegramConfig.botToken || '',
+      baleBotToken: telegramConfig.baleBotToken || '',
+      adminBotToken: telegramConfig.adminBotToken || '',
+      customerBotToken: telegramConfig.customerBotToken || '',
+      telegramBotToken: telegramConfig.telegramBotToken || '',
+      webhookSecretToken: telegramConfig.webhookSecretToken || ''
+    },
+    botActivityLogs,
+    siteContent,
+    adminCredentials: {
+      username: adminCredentials.username,
+      email: adminCredentials.email,
+      name: adminCredentials.name
+    },
+    slugRedirects
+  };
+
+  res.send(JSON.stringify(snapshot, null, 2));
+});
+
 // Compatibility aliases
 app.get('/api/firebase/export-state', handleExportHostState);
 app.post('/api/firebase/import-state', handleImportHostState);
+
+// ================= E-COMMERCE & FINANCIAL DATA EXPORT ENDPOINTS =================
+
+// 1. Paid Orders Financial CSV Export
+app.get('/api/admin/export/paid-orders.csv', requireAdminAuth, (req: Request, res: Response) => {
+  const startDateStr = typeof req.query.startDate === 'string' ? req.query.startDate.trim() : '';
+  const endDateStr = typeof req.query.endDate === 'string' ? req.query.endDate.trim() : '';
+
+  const normalizePersianDate = (val: string): string => {
+    return String(val || '')
+      .replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d).toString())
+      .replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString())
+      .replace(/-/g, '/')
+      .trim();
+  };
+
+  const normStart = normalizePersianDate(startDateStr);
+  const normEnd = normalizePersianDate(endDateStr);
+
+  // Filter only paid orders
+  let paidOrders = orders.filter((o) => o.paymentStatus === 'Paid' || o.status === 'Completed');
+
+  // Filter by date if provided (creationTime format e.g. "1403/06/23" or "2025-02-27")
+  if (normStart) {
+    paidOrders = paidOrders.filter((o) => {
+      const orderDate = normalizePersianDate(String(o.creationTime || o.date || '').slice(0, 10));
+      return orderDate >= normStart;
+    });
+  }
+  if (normEnd) {
+    paidOrders = paidOrders.filter((o) => {
+      const orderDate = normalizePersianDate(String(o.creationTime || o.date || '').slice(0, 10));
+      return orderDate <= normEnd;
+    });
+  }
+
+  const escapeCsvField = (field: any): string => {
+    if (field === null || field === undefined) return '""';
+    let str = String(field).replace(/"/g, '""');
+    if (/^[=+\-@\t\r]/.test(str)) {
+      str = `'` + str;
+    }
+    return `"${str}"`;
+  };
+
+  const headers = [
+    'کد رهگیری',
+    'نام مشتری',
+    'شماره تماس',
+    'آدرس تحویل',
+    'مبلغ کل (تومان)',
+    'روش پرداخت',
+    'تاریخ ثبت',
+    'وضعیت سفارش',
+    'اقلام فاکتور'
+  ];
+
+  const rows = paidOrders.map((o) => {
+    const itemsDescription = Array.isArray(o.items)
+      ? o.items
+          .map((it: any) => `${it.productName || 'کالا'} ${it.size ? `(${it.size})` : ''} × ${it.quantity || 1} (${it.totalPrice || it.unitPrice || 0} تومان)`)
+          .join(' | ')
+      : '';
+
+    const payMethodFa =
+      o.paymentMethod === 'card_to_card'
+        ? 'کارت به کارت'
+        : o.paymentMethod === 'online_gateway'
+        ? 'درگاه پرداخت اینترنتی'
+        : 'کیف پول بله';
+
+    const statusFa =
+      o.status === 'Completed'
+        ? 'تکمیل شده'
+        : o.status === 'Shipped'
+        ? 'ارسال شده'
+        : o.status === 'Processing'
+        ? 'در حال آماده‌سازی'
+        : o.status === 'Cancelled'
+        ? 'لغو شده'
+        : 'در انتظار';
+
+    return [
+      escapeCsvField(o.trackingCode || `ONV-${o.id}`),
+      escapeCsvField(o.userFullName || 'مشتری بدون نام'),
+      escapeCsvField(o.phoneNumber || ''),
+      escapeCsvField(o.userAddress || ''),
+      escapeCsvField(Number(o.totalPrice) || 0),
+      escapeCsvField(payMethodFa),
+      escapeCsvField(o.creationTime || o.date || ''),
+      escapeCsvField(statusFa),
+      escapeCsvField(itemsDescription)
+    ].join(',');
+  });
+
+  const BOM = '\uFEFF';
+  const csvContent = BOM + [headers.map(escapeCsvField).join(','), ...rows].join('\r\n');
+  const filename = `paid-orders-${new Date().toISOString().slice(0, 10)}.csv`;
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(csvContent);
+});
+
+// 2. WooCommerce Standard Product CSV Export
+app.get('/api/admin/export/woocommerce-products.csv', requireAdminAuth, (req: Request, res: Response) => {
+  const origin = getRequestOrigin(req);
+  const activeProducts = products.filter((p) => !p.isDelete);
+
+  const escapeCsvField = (field: any): string => {
+    if (field === null || field === undefined) return '""';
+    let str = String(field).replace(/"/g, '""');
+    if (/^[=+\-@\t\r]/.test(str)) {
+      str = `'` + str;
+    }
+    return `"${str}"`;
+  };
+
+  const columns = [
+    'ID',
+    'Type',
+    'SKU',
+    'Name',
+    'Published',
+    'Is featured?',
+    'Visibility in catalog',
+    'Short description',
+    'Description',
+    'Date sale price starts',
+    'Date sale price ends',
+    'Tax status',
+    'Tax class',
+    'In stock?',
+    'Stock',
+    'Low stock amount',
+    'Backorders allowed?',
+    'Sold individually?',
+    'Weight (kg)',
+    'Length (cm)',
+    'Width (cm)',
+    'Height (cm)',
+    'Allow customer reviews?',
+    'Purchase note',
+    'Sale price',
+    'Regular price',
+    'Categories',
+    'Tags',
+    'Shipping class',
+    'Images',
+    'Download limit',
+    'Download expiry days',
+    'Parent',
+    'Grouped products',
+    'Upsells',
+    'Cross-sells',
+    'External URL',
+    'Button text',
+    'Position',
+    'Attribute 1 name',
+    'Attribute 1 value(s)',
+    'Attribute 1 visible',
+    'Attribute 1 global'
+  ];
+
+  const csvRows: string[] = [];
+
+  for (const p of activeProducts) {
+    const isVariable = Boolean(p.hasSize && Array.isArray(p.sizes) && p.sizes.length > 0);
+    const category = p.categoryTitle || 'عمومی';
+    const shortDesc = p.description || '';
+    const longDesc = p.content || p.description || '';
+    const discount = Number(p.discount ?? p.discountPercent ?? 0);
+    const sku = p.slug || `ONV-PRD-${p.id}`;
+
+    const mainImageUrl = p.imageName
+      ? (p.imageName.startsWith('http') ? p.imageName : `${origin}${p.imageName.startsWith('/') ? '' : '/'}${p.imageName}`)
+      : `${origin}/images/honey-default.jpg`;
+
+    const allImages = [
+      mainImageUrl,
+      ...(Array.isArray(p.galleryImages)
+        ? p.galleryImages.map((img) => (img.startsWith('http') ? img : `${origin}${img.startsWith('/') ? '' : '/'}${img}`))
+        : [])
+    ].join(', ');
+
+    if (!isVariable) {
+      // Simple product
+      const regularPrice = Number(p.price) || 0;
+      const salePrice = discount > 0 ? Math.round(regularPrice * (100 - discount) / 100) : '';
+      const inStock = (p.isOutOfStock || Number(p.stock ?? 1) <= 0) ? 0 : 1;
+      const stockQty = Number(p.stock ?? 10);
+
+      const row = [
+        escapeCsvField(p.id),
+        escapeCsvField('simple'),
+        escapeCsvField(sku),
+        escapeCsvField(p.title),
+        escapeCsvField(1),
+        escapeCsvField(0),
+        escapeCsvField('visible'),
+        escapeCsvField(shortDesc),
+        escapeCsvField(longDesc),
+        escapeCsvField(''),
+        escapeCsvField(''),
+        escapeCsvField('taxable'),
+        escapeCsvField(''),
+        escapeCsvField(inStock),
+        escapeCsvField(stockQty),
+        escapeCsvField(''),
+        escapeCsvField(0),
+        escapeCsvField(0),
+        escapeCsvField(''),
+        escapeCsvField(''),
+        escapeCsvField(''),
+        escapeCsvField(''),
+        escapeCsvField(1),
+        escapeCsvField(''),
+        escapeCsvField(salePrice),
+        escapeCsvField(regularPrice),
+        escapeCsvField(category),
+        escapeCsvField(''),
+        escapeCsvField(''),
+        escapeCsvField(allImages),
+        escapeCsvField(''),
+        escapeCsvField(''),
+        escapeCsvField(''),
+        escapeCsvField(''),
+        escapeCsvField(''),
+        escapeCsvField(''),
+        escapeCsvField(''),
+        escapeCsvField(''),
+        escapeCsvField(0),
+        escapeCsvField(''),
+        escapeCsvField(''),
+        escapeCsvField(''),
+        escapeCsvField('')
+      ];
+      csvRows.push(row.join(','));
+    } else {
+      // Variable product parent
+      const sizeNames = p.sizes.map((s: any) => s.name).join(', ');
+      const basePrice = p.sizes[0]?.price || Number(p.price) || 0;
+      const salePrice = discount > 0 ? Math.round(basePrice * (100 - discount) / 100) : '';
+      const inStock = (p.isOutOfStock || Number(p.stock ?? 1) <= 0) ? 0 : 1;
+      const stockQty = Number(p.stock ?? 10);
+
+      const parentRow = [
+        escapeCsvField(p.id),
+        escapeCsvField('variable'),
+        escapeCsvField(sku),
+        escapeCsvField(p.title),
+        escapeCsvField(1),
+        escapeCsvField(0),
+        escapeCsvField('visible'),
+        escapeCsvField(shortDesc),
+        escapeCsvField(longDesc),
+        escapeCsvField(''),
+        escapeCsvField(''),
+        escapeCsvField('taxable'),
+        escapeCsvField(''),
+        escapeCsvField(inStock),
+        escapeCsvField(stockQty),
+        escapeCsvField(''),
+        escapeCsvField(0),
+        escapeCsvField(0),
+        escapeCsvField(''),
+        escapeCsvField(''),
+        escapeCsvField(''),
+        escapeCsvField(''),
+        escapeCsvField(1),
+        escapeCsvField(''),
+        escapeCsvField(salePrice),
+        escapeCsvField(basePrice),
+        escapeCsvField(category),
+        escapeCsvField(''),
+        escapeCsvField(''),
+        escapeCsvField(allImages),
+        escapeCsvField(''),
+        escapeCsvField(''),
+        escapeCsvField(''),
+        escapeCsvField(''),
+        escapeCsvField(''),
+        escapeCsvField(''),
+        escapeCsvField(''),
+        escapeCsvField(''),
+        escapeCsvField(0),
+        escapeCsvField('بسته‌بندی'),
+        escapeCsvField(sizeNames),
+        escapeCsvField(1),
+        escapeCsvField(1)
+      ];
+      csvRows.push(parentRow.join(','));
+
+      // Child variation rows
+      p.sizes.forEach((s: any, idx: number) => {
+        const varRegularPrice = Number(s.price) || 0;
+        const varSalePrice = discount > 0 ? Math.round(varRegularPrice * (100 - discount) / 100) : '';
+        const varInStock = (p.isOutOfStock || (s.stock !== undefined && Number(s.stock) <= 0)) ? 0 : 1;
+        const varStockQty = s.stock !== undefined ? Number(s.stock) : Number(p.stock ?? 10);
+        const varSku = `${sku}-VAR-${idx + 1}`;
+
+        const varRow = [
+          escapeCsvField(`${p.id}${idx + 1}`),
+          escapeCsvField('variation'),
+          escapeCsvField(varSku),
+          escapeCsvField(`${p.title} - ${s.name}`),
+          escapeCsvField(1),
+          escapeCsvField(0),
+          escapeCsvField('visible'),
+          escapeCsvField(''),
+          escapeCsvField(''),
+          escapeCsvField(''),
+          escapeCsvField(''),
+          escapeCsvField('taxable'),
+          escapeCsvField(''),
+          escapeCsvField(varInStock),
+          escapeCsvField(varStockQty),
+          escapeCsvField(''),
+          escapeCsvField(0),
+          escapeCsvField(0),
+          escapeCsvField(''),
+          escapeCsvField(''),
+          escapeCsvField(''),
+          escapeCsvField(''),
+          escapeCsvField(1),
+          escapeCsvField(''),
+          escapeCsvField(varSalePrice),
+          escapeCsvField(varRegularPrice),
+          escapeCsvField(''),
+          escapeCsvField(''),
+          escapeCsvField(''),
+          escapeCsvField(''),
+          escapeCsvField(''),
+          escapeCsvField(''),
+          escapeCsvField(`id:${p.id}`),
+          escapeCsvField(''),
+          escapeCsvField(''),
+          escapeCsvField(''),
+          escapeCsvField(''),
+          escapeCsvField(''),
+          escapeCsvField(idx + 1),
+          escapeCsvField('بسته‌بندی'),
+          escapeCsvField(s.name),
+          escapeCsvField(1),
+          escapeCsvField(1)
+        ];
+        csvRows.push(varRow.join(','));
+      });
+    }
+  }
+
+  const BOM = '\uFEFF';
+  const csvContent = BOM + [columns.map(escapeCsvField).join(','), ...csvRows].join('\r\n');
+  const filename = `woocommerce-products-${new Date().toISOString().slice(0, 10)}.csv`;
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(csvContent);
+});
+
+// 3. WordPress WXR 1.2 XML Export
+app.get('/api/admin/export/wordpress-wxr.xml', requireAdminAuth, (req: Request, res: Response) => {
+  const origin = getRequestOrigin(req);
+
+  function escapeXml(str: any): string {
+    return String(str || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
+  }
+
+  function cdata(str: any): string {
+    const clean = String(str || '').replace(/]]>/g, ']]]]><![CDATA[>');
+    return `<![CDATA[${clean}]]>`;
+  }
+
+  const siteTitle = escapeXml(siteContent?.brandName || 'فروشگاه اونیوال | ONIVAL');
+  const siteDescription = escapeXml(siteContent?.metaDescription || 'تولید و عرضه مستقیم عسل ارگانیک، ژل رویال و محصولات زنبورعسل');
+  const exportDate = new Date().toUTCString();
+
+  let xml = `<?xml version="1.0" encoding="UTF-8" ?>
+<rss version="2.0"
+  xmlns:excerpt="http://wordpress.org/export/1.2/excerpt/"
+  xmlns:content="http://purl.org/rss/1.0/modules/content/"
+  xmlns:wfw="http://wellformedweb.org/CommentAPI/"
+  xmlns:dc="http://purl.org/dc/elements/1.1/"
+  xmlns:wp="http://wordpress.org/export/1.2/"
+>
+<channel>
+  <title>${siteTitle}</title>
+  <link>${escapeXml(origin)}</link>
+  <description>${siteDescription}</description>
+  <pubDate>${exportDate}</pubDate>
+  <language>fa-IR</language>
+  <wp:wxr_version>1.2</wp:wxr_version>
+  <wp:base_site_url>${escapeXml(origin)}</wp:base_site_url>
+  <wp:base_blog_url>${escapeXml(origin)}</wp:base_blog_url>
+`;
+
+  // Categories
+  for (const cat of productCategories) {
+    xml += `
+  <wp:category>
+    <wp:term_id>${cat.id}</wp:term_id>
+    <wp:category_nicename>${escapeXml(cat.slug || `cat-${cat.id}`)}</wp:category_nicename>
+    <wp:cat_name>${cdata(cat.title)}</wp:cat_name>
+  </wp:category>`;
+  }
+
+  // Products
+  const activeProducts = products.filter((p) => !p.isDelete);
+  for (const p of activeProducts) {
+    const pubDate = new Date().toUTCString();
+    const discount = Number(p.discount ?? p.discountPercent ?? 0);
+    const basePrice = p.hasSize && p.sizes?.length ? p.sizes[0].price : (Number(p.price) || 0);
+    const salePrice = discount > 0 ? Math.round(basePrice * (100 - discount) / 100) : '';
+    const inStock = (p.isOutOfStock || Number(p.stock ?? 1) <= 0) ? 'outofstock' : 'instock';
+    const stockQty = Number(p.stock ?? 10);
+    const sku = p.slug || `ONV-PRD-${p.id}`;
+
+    xml += `
+  <item>
+    <title>${cdata(p.title)}</title>
+    <link>${escapeXml(origin)}/products/${encodeURIComponent(p.slug || `product-${p.id}`)}</link>
+    <pubDate>${pubDate}</pubDate>
+    <dc:creator>${cdata('admin')}</dc:creator>
+    <guid isPermaLink="false">${escapeXml(origin)}/?post_type=product&#038;p=${p.id}</guid>
+    <description>${cdata(p.description || '')}</description>
+    <content:encoded>${cdata(p.content || p.description || '')}</content:encoded>
+    <excerpt:encoded>${cdata(p.description || '')}</excerpt:encoded>
+    <wp:post_id>${p.id}</wp:post_id>
+    <wp:post_date>${new Date().toISOString().slice(0, 19).replace('T', ' ')}</wp:post_date>
+    <wp:post_type>product</wp:post_type>
+    <wp:status>publish</wp:status>
+    <wp:post_name>${escapeXml(p.slug || `product-${p.id}`)}</wp:post_name>
+    <category domain="product_cat" nicename="${escapeXml(p.slug || 'honey')}">${cdata(p.categoryTitle || 'عمومی')}</category>
+    <wp:postmeta>
+      <wp:meta_key>_sku</wp:meta_key>
+      <wp:meta_value>${cdata(sku)}</wp:meta_value>
+    </wp:postmeta>
+    <wp:postmeta>
+      <wp:meta_key>_price</wp:meta_key>
+      <wp:meta_value>${cdata(salePrice || basePrice)}</wp:meta_value>
+    </wp:postmeta>
+    <wp:postmeta>
+      <wp:meta_key>_regular_price</wp:meta_key>
+      <wp:meta_value>${cdata(basePrice)}</wp:meta_value>
+    </wp:postmeta>
+    <wp:postmeta>
+      <wp:meta_key>_sale_price</wp:meta_key>
+      <wp:meta_value>${cdata(salePrice)}</wp:meta_value>
+    </wp:postmeta>
+    <wp:postmeta>
+      <wp:meta_key>_manage_stock</wp:meta_key>
+      <wp:meta_value>${cdata('yes')}</wp:meta_value>
+    </wp:postmeta>
+    <wp:postmeta>
+      <wp:meta_key>_stock</wp:meta_key>
+      <wp:meta_value>${cdata(stockQty)}</wp:meta_value>
+    </wp:postmeta>
+    <wp:postmeta>
+      <wp:meta_key>_stock_status</wp:meta_key>
+      <wp:meta_value>${cdata(inStock)}</wp:meta_value>
+    </wp:postmeta>
+  </item>`;
+  }
+
+  // Blog Posts
+  const activePosts = posts.filter((post) => !post.isDelete);
+  for (const post of activePosts) {
+    const pubDate = new Date().toUTCString();
+    xml += `
+  <item>
+    <title>${cdata(post.title)}</title>
+    <link>${escapeXml(origin)}/blog/${encodeURIComponent(post.slug || `post-${post.id}`)}</link>
+    <pubDate>${pubDate}</pubDate>
+    <dc:creator>${cdata('admin')}</dc:creator>
+    <guid isPermaLink="false">${escapeXml(origin)}/?p=${post.id}</guid>
+    <description>${cdata(post.summary || '')}</description>
+    <content:encoded>${cdata(post.content || post.summary || '')}</content:encoded>
+    <excerpt:encoded>${cdata(post.summary || '')}</excerpt:encoded>
+    <wp:post_id>${post.id + 10000}</wp:post_id>
+    <wp:post_date>${new Date().toISOString().slice(0, 19).replace('T', ' ')}</wp:post_date>
+    <wp:post_type>post</wp:post_type>
+    <wp:status>publish</wp:status>
+    <wp:post_name>${escapeXml(post.slug || `post-${post.id}`)}</wp:post_name>
+    <category domain="category" nicename="blog">${cdata(post.category || 'وبلاگ')}</category>
+  </item>`;
+  }
+
+  xml += `
+</channel>
+</rss>`;
+
+  const filename = `wordpress-wxr-${new Date().toISOString().slice(0, 10)}.xml`;
+  res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(xml);
+});
 
 // ================= TECHNICAL SEO: ROBOTS.TXT & SITEMAP.XML =================
 function getRequestOrigin(req: Request): string {
@@ -5221,8 +6605,10 @@ function injectSsrSeoIntoHtml(rawHtml: string, seo: ReturnType<typeof resolveSeo
     <meta name="product_old_price" content="${String(Number(seo.matchedProduct.price || 0))}" />
     <meta name="availability" content="${(seo.matchedProduct.isOutOfStock || Number(seo.matchedProduct.stock ?? 1) <= 0) ? 'outofstock' : 'instock'}" />
     ` : ''}
-    <script id="onival-jsonld" type="application/ld+json">${JSON.stringify(seo.jsonLd)}</script>
+    <script id="onival-jsonld" type="application/ld+json">${JSON.stringify(seo.jsonLd).replace(/</g, '\\u003c').replace(/>/g, '\\u003e')}</script>
   `;
+
+  const safeSemanticHtml = (seo.semanticHtml || '').replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
 
   let html = rawHtml.replace(
     /<!--SEO_HEAD_START-->[\s\S]*?<!--SEO_HEAD_END-->/,
@@ -5231,7 +6617,7 @@ function injectSsrSeoIntoHtml(rawHtml: string, seo: ReturnType<typeof resolveSeo
 
   html = html.replace(
     /<!--SEO_BODY_START-->[\s\S]*?<!--SEO_BODY_END-->/,
-    `<!--SEO_BODY_START-->${seo.semanticHtml || ''}<!--SEO_BODY_END-->`
+    `<!--SEO_BODY_START-->${safeSemanticHtml}<!--SEO_BODY_END-->`
   );
 
   return html;
@@ -5340,6 +6726,7 @@ async function startServer() {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Onival Web & Admin Server running at http://0.0.0.0:${PORT}`);
     startBaleBotPolling().catch(() => {});
+    startTelegramBotPolling().catch(() => {});
   });
 }
 

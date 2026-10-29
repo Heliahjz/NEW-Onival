@@ -20,9 +20,14 @@ import {
   Sliders,
   Download,
   FileSpreadsheet,
-  Users
+  Users,
+  TrendingUp,
+  Calendar,
+  Package,
+  BarChart3
 } from 'lucide-react';
 import { Order } from '../types';
+import { apiFetch } from '../services/dataService';
 
 interface OrdersViewProps {
   orders: Order[];
@@ -37,8 +42,12 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
   onVerifyReceipt,
   onOpenPaymentSettings
 }) => {
+  const [activeTab, setActiveTab] = useState<'all_orders' | 'paid_report'>('all_orders');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [reportStartDate, setReportStartDate] = useState('');
+  const [reportEndDate, setReportEndDate] = useState('');
+  const [isDownloadingCsv, setIsDownloadingCsv] = useState(false);
   const [previewOrderReceipt, setPreviewOrderReceipt] = useState<Order | null>(null);
   const [verifyingId, setVerifyingId] = useState<number | null>(null);
 
@@ -46,8 +55,70 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
     return new Intl.NumberFormat('fa-IR').format(val) + ' تومان';
   };
 
+  const normalizeDate = (val: string): string => {
+    return String(val || '')
+      .replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d).toString())
+      .replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString())
+      .replace(/-/g, '/')
+      .trim();
+  };
+
+  const paidOrdersList = orders.filter((o) => {
+    const isPaid = o.paymentStatus === 'Paid' || o.status === 'Completed';
+    if (!isPaid) return false;
+    const normOrderDate = normalizeDate(String(o.creationTime || (o as any).date || '').slice(0, 10));
+    const normStart = normalizeDate(reportStartDate);
+    const normEnd = normalizeDate(reportEndDate);
+    if (normStart && normOrderDate < normStart) return false;
+    if (normEnd && normOrderDate > normEnd) return false;
+    return true;
+  });
+
+  const totalPaidRevenue = paidOrdersList.reduce((acc, o) => acc + (Number(o.totalPrice) || 0), 0);
+  const totalPaidCount = paidOrdersList.length;
+  const totalPaidItemsCount = paidOrdersList.reduce((acc, o) => {
+    return acc + (o.items || []).reduce((itemAcc, it) => itemAcc + (Number(it.quantity) || 1), 0);
+  }, 0);
+
+  const handleDownloadPaidOrdersCsv = async () => {
+    setIsDownloadingCsv(true);
+    try {
+      let url = '/api/admin/export/paid-orders.csv';
+      const params = new URLSearchParams();
+      if (reportStartDate) params.set('startDate', reportStartDate);
+      if (reportEndDate) params.set('endDate', reportEndDate);
+      if (params.toString()) {
+        url += `?${params.toString()}`;
+      }
+
+      const res = await apiFetch(url);
+      if (res.ok) {
+        const blob = await res.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = `paid-orders-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(blobUrl);
+        return;
+      }
+    } catch (err) {
+      console.error('Error downloading paid orders CSV from server:', err);
+    } finally {
+      setIsDownloadingCsv(false);
+    }
+
+    handleExportOrdersExcel(true);
+  };
+
   const pendingReceiptsCount = orders.filter(
     o => o.paymentStatus === 'PendingVerification' || (o.receiptImageUrl && o.paymentStatus !== 'Paid')
+  ).length;
+
+  const consultationsCount = orders.filter(
+    o => Boolean(o.isConsultation || o.trackingCode.startsWith('ONV-CNS') || o.consultationDetails)
   ).length;
 
   const filteredOrders = orders.filter((o) => {
@@ -59,6 +130,9 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
     if (statusFilter === 'all') return matchSearch;
     if (statusFilter === 'PendingReceipt') {
       return matchSearch && (o.paymentStatus === 'PendingVerification' || Boolean(o.receiptImageUrl && o.paymentStatus !== 'Paid'));
+    }
+    if (statusFilter === 'Consultations') {
+      return matchSearch && Boolean(o.isConsultation || o.trackingCode.startsWith('ONV-CNS') || o.consultationDetails);
     }
     return matchSearch && o.status === statusFilter;
   });
@@ -98,7 +172,10 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
 
   const escapeCsv = (val: any) => {
     if (val === null || val === undefined) return '""';
-    const str = String(val).replace(/"/g, '""');
+    let str = String(val).replace(/"/g, '""');
+    if (/^[=+\-@\t\r]/.test(str)) {
+      str = `'` + str;
+    }
     return `"${str}"`;
   };
 
@@ -329,18 +406,217 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
-        <div>
-          <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-            <ShoppingCart className="w-5 h-5 text-blue-600" />
-            <span>مدیریت سفارشات و تایید فیش‌های واریزی</span>
-          </h2>
-          <p className="text-xs text-slate-500 mt-1">
-            بررسی تصاویر فیش‌های واریزی کارت به کارت به همراه شماره فاکتور، تایید پرداخت و مدیریت ارسال مرسولات
-          </p>
-        </div>
+      {/* Primary Sub-Navigation Tabs */}
+      <div className="flex flex-wrap items-center gap-2 p-1.5 bg-slate-100 rounded-2xl border border-slate-200">
+        <button
+          type="button"
+          onClick={() => setActiveTab('all_orders')}
+          className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black transition cursor-pointer ${
+            activeTab === 'all_orders'
+              ? 'bg-white text-blue-600 shadow-xs border border-slate-200/80'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+          }`}
+        >
+          <ShoppingCart className="w-4 h-4" />
+          <span>مدیریت همه سفارش‌ها و فیش‌ها</span>
+          <span className={`px-2 py-0.5 rounded-full text-[11px] font-mono ${
+            activeTab === 'all_orders' ? 'bg-blue-50 text-blue-700' : 'bg-slate-200 text-slate-700'
+          }`}>
+            {orders.length}
+          </span>
+        </button>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setActiveTab('paid_report')}
+          className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black transition cursor-pointer ${
+            activeTab === 'paid_report'
+              ? 'bg-emerald-600 text-white shadow-xs'
+              : 'text-slate-600 hover:text-emerald-700 hover:bg-emerald-50'
+          }`}
+        >
+          <BarChart3 className="w-4 h-4" />
+          <span>گزارش سفارش‌های تایید و پرداخت‌شده</span>
+          <span className={`px-2 py-0.5 rounded-full text-[11px] font-mono ${
+            activeTab === 'paid_report' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-800'
+          }`}>
+            {orders.filter(o => o.paymentStatus === 'Paid' || o.status === 'Completed').length}
+          </span>
+        </button>
+      </div>
+
+      {activeTab === 'paid_report' ? (
+        <div className="space-y-6">
+          {/* 3 Summary KPI Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="bg-gradient-to-br from-emerald-500 to-teal-600 p-5 rounded-2xl text-white shadow-md shadow-emerald-500/20 relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-emerald-100">کل درآمد وصول شده</span>
+                <span className="p-2 bg-white/15 rounded-xl">
+                  <TrendingUp className="w-5 h-5 text-white" />
+                </span>
+              </div>
+              <div className="mt-3 text-2xl font-black">
+                {formatPrice(totalPaidRevenue)}
+              </div>
+              <div className="mt-1 text-[11px] text-emerald-100 font-medium">
+                مجموع مبالغ واریز شده و فیش‌های تاییدشده
+              </div>
+            </div>
+
+            <div className="bg-gradient-to-br from-blue-600 to-indigo-600 p-5 rounded-2xl text-white shadow-md shadow-blue-500/20 relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-blue-100">تعداد سفارش‌های پرداخت شده</span>
+                <span className="p-2 bg-white/15 rounded-xl">
+                  <CheckCircle2 className="w-5 h-5 text-white" />
+                </span>
+              </div>
+              <div className="mt-3 text-2xl font-black">
+                {new Intl.NumberFormat('fa-IR').format(totalPaidCount)} فاکتور
+              </div>
+              <div className="mt-1 text-[11px] text-blue-100 font-medium">
+                تراکنش‌های موفق مالی و فاکتورهای نهایی
+              </div>
+            </div>
+
+            <div className="bg-gradient-to-br from-amber-500 to-orange-600 p-5 rounded-2xl text-white shadow-md shadow-amber-500/20 relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-amber-100">کل اقلام فروخته شده</span>
+                <span className="p-2 bg-white/15 rounded-xl">
+                  <Package className="w-5 h-5 text-white" />
+                </span>
+              </div>
+              <div className="mt-3 text-2xl font-black">
+                {new Intl.NumberFormat('fa-IR').format(totalPaidItemsCount)} عدد کالا
+              </div>
+              <div className="mt-1 text-[11px] text-amber-100 font-medium">
+                مجموع واحدهای کالایی کسر شده از انبار
+              </div>
+            </div>
+          </div>
+
+          {/* Date Filter & Direct CSV Export Toolbar */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
+                <Calendar className="w-4 h-4 text-emerald-600" />
+                <span>فیلتر بازه زمانی فاکتورها:</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="از تاریخ (مثلاً 1403/01/01)"
+                  value={reportStartDate}
+                  onChange={(e) => setReportStartDate(e.target.value)}
+                  className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20"
+                />
+                <span className="text-slate-400 text-xs">تا</span>
+                <input
+                  type="text"
+                  placeholder="تا تاریخ (مثلاً 1403/12/29)"
+                  value={reportEndDate}
+                  onChange={(e) => setReportEndDate(e.target.value)}
+                  className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20"
+                />
+                {(reportStartDate || reportEndDate) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReportStartDate('');
+                      setReportEndDate('');
+                    }}
+                    className="px-2.5 py-1.5 text-xs text-rose-600 hover:bg-rose-50 rounded-xl border border-rose-200 cursor-pointer font-bold"
+                  >
+                    حذف فیلتر
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              disabled={isDownloadingCsv || paidOrdersList.length === 0}
+              onClick={handleDownloadPaidOrdersCsv}
+              className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition cursor-pointer"
+            >
+              <Download className={`w-4 h-4 ${isDownloadingCsv ? 'animate-bounce' : ''}`} />
+              <span>
+                {isDownloadingCsv
+                  ? 'در حال دریافت خروجی CSV...'
+                  : `دانلود گزارش مالی فاکتورهای پرداخت‌شده (CSV اکسل - ${paidOrdersList.length} مورد)`}
+              </span>
+            </button>
+          </div>
+
+          {/* Paid Orders Table */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-800">
+                لیست تراکنش‌ها و فاکتورهای پرداخت‌شده ({paidOrdersList.length} فاکتور)
+              </h3>
+            </div>
+            {paidOrdersList.length === 0 ? (
+              <div className="p-12 text-center text-slate-400 text-sm">
+                هیچ سفارش پرداخت‌شده‌ای در این بازه زمانی یافت نشد.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-right text-xs">
+                  <thead className="bg-slate-50 text-slate-600 border-b border-slate-100 font-bold">
+                    <tr>
+                      <th className="py-3 px-4">کد رهگیری</th>
+                      <th className="py-3 px-4">نام مشتری</th>
+                      <th className="py-3 px-4">شماره تماس</th>
+                      <th className="py-3 px-4">مبلغ پرداختی</th>
+                      <th className="py-3 px-4">روش پرداخت</th>
+                      <th className="py-3 px-4">تاریخ ثبت</th>
+                      <th className="py-3 px-4">اقلام فاکتور</th>
+                      <th className="py-3 px-4">نشانی</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-700">
+                    {paidOrdersList.map((o) => (
+                      <tr key={o.id} className="hover:bg-slate-50/70 transition">
+                        <td className="py-3 px-4 font-mono font-bold text-blue-700">
+                          {o.trackingCode || `ONV-${o.id}`}
+                        </td>
+                        <td className="py-3 px-4 font-bold text-slate-900">{o.userFullName}</td>
+                        <td className="py-3 px-4 font-mono text-slate-600">{o.phoneNumber}</td>
+                        <td className="py-3 px-4 font-black text-emerald-700">
+                          {formatPrice(o.totalPrice)}
+                        </td>
+                        <td className="py-3 px-4">{getMethodLabel(o.paymentMethod)}</td>
+                        <td className="py-3 px-4 font-mono text-slate-500">
+                          {o.creationTime || (o as any).date || '-'}
+                        </td>
+                        <td className="py-3 px-4 max-w-xs truncate text-slate-600" title={(o.items || []).map(it => `${it.productName} (${it.size || ''}) × ${it.quantity}`).join(' | ')}>
+                          {(o.items || []).map(it => `${it.productName} × ${it.quantity}`).join('، ')}
+                        </td>
+                        <td className="py-3 px-4 max-w-xs truncate text-slate-500" title={o.userAddress}>
+                          {o.userAddress}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+            <div>
+              <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                <ShoppingCart className="w-5 h-5 text-blue-600" />
+                <span>مدیریت سفارشات و تایید فیش‌های واریزی</span>
+              </h2>
+              <p className="text-xs text-slate-500 mt-1">
+                بررسی تصاویر فیش‌های واریزی کارت به کارت به همراه شماره فاکتور، تایید پرداخت و مدیریت ارسال مرسولات
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
           {onOpenPaymentSettings && (
             <button
               type="button"
@@ -376,6 +652,23 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
             {pendingReceiptsCount > 0 && (
               <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[10px] font-black">
                 {pendingReceiptsCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setStatusFilter('Consultations')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+              statusFilter === 'Consultations'
+                ? 'bg-purple-600 text-white shadow-xs'
+                : 'bg-purple-50 text-purple-900 border border-purple-200 hover:bg-purple-100'
+            }`}
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            <span>نوبت‌های مشاوره</span>
+            {consultationsCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-purple-700 text-white text-[10px] font-black">
+                {consultationsCount}
               </span>
             )}
           </button>
@@ -504,6 +797,12 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                     <span>شماره فاکتور: {order.trackingCode}</span>
                   </span>
                   {getMethodLabel(order.paymentMethod)}
+                  {(order.isConsultation || order.trackingCode.startsWith('ONV-CNS') || order.consultationDetails) && (
+                    <span className="text-xs font-black text-purple-800 bg-purple-50 px-2.5 py-0.5 rounded-lg border border-purple-200 flex items-center gap-1">
+                      <Calendar className="w-3 h-3 text-purple-600" />
+                      <span>نوبت مشاوره</span>
+                    </span>
+                  )}
                   <span className="font-bold text-slate-900 text-sm">{order.userFullName}</span>
                   <span className="text-xs text-slate-500 flex items-center gap-1">
                     <Phone className="w-3 h-3 text-slate-400" />
@@ -602,6 +901,43 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                 </div>
               )}
 
+              {/* Consultation Details Box */}
+              {(order.isConsultation || order.consultationDetails) && (
+                <div className="rounded-2xl bg-purple-50/80 border border-purple-200 p-4 space-y-2 text-xs">
+                  <div className="flex items-center gap-2 font-black text-purple-900">
+                    <Calendar className="w-4 h-4 text-purple-600" />
+                    <span>جزئیات نوبت رزرو مشاوره تخصصی</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 text-slate-700">
+                    <div className="bg-white/80 rounded-lg p-2 border border-purple-100">
+                      <span className="text-slate-400 block text-[10px]">تاریخ درخواستی:</span>
+                      <span className="font-bold text-purple-950 font-mono">
+                        {order.consultationDetails?.preferredDate || 'تعیین در هماهنگی'}
+                      </span>
+                    </div>
+                    <div className="bg-white/80 rounded-lg p-2 border border-purple-100">
+                      <span className="text-slate-400 block text-[10px]">بازه ساعتی:</span>
+                      <span className="font-bold text-purple-950">
+                        {order.consultationDetails?.preferredTimeSlot || 'تعیین در هماهنگی'}
+                      </span>
+                    </div>
+                    <div className="bg-white/80 rounded-lg p-2 border border-purple-100">
+                      <span className="text-slate-400 block text-[10px]">بستر ارتباطی:</span>
+                      <span className="font-bold text-purple-950">
+                        {order.consultationDetails?.socialPlatform || 'تماس تلفنی / پیام‌رسان'}
+                      </span>
+                    </div>
+                  </div>
+                  {(order.consultationDetails?.topicTitle || order.consultationDetails?.question) && (
+                    <div className="text-slate-600 pt-1 border-t border-purple-100">
+                      <span className="font-bold text-slate-700">موضوع / توضیحات: </span>
+                      {order.consultationDetails.topicTitle ? `[${order.consultationDetails.topicTitle}] ` : ''}
+                      {order.consultationDetails.question}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Items List */}
               <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 space-y-2">
                 <div className="text-xs font-bold text-slate-600 mb-1">اقلام خریداری شده در فاکتور {order.trackingCode}:</div>
@@ -669,6 +1005,8 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
           ))
         )}
       </div>
+      </>
+      )}
 
       {/* Full-Screen Receipt Inspection Modal for Admin */}
       {previewOrderReceipt && (

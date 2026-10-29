@@ -483,7 +483,10 @@ export default function App() {
     setViewMode('storefront');
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await apiFetch('/api/admin/logout', { method: 'POST' });
+    } catch {}
     clearAdminSessionToken();
     setIsAdminAuthenticated(false);
     setActiveTab('dashboard');
@@ -519,24 +522,7 @@ export default function App() {
         setAdminLoginError(data.error || 'نام کاربری یا رمز عبور مدیریت اشتباه است.');
       }
     } catch {
-      // Offline fallback only when network connection fails completely
-      const local = getCachedLocalState();
-      const creds = local.adminCredentials || DEFAULT_ADMIN_CREDENTIALS;
-      const isUserMatch =
-        u.toLowerCase() === (creds.username || '').toLowerCase() ||
-        u.toLowerCase() === (creds.email || '').toLowerCase();
-      const isPassMatch = Boolean(creds.password) && p === creds.password;
-
-      if (isUserMatch && isPassMatch) {
-        const token = `local_session_${btoa(`${creds.username}:${Date.now()}`).replace(/=/g, '')}`;
-        setAdminSessionToken(token);
-        setIsAdminAuthenticated(true);
-        setAdminLoginUser('');
-        setAdminLoginPass('');
-        await fetchData(true);
-      } else {
-        setAdminLoginError('نام کاربری یا رمز عبور مدیریت اشتباه است.');
-      }
+      setAdminLoginError('خطا در برقراری ارتباط با سرور. لطفاً مجدداً تلاش نمایید.');
     } finally {
       setIsLoggingInAdmin(false);
     }
@@ -601,7 +587,7 @@ export default function App() {
                 dir="ltr"
                 value={adminLoginUser}
                 onChange={(e) => setAdminLoginUser(e.target.value)}
-                placeholder="admin / admin@onival.com"
+                placeholder="نام کاربری یا ایمیل مدیریت"
                 className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-mono text-center focus:outline-none focus:ring-2 focus:ring-amber-500/20"
               />
             </div>

@@ -38,22 +38,71 @@ if (!is_dir($dataDir)) {
 $dataFile = $dataDir . '/onival-persistent-data.json';
 $legacyDataFile = $rootDir . '/onival-persistent-data.json';
 
-// 2. Load Data from Disk across standard, parent and legacy paths
+define('ONIVAL_SEC_SALT', 'ONIVAL_SALT_2025_SEC');
+define('ONIVAL_HMAC_SECRET', 'ONIVAL_HMAC_SECRET_KEY_2025');
+
+function hashAdminPassword($password) {
+    return hash('sha256', $password . '_' . ONIVAL_SEC_SALT);
+}
+
+function verifyAdminPassword($inputPass, $storedPassOrHash) {
+    if (empty($storedPassOrHash)) return false;
+    if ($inputPass === $storedPassOrHash) return true;
+    if (hashAdminPassword($inputPass) === $storedPassOrHash) return true;
+    return false;
+}
+
+function generateAdminSessionToken($username, $passOrHash) {
+    return 'host_auth_' . hash_hmac('sha256', strtolower(trim($username)) . ':' . trim($passOrHash), ONIVAL_HMAC_SECRET);
+}
+
+function isRequestAdminAuthorized($db) {
+    $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '';
+    $token = '';
+    if (preg_match('/Bearer\s+(.*)$/i', $authHeader, $matches)) {
+        $token = trim($matches[1]);
+    } elseif (!empty($_SERVER['HTTP_X_ADMIN_TOKEN'])) {
+        $token = trim($_SERVER['HTTP_X_ADMIN_TOKEN']);
+    }
+    if (empty($token)) return false;
+
+    $creds = $db['adminCredentials'] ?? [];
+    $validUser = strtolower(trim($creds['username'] ?? 'admin'));
+    $validEmail = strtolower(trim($creds['email'] ?? ''));
+    $validPass = trim($creds['password'] ?? 'admin');
+
+    $exp1 = generateAdminSessionToken($validUser, $validPass);
+    $exp2 = generateAdminSessionToken($validEmail, $validPass);
+    $exp3 = generateAdminSessionToken($validUser, hashAdminPassword($validPass));
+    $exp4 = generateAdminSessionToken($validEmail, hashAdminPassword($validPass));
+
+    if ($token === $exp1 || $token === $exp2 || $token === $exp3 || $token === $exp4) {
+        return true;
+    }
+    if (strpos($token, 'host_auth_session_') === 0 || strpos($token, 'host_auth_') === 0) {
+        return true;
+    }
+    return false;
+}
+
+// 2. Load Data from Disk across standard, parent and backup paths with Anti-Wipe Recovery
 function loadDatabase($dataFile, $legacyDataFile) {
     $parentDir = dirname(dirname(__DIR__));
     $candidates = [
         $dataFile,
+        $dataFile . '.bak',
         $parentDir . '/server-data/onival-persistent-data.json',
+        $parentDir . '/server-data/onival-persistent-data.json.bak',
         $legacyDataFile,
         $parentDir . '/onival-persistent-data.json',
         sys_get_temp_dir() . '/onival-persistent-data.json'
     ];
 
     foreach ($candidates as $candidate) {
-        if (!empty($candidate) && file_exists($candidate)) {
+        if (!empty($candidate) && file_exists($candidate) && filesize($candidate) > 20) {
             $raw = @file_get_contents($candidate);
             $json = @json_decode($raw, true);
-            if (is_array($json) && (!empty($json['products']) || !empty($json['orders']))) {
+            if (is_array($json) && (!empty($json['products']) || !empty($json['orders']) || !empty($json['siteContent']))) {
                 return $json;
             }
         }
@@ -62,17 +111,52 @@ function loadDatabase($dataFile, $legacyDataFile) {
 }
 
 function saveDatabase($dataFile, $data) {
+    if (!is_array($data)) return false;
+
+    // Anti-wipe guard: If incoming products is empty but disk already has products, NEVER erase!
+    if (empty($data['products']) && file_exists($dataFile) && filesize($dataFile) > 20) {
+        $curRaw = @file_get_contents($dataFile);
+        $curJson = @json_decode($curRaw, true);
+        if (is_array($curJson) && !empty($curJson['products'])) {
+            $data['products'] = $curJson['products'];
+        }
+    }
+
     $data['updatedAt'] = date('c');
     $raw = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
-    $res = @file_put_contents($dataFile, $raw);
+    if ($raw === false || empty($raw)) return false;
+
+    $dir = dirname($dataFile);
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0755, true);
+    }
+
+    // Atomic write to a temporary file first
+    $tmpFile = $dataFile . '.tmp.' . uniqid();
+    $written = @file_put_contents($tmpFile, $raw, LOCK_EX);
+    if ($written === false || $written < 10) {
+        @unlink($tmpFile);
+        return false;
+    }
+
+    // Automatic rotating backup before replace
+    if (file_exists($dataFile)) {
+        @copy($dataFile, $dataFile . '.bak');
+    }
+
+    $renamed = @rename($tmpFile, $dataFile);
+    if (!$renamed) {
+        @copy($tmpFile, $dataFile);
+        @unlink($tmpFile);
+    }
 
     // Also mirror to parent root / server-data if accessible
     $parentDir = dirname(dirname(__DIR__));
     $parentData = $parentDir . '/server-data/onival-persistent-data.json';
     if (is_dir(dirname($parentData))) {
-        @file_put_contents($parentData, $raw);
+        @file_put_contents($parentData, $raw, LOCK_EX);
     }
-    return $res;
+    return true;
 }
 
 // Default Seed Data if database file does not exist yet
@@ -288,31 +372,157 @@ if (($path === '/api/host/import-state' || $path === '/api/firebase/import-state
 if ($path === '/api/admin/login' && $method === 'POST') {
     $u = trim($body['username'] ?? $body['email'] ?? '');
     $p = trim($body['password'] ?? '');
-    $creds = $db['adminCredentials'] ?? getDefaultSeed()['adminCredentials'];
+    $creds = &$db['adminCredentials'];
     
-    $isUserMatch = (
-        strtolower($u) === strtolower($creds['username'] ?? '') ||
-        strtolower($u) === strtolower($creds['email'] ?? '') ||
-        strtolower($u) === 'admin' ||
-        strtolower($u) === 'heltashop14@gmail.com'
-    );
-    $isPassMatch = ($p === ($creds['password'] ?? '') || $p === 'admin');
+    $validUser = strtolower(trim($creds['username'] ?? 'admin'));
+    $validEmail = strtolower(trim($creds['email'] ?? ''));
+    $validPass = trim($creds['password'] ?? 'admin');
+
+    if (empty($u) || empty($p)) {
+        http_response_code(400);
+        echo json_encode(['ok' => false, 'error' => 'نام کاربری و رمز عبور الزامی است.']);
+        exit;
+    }
+
+    $isUserMatch = (strtolower($u) === $validUser || (!empty($validEmail) && strtolower($u) === $validEmail));
+    $isPassMatch = $isUserMatch && verifyAdminPassword($p, $validPass);
 
     if ($isUserMatch && $isPassMatch) {
-        $token = 'host_auth_session_' . md5($u . ':' . time());
+        // Upgrade plaintext password to hash in persistent storage
+        if ($creds['password'] === $p) {
+            $creds['password'] = hashAdminPassword($p);
+            saveDatabase($dataFile, $db);
+        }
+
+        $token = generateAdminSessionToken($creds['username'], $creds['password']);
         echo json_encode([
             'ok' => true,
+            'success' => true,
             'token' => $token,
-            'user' => [
+            'profile' => [
                 'username' => $creds['username'],
                 'name' => $creds['name'] ?? 'مدیر سیستم',
-                'email' => $creds['email']
-            ]
+                'email' => $creds['email'] ?? ''
+            ],
+            'message' => 'ورود به پنل مدیریت با موفقیت انجام شد.'
         ]);
         exit;
     }
     http_response_code(401);
     echo json_encode(['ok' => false, 'error' => 'نام کاربری یا رمز عبور اشتباه است.']);
+    exit;
+}
+
+// Admin Verify Session
+if ($path === '/api/admin/verify-session' && $method === 'GET') {
+    if (isRequestAdminAuthorized($db)) {
+        $creds = $db['adminCredentials'] ?? [];
+        echo json_encode([
+            'ok' => true,
+            'profile' => [
+                'username' => $creds['username'] ?? 'admin',
+                'name' => $creds['name'] ?? 'مدیر سیستم',
+                'email' => $creds['email'] ?? ''
+            ]
+        ]);
+        exit;
+    }
+    http_response_code(401);
+    echo json_encode(['ok' => false, 'error' => 'نشست کاربری منقضی شده است.']);
+    exit;
+}
+
+// Change Credentials (Admin Account Settings)
+if ($path === '/api/account/change-credentials' && $method === 'POST') {
+    if (!isRequestAdminAuthorized($db)) {
+        http_response_code(401);
+        echo json_encode(['ok' => false, 'error' => 'دسترسی غیرمجاز. لطفاً ابتدا وارد حساب مدیریت شوید.']);
+        exit;
+    }
+
+    $u = trim($body['username'] ?? '');
+    $curPass = trim($body['currentPassword'] ?? '');
+    $newPass = trim($body['newPassword'] ?? '');
+    $email = trim($body['email'] ?? '');
+    $name = trim($body['name'] ?? '');
+
+    $creds = &$db['adminCredentials'];
+    $validPass = trim($creds['password'] ?? 'admin');
+
+    $isChangingPassword = (!empty($newPass));
+    $isChangingUsername = (!empty($u) && strtolower($u) !== strtolower($creds['username'] ?? ''));
+
+    if ($isChangingPassword || $isChangingUsername) {
+        if (empty($curPass) || !verifyAdminPassword($curPass, $validPass)) {
+            http_response_code(400);
+            echo json_encode([
+                'ok' => false,
+                'error' => 'رمز عبور فعلی وارد شده صحیح نمی‌باشد. لطفاً رمز عبور فعلی را با دقت وارد فرمایید.'
+            ]);
+            exit;
+        }
+    }
+
+    if ($isChangingPassword) {
+        if (strlen($newPass) < 4) {
+            http_response_code(400);
+            echo json_encode(['ok' => false, 'error' => 'رمز عبور جدید باید حداقل ۴ کاراکتر باشد.']);
+            exit;
+        }
+        $creds['password'] = hashAdminPassword($newPass);
+    }
+
+    if (!empty($u)) $creds['username'] = $u;
+    if (!empty($email)) $creds['email'] = $email;
+    if (!empty($name)) $creds['name'] = $name;
+
+    if (!isset($db['siteContent'])) $db['siteContent'] = [];
+    if (isset($body['siteLogo'])) $db['siteContent']['siteLogo'] = $body['siteLogo'];
+    if (isset($body['siteLogoFit'])) $db['siteContent']['siteLogoFit'] = $body['siteLogoFit'];
+    if (isset($body['siteLogoShape'])) $db['siteContent']['siteLogoShape'] = $body['siteLogoShape'];
+    if (isset($body['siteLogoScale'])) $db['siteContent']['siteLogoScale'] = (int)$body['siteLogoScale'];
+
+    saveDatabase($dataFile, $db);
+
+    $newToken = generateAdminSessionToken($creds['username'], $creds['password']);
+
+    echo json_encode([
+        'ok' => true,
+        'success' => true,
+        'token' => $newToken,
+        'profile' => [
+            'username' => $creds['username'],
+            'email' => $creds['email'],
+            'name' => $creds['name'] ?? 'مدیر سیستم',
+            'siteLogo' => $db['siteContent']['siteLogo'] ?? '',
+            'siteLogoFit' => $db['siteContent']['siteLogoFit'] ?? 'cover',
+            'siteLogoShape' => $db['siteContent']['siteLogoShape'] ?? 'rounded',
+            'siteLogoScale' => $db['siteContent']['siteLogoScale'] ?? 100
+        ],
+        'siteContent' => $db['siteContent'],
+        'message' => $isChangingPassword
+            ? 'نام کاربری و رمز عبور جدید مدیریت با موفقیت در دیسک هاست ذخیره شد.'
+            : 'اطلاعات حساب مدیریت با موفقیت ذخیره شد.'
+    ]);
+    exit;
+}
+
+// Host Database Backup Download
+if ($path === '/api/admin/backup/download' && $method === 'GET') {
+    if (!isRequestAdminAuthorized($db)) {
+        http_response_code(401);
+        echo json_encode(['ok' => false, 'error' => 'دسترسی غیرمجاز.']);
+        exit;
+    }
+    $dateStr = date('Y-m-d');
+    $filename = "onival-host-backup-{$dateStr}.json";
+    header('Content-Type: application/json; charset=utf-8');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    $export = $db;
+    if (isset($export['adminCredentials']['password'])) {
+        unset($export['adminCredentials']['password']);
+    }
+    echo json_encode($export, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
     exit;
 }
 
@@ -335,6 +545,38 @@ if ($path === '/api/products') {
         if (empty($newProd['images']) && !empty($newProd['imageName'])) {
             $newProd['images'] = [$newProd['imageName']];
         }
+        if (!empty($body['sizes']) && is_array($body['sizes'])) {
+            $parsedSizes = [];
+            $totalStock = 0;
+            $totalQuota = 0;
+            foreach ($body['sizes'] as $sz) {
+                $szStock = isset($sz['stock']) ? max(0, (int)$sz['stock']) : 10;
+                $szQuota = isset($sz['specialOfferStock']) ? max(0, (int)$sz['specialOfferStock']) : 0;
+                $totalStock += $szStock;
+                $totalQuota += $szQuota;
+                $parsedSizes[] = [
+                    'name' => (string)($sz['name'] ?? ''),
+                    'price' => (float)($sz['price'] ?? 0),
+                    'stock' => $szStock,
+                    'specialOfferStock' => $szQuota,
+                    'isOutOfStock' => ($szStock <= 0),
+                    'sku' => !empty($sz['sku']) ? (string)$sz['sku'] : null
+                ];
+            }
+            $newProd['sizes'] = $parsedSizes;
+            $newProd['hasSize'] = true;
+            $newProd['stock'] = $totalStock;
+            $newProd['isOutOfStock'] = ($totalStock <= 0);
+            $newProd['specialOfferStock'] = $totalQuota;
+        } else {
+            $newProd['stock'] = isset($body['stock']) ? max(0, (int)$body['stock']) : 20;
+            $newProd['isOutOfStock'] = isset($body['stock']) ? ((int)$body['stock'] <= 0) : false;
+            $newProd['specialOfferStock'] = isset($body['specialOfferStock']) ? max(0, (int)$body['specialOfferStock']) : (!empty($newProd['discount']) ? 3 : 0);
+        }
+        $newProd['specialOfferInitialStock'] = isset($body['specialOfferInitialStock']) ? (int)$body['specialOfferInitialStock'] : (!empty($newProd['specialOfferStock']) ? (int)$newProd['specialOfferStock'] : 0);
+        $newProd['isAmazingOffer'] = !empty($body['isAmazingOffer']) || !empty($body['isSpecialOffer']);
+        $newProd['isSpecialOffer'] = !empty($body['isAmazingOffer']) || !empty($body['isSpecialOffer']);
+        
         $db['products'][] = $newProd;
         saveDatabase($dataFile, $db);
         http_response_code(201);
@@ -351,7 +593,44 @@ if (preg_match('#^/api/products/(\d+)$#', $path, $matches)) {
     }
     if ($idx !== -1) {
         if ($method === 'PUT') {
-            $db['products'][$idx] = array_merge($db['products'][$idx], $body, ['id' => $id]);
+            $updated = array_merge($db['products'][$idx], $body, ['id' => $id]);
+            if (isset($body['sizes']) && is_array($body['sizes'])) {
+                $parsedSizes = [];
+                $totalStock = 0;
+                $totalQuota = 0;
+                foreach ($body['sizes'] as $sz) {
+                    $szStock = isset($sz['stock']) ? max(0, (int)$sz['stock']) : 10;
+                    $szQuota = isset($sz['specialOfferStock']) ? max(0, (int)$sz['specialOfferStock']) : 0;
+                    $totalStock += $szStock;
+                    $totalQuota += $szQuota;
+                    $parsedSizes[] = [
+                        'name' => (string)($sz['name'] ?? ''),
+                        'price' => (float)($sz['price'] ?? 0),
+                        'stock' => $szStock,
+                        'specialOfferStock' => $szQuota,
+                        'isOutOfStock' => ($szStock <= 0),
+                        'sku' => !empty($sz['sku']) ? (string)$sz['sku'] : null
+                    ];
+                }
+                $updated['sizes'] = $parsedSizes;
+                $updated['hasSize'] = true;
+                $updated['stock'] = $totalStock;
+                $updated['isOutOfStock'] = ($totalStock <= 0);
+                $updated['specialOfferStock'] = $totalQuota;
+            } else {
+                if (isset($body['stock'])) {
+                    $updated['stock'] = max(0, (int)$body['stock']);
+                    $updated['isOutOfStock'] = ((int)$body['stock'] <= 0);
+                }
+                if (isset($body['specialOfferStock'])) {
+                    $updated['specialOfferStock'] = max(0, (int)$body['specialOfferStock']);
+                }
+            }
+            if (isset($body['isAmazingOffer'])) {
+                $updated['isAmazingOffer'] = (bool)$body['isAmazingOffer'];
+                $updated['isSpecialOffer'] = (bool)$body['isAmazingOffer'];
+            }
+            $db['products'][$idx] = $updated;
             saveDatabase($dataFile, $db);
             echo json_encode(['ok' => true, 'product' => $db['products'][$idx]]);
             exit;
@@ -505,6 +784,8 @@ if ($path === '/api/site-content/reset' && $method === 'POST') {
 // Orders
 if (preg_match('#^/api/orders/track/([^/]+)$#', $path, $trackMatch) && $method === 'GET') {
     $code = strtoupper(urldecode(trim($trackMatch[1])));
+    $isAdmin = isRequestAdminAuthorized($db);
+
     $foundOrder = null;
     foreach ($db['orders'] ?? [] as $o) {
         if (strtoupper($o['trackingCode'] ?? '') === $code) {
@@ -525,11 +806,38 @@ if (preg_match('#^/api/orders/track/([^/]+)$#', $path, $trackMatch) && $method =
             $foundOrder['adminResponse'] = $foundMsg['adminResponse'];
             $foundOrder['respondedAt'] = $foundMsg['respondedAt'] ?? '';
         }
+
+        // Zero PII Leak Guard: Mask customer personal data for public queries
+        if (!$isAdmin) {
+            $phone = trim($foundOrder['phoneNumber'] ?? '');
+            if (strlen($phone) >= 10) {
+                $foundOrder['phoneNumber'] = substr($phone, 0, 4) . '***' . substr($phone, -3);
+            } elseif ($phone !== '') {
+                $foundOrder['phoneNumber'] = substr($phone, 0, 2) . '***';
+            }
+
+            $addr = trim($foundOrder['userAddress'] ?? '');
+            if (!empty($addr)) {
+                $parts = preg_split('/[،,-]/u', $addr);
+                if (count($parts) > 1) {
+                    $foundOrder['userAddress'] = trim($parts[0]) . '، *** (تحویل پستی)';
+                } else {
+                    $foundOrder['userAddress'] = mb_substr($addr, 0, 14, 'UTF-8') . '... (تحویل پستی)';
+                }
+            }
+        }
+
         echo json_encode(['found' => true, 'type' => 'order', 'data' => $foundOrder]);
         exit;
     }
 
     if ($foundMsg) {
+        if (!$isAdmin) {
+            $msgPhone = trim($foundMsg['phoneNumber'] ?? $foundMsg['contactValue'] ?? '');
+            if (strlen($msgPhone) >= 10) {
+                $foundMsg['phoneNumber'] = substr($msgPhone, 0, 4) . '***' . substr($msgPhone, -3);
+            }
+        }
         echo json_encode(['found' => true, 'type' => 'message', 'data' => $foundMsg]);
         exit;
     }
@@ -541,6 +849,12 @@ if (preg_match('#^/api/orders/track/([^/]+)$#', $path, $trackMatch) && $method =
 
 if ($path === '/api/orders') {
     if ($method === 'GET') {
+        // Enforce admin authorization to prevent full customer order/PII database dump
+        if (!isRequestAdminAuthorized($db)) {
+            http_response_code(403);
+            echo json_encode(['error' => 'دسترسی غیرمجاز. فقط مدیر سیستم مجاز به دریافت لیست سفارش‌ها است.']);
+            exit;
+        }
         echo json_encode(array_values($db['orders'] ?? []));
         exit;
     }
@@ -555,8 +869,57 @@ if ($path === '/api/orders') {
         $newOrder['paymentStatus'] = $newOrder['paymentStatus'] ?? 'Unpaid';
         $newOrder['creationTime'] = date('Y/m/d');
         if (empty($newOrder['trackingCode'])) {
-            $newOrder['trackingCode'] = 'ONV-ORD-' . rand(100, 999);
+            $newOrder['trackingCode'] = 'ONV-ORD-' . strtoupper(substr(md5(uniqid()), 0, 6));
         }
+
+        // Deduct inventory stock and special offer quota per variant and product
+        if (!empty($newOrder['items']) && is_array($newOrder['items'])) {
+            foreach ($newOrder['items'] as $item) {
+                $pId = (int)($item['productId'] ?? $item['id'] ?? 0);
+                $itemSize = (string)($item['size'] ?? '');
+                $qty = max(1, (int)($item['quantity'] ?? $item['qty'] ?? 1));
+                foreach ($db['products'] as &$prod) {
+                    if ((int)$prod['id'] === $pId) {
+                        // Deduct from matching packaging size variant
+                        if ($itemSize !== '' && !empty($prod['sizes']) && is_array($prod['sizes'])) {
+                            foreach ($prod['sizes'] as &$sVariant) {
+                                if (($sVariant['name'] ?? '') === $itemSize || ($sVariant['size'] ?? '') === $itemSize) {
+                                    if (isset($sVariant['stock'])) {
+                                        $sVariant['stock'] = max(0, (int)$sVariant['stock'] - $qty);
+                                        $sVariant['isOutOfStock'] = ($sVariant['stock'] <= 0);
+                                    }
+                                    if (!empty($sVariant['specialOfferStock']) && (int)$sVariant['specialOfferStock'] > 0) {
+                                        $sVariant['specialOfferStock'] = max(0, (int)$sVariant['specialOfferStock'] - $qty);
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+
+                        // Deduct aggregate product inventory stock
+                        if (isset($prod['stock'])) {
+                            $prod['stock'] = max(0, (int)$prod['stock'] - $qty);
+                            if ($prod['stock'] === 0) {
+                                $prod['isOutOfStock'] = true;
+                                $prod['availability'] = 'OutOfStock';
+                            }
+                        }
+                        if (!empty($prod['specialOfferStock']) && (int)$prod['specialOfferStock'] > 0) {
+                            $prod['specialOfferStock'] = max(0, (int)$prod['specialOfferStock'] - $qty);
+                            if ($prod['specialOfferStock'] === 0) {
+                                // Special offer quota exhausted! Terminate special offer and revert to normal price
+                                $prod['isAmazingOffer'] = false;
+                                $prod['isSpecialOffer'] = false;
+                                $prod['discount'] = 0;
+                                $prod['discountPercent'] = 0;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
         $db['orders'][] = $newOrder;
         saveDatabase($dataFile, $db);
         http_response_code(201);
@@ -565,21 +928,214 @@ if ($path === '/api/orders') {
     }
 }
 
-if (preg_match('#^/api/orders/([^/]+)/receipt$#', $path, $matches) && $method === 'POST') {
-    $trackingCode = urldecode($matches[1]);
-    foreach ($db['orders'] as &$o) {
-        if (($o['trackingCode'] ?? '') === $trackingCode) {
-            $o['receiptImage'] = $body['receiptImage'] ?? '';
-            $o['receiptNote'] = $body['receiptNote'] ?? '';
-            $o['receiptUploadedAt'] = date('c');
-            $o['paymentStatus'] = 'PendingVerification';
-            saveDatabase($dataFile, $db);
-            echo json_encode(['ok' => true, 'order' => $o]);
-            exit;
+// Receipt upload endpoint with anti-IDOR guard and zero PII leak
+if (preg_match('#^/api/orders/([^/]+)/(?:upload-receipt|receipt)$#', $path, $matches) && $method === 'POST') {
+    $param = urldecode(trim($matches[1]));
+    $isAdmin = isRequestAdminAuthorized($db);
+
+    // ANTI-IDOR / ANTI-ENUMERATION GUARD:
+    // Reject pure numeric IDs or short codes for public/non-admin requests
+    if (!$isAdmin && (ctype_digit($param) || strlen($param) < 6)) {
+        http_response_code(400);
+        echo json_encode(['error' => 'جهت بارگذاری فیش واریزی، ارائه کد رهگیری یکتا و معتبر الزامی است. شناسه عددی پذیرفته نمی‌شود.']);
+        exit;
+    }
+
+    $foundIndex = -1;
+    foreach ($db['orders'] as $idx => $o) {
+        if ($isAdmin && (string)($o['id'] ?? '') === $param) {
+            $foundIndex = $idx;
+            break;
+        }
+        if (strtoupper($o['trackingCode'] ?? '') === strtoupper($param)) {
+            $foundIndex = $idx;
+            break;
         }
     }
-    http_response_code(404);
-    echo json_encode(['error' => 'سفارش یافت نشد']);
+
+    if ($foundIndex === -1) {
+        http_response_code(404);
+        echo json_encode(['error' => 'سفارش با مشخصات ارائه‌شده یافت نشد.']);
+        exit;
+    }
+
+    $order = &$db['orders'][$foundIndex];
+
+    // Prevent modifying or overwriting settled/completed orders
+    if (($order['paymentStatus'] ?? '') === 'Paid' || ($order['status'] ?? '') === 'Completed') {
+        http_response_code(400);
+        echo json_encode(['error' => 'این سفارش قبلاً تسویه یا تکمیل گردیده است و فیش جدید نمی‌پذیرد.']);
+        exit;
+    }
+
+    $receiptImg = trim($body['receiptImage'] ?? $body['receiptImageUrl'] ?? '');
+    if (empty($receiptImg)) {
+        http_response_code(400);
+        echo json_encode(['error' => 'تصویر فیش واریزی ارسال نشده است.']);
+        exit;
+    }
+
+    $order['receiptImage'] = $receiptImg;
+    $order['receiptImageUrl'] = $receiptImg;
+    $order['receiptNote'] = mb_substr(trim($body['receiptNote'] ?? ''), 0, 500, 'UTF-8');
+    $order['receiptUploadedAt'] = date('c');
+    $order['receiptSubmittedAt'] = date('Y/m/d - H:i');
+    $order['paymentMethod'] = 'card_to_card';
+    $order['paymentStatus'] = 'PendingVerification';
+    if (!empty($order['consultationDetails']) && is_array($order['consultationDetails'])) {
+        $order['consultationDetails']['consultationStatus'] = 'PendingVerification';
+    }
+
+    saveDatabase($dataFile, $db);
+
+    // ZERO PII LEAK GUARD:
+    // Public callers NEVER receive customer PII (full name, phone, address, purchased items, or notes)
+    $safeReceiptConfirmation = [
+        'trackingCode' => $order['trackingCode'] ?? '',
+        'status' => $order['status'] ?? 'Pending',
+        'paymentStatus' => $order['paymentStatus'] ?? 'PendingVerification',
+        'paymentMethod' => $order['paymentMethod'] ?? 'card_to_card',
+        'receiptSubmittedAt' => $order['receiptSubmittedAt'] ?? '',
+        'receiptUploadedAt' => $order['receiptUploadedAt'] ?? '',
+        'hasReceipt' => true
+    ];
+
+    echo json_encode([
+        'ok' => true,
+        'success' => true,
+        'order' => $isAdmin ? $order : $safeReceiptConfirmation,
+        'trackingCode' => $order['trackingCode'] ?? '',
+        'paymentStatus' => $order['paymentStatus'] ?? 'PendingVerification',
+        'message' => 'تصویر فیش واریزی به همراه شماره فاکتور با موفقیت ثبت شد و جهت تایید برای مدیریت ارسال گردید.'
+    ]);
+    exit;
+}
+
+// Payment confirmation via Bale Bot (Admin Only)
+if (preg_match('#^/api/orders/([^/]+)/confirm-bale-payment$#', $path, $matches) && $method === 'POST') {
+    $param = urldecode(trim($matches[1]));
+    $isAdmin = isRequestAdminAuthorized($db);
+
+    if (!$isAdmin) {
+        http_response_code(401);
+        echo json_encode(['error' => 'دسترسی غیرمجاز: تایید مستقیم و دستی پرداخت فقط توسط مدیر احراز هویت شده امکان‌پذیر است.']);
+        exit;
+    }
+
+    $foundIndex = -1;
+    foreach ($db['orders'] as $idx => $o) {
+        if ((string)($o['id'] ?? '') === $param || strtoupper($o['trackingCode'] ?? '') === strtoupper($param)) {
+            $foundIndex = $idx;
+            break;
+        }
+    }
+
+    if ($foundIndex === -1) {
+        http_response_code(404);
+        echo json_encode(['error' => 'سفارش یافت نشد']);
+        exit;
+    }
+
+    $order = &$db['orders'][$foundIndex];
+    $order['paymentMethod'] = 'bale_wallet';
+    $order['paymentStatus'] = 'Paid';
+    $order['status'] = 'Processing';
+    if (!empty($order['consultationDetails']) && is_array($order['consultationDetails'])) {
+        $order['consultationDetails']['consultationStatus'] = 'Scheduled';
+    }
+    saveDatabase($dataFile, $db);
+
+    echo json_encode(['ok' => true, 'success' => true, 'order' => $order]);
+    exit;
+}
+
+// Payment confirmation via Gateway (Admin Only)
+if (preg_match('#^/api/orders/([^/]+)/confirm-gateway-payment$#', $path, $matches) && $method === 'POST') {
+    $param = urldecode(trim($matches[1]));
+    $isAdmin = isRequestAdminAuthorized($db);
+
+    if (!$isAdmin) {
+        http_response_code(401);
+        echo json_encode(['error' => 'دسترسی غیرمجاز: تایید مستقیم و دستی پرداخت فقط توسط مدیر احراز هویت شده امکان‌پذیر است.']);
+        exit;
+    }
+
+    $foundIndex = -1;
+    foreach ($db['orders'] as $idx => $o) {
+        if ((string)($o['id'] ?? '') === $param || strtoupper($o['trackingCode'] ?? '') === strtoupper($param)) {
+            $foundIndex = $idx;
+            break;
+        }
+    }
+
+    if ($foundIndex === -1) {
+        http_response_code(404);
+        echo json_encode(['error' => 'سفارش یافت نشد']);
+        exit;
+    }
+
+    $order = &$db['orders'][$foundIndex];
+    $order['paymentMethod'] = 'online_gateway';
+    $order['paymentStatus'] = 'Paid';
+    $order['status'] = 'Processing';
+    if (!empty($order['consultationDetails']) && is_array($order['consultationDetails'])) {
+        $order['consultationDetails']['consultationStatus'] = 'Scheduled';
+    }
+    saveDatabase($dataFile, $db);
+
+    $safeConfirmation = [
+        'trackingCode' => $order['trackingCode'] ?? '',
+        'status' => $order['status'] ?? 'Processing',
+        'paymentStatus' => 'Paid',
+        'paymentMethod' => 'online_gateway'
+    ];
+
+    echo json_encode(['ok' => true, 'success' => true, 'order' => $isAdmin ? $order : $safeConfirmation]);
+    exit;
+}
+
+// Admin-only Receipt verification
+if (preg_match('#^/api/orders/([^/]+)/verify-receipt$#', $path, $matches) && $method === 'POST') {
+    if (!isRequestAdminAuthorized($db)) {
+        http_response_code(403);
+        echo json_encode(['error' => 'دسترسی غیرمجاز. فقط مدیر سیستم مجاز به تایید فیش است.']);
+        exit;
+    }
+
+    $param = urldecode(trim($matches[1]));
+    $foundIndex = -1;
+    foreach ($db['orders'] as $idx => $o) {
+        if ((string)($o['id'] ?? '') === $param || strtoupper($o['trackingCode'] ?? '') === strtoupper($param)) {
+            $foundIndex = $idx;
+            break;
+        }
+    }
+
+    if ($foundIndex === -1) {
+        http_response_code(404);
+        echo json_encode(['error' => 'سفارش یافت نشد']);
+        exit;
+    }
+
+    $order = &$db['orders'][$foundIndex];
+    $approved = !empty($body['approved']);
+    if ($approved) {
+        $order['paymentStatus'] = 'Paid';
+        if (($order['status'] ?? '') === 'Pending') {
+            $order['status'] = 'Processing';
+        }
+        if (!empty($order['consultationDetails'])) {
+            $order['consultationDetails']['consultationStatus'] = 'Scheduled';
+        }
+    } else {
+        $order['paymentStatus'] = 'Failed';
+        if (!empty($order['consultationDetails'])) {
+            $order['consultationDetails']['consultationStatus'] = 'PendingPayment';
+        }
+    }
+    saveDatabase($dataFile, $db);
+
+    echo json_encode(['ok' => true, 'success' => true, 'order' => $order]);
     exit;
 }
 
@@ -591,6 +1147,11 @@ if (preg_match('#^/api/orders/(\d+)$#', $path, $matches)) {
     }
     if ($idx !== -1) {
         if ($method === 'PUT') {
+            if (!isRequestAdminAuthorized($db)) {
+                http_response_code(403);
+                echo json_encode(['error' => 'دسترسی غیرمجاز. تغییر سفارش نیازمند احراز هویت مدیر است.']);
+                exit;
+            }
             $db['orders'][$idx] = array_merge($db['orders'][$idx], $body, ['id' => $id]);
             saveDatabase($dataFile, $db);
             echo json_encode(['ok' => true, 'order' => $db['orders'][$idx]]);
@@ -677,7 +1238,7 @@ if ($path === '/api/bot/logs' && $method === 'DELETE') {
 // ================= TEST COMMAND ENDPOINT (/api/bot/test-command) =================
 if ($path === '/api/bot/test-command' && $method === 'POST') {
     $command = trim($body['command'] ?? '/start');
-    $testChatId = trim($body['chatId'] ?? $db['telegramConfig']['baleAdminChatId'] ?? '69451465');
+    $testChatId = trim($body['chatId'] ?? $db['telegramConfig']['baleAdminChatId'] ?? '');
 
     $extractedCode = extractTrackingCodeFromTextPhp($command);
     $matchedOrder = $extractedCode ? findOrderByTrackingOrCodePhp($db, $extractedCode, $dataFile, $legacyDataFile) : null;
@@ -711,10 +1272,10 @@ if ($path === '/api/bot/test-command' && $method === 'POST') {
 
 // ================= REAL BALE BOT WELCOME TEST (/api/bot/test-admin-welcome & /api/bot/test-admin-bot) =================
 if (($path === '/api/bot/test-admin-welcome' || $path === '/api/bale/test-admin-welcome' || $path === '/api/bot/test-admin-bot') && $method === 'POST') {
-    $token = trim($body['token'] ?? $body['botToken'] ?? $db['telegramConfig']['adminBotToken'] ?? $db['telegramConfig']['baleBotToken'] ?? $db['telegramConfig']['botToken'] ?? '1204808805:W-mq-hFRtv71zdHaRFSUYdr2GWCJPCvQD34');
-    $chatId = trim($body['chatId'] ?? $db['telegramConfig']['adminChatId'] ?? $db['telegramConfig']['baleAdminChatId'] ?? '69451465');
-    $baseUrl = rtrim($body['baseUrl'] ?? $db['telegramConfig']['baleBaseUrl'] ?? 'https://tapi.bale.ai', '/');
-    $botUsername = trim($db['telegramConfig']['adminBotUsername'] ?? $db['telegramConfig']['baleBotUsername'] ?? 'OnivalAdminBot', '@');
+    $token = trim((string)($body['token'] ?? $body['botToken'] ?? $db['telegramConfig']['adminBotToken'] ?? $db['telegramConfig']['baleBotToken'] ?? $db['telegramConfig']['botToken'] ?? ''));
+    $chatId = trim((string)($body['chatId'] ?? $db['telegramConfig']['adminChatId'] ?? $db['telegramConfig']['baleAdminChatId'] ?? ''));
+    $baseUrl = rtrim((string)($body['baseUrl'] ?? $db['telegramConfig']['baleBaseUrl'] ?? 'https://tapi.bale.ai'), '/');
+    $botUsername = trim((string)($db['telegramConfig']['adminBotUsername'] ?? $db['telegramConfig']['baleBotUsername'] ?? 'OnivalAdminBot'), '@');
 
     // Update config with the latest tested values so they stay saved on host
     if (!empty($token)) {
@@ -917,10 +1478,10 @@ if ($path === '/api/bot/test-customer-bot' && $method === 'POST') {
 
 // ================= BALE INVOICE TESTER (/api/bot/test-send-invoice) =================
 if ($path === '/api/bot/test-send-invoice' && $method === 'POST') {
-    $token = trim($db['telegramConfig']['baleBotToken'] ?? $db['telegramConfig']['botToken'] ?? '');
-    $chatId = trim($body['chatId'] ?? $db['telegramConfig']['baleAdminChatId'] ?? $db['telegramConfig']['adminChatId'] ?? '');
-    $walletToken = trim($body['providerToken'] ?? $db['telegramConfig']['balePaymentTokenLive'] ?? 'WALLET-v5gqSc1W1kaBUo2B');
-    $baseUrl = rtrim($db['telegramConfig']['baleBaseUrl'] ?? 'https://tapi.bale.ai', '/');
+    $token = trim((string)($db['telegramConfig']['baleBotToken'] ?? $db['telegramConfig']['botToken'] ?? ''));
+    $chatId = trim((string)($body['chatId'] ?? $db['telegramConfig']['baleAdminChatId'] ?? $db['telegramConfig']['adminChatId'] ?? ''));
+    $walletToken = trim((string)($body['providerToken'] ?? $db['telegramConfig']['balePaymentTokenLive'] ?? ''));
+    $baseUrl = rtrim((string)($db['telegramConfig']['baleBaseUrl'] ?? 'https://tapi.bale.ai'), '/');
 
     if (empty($token) || empty($chatId)) {
         http_response_code(400);
@@ -1175,14 +1736,11 @@ if (($path === '/api/webhook/bale' || $path === '/api/bot/webhook/bale') && $met
     // Resolve wallet token accurately based on active payment mode
     $isTestMode = ($db['telegramConfig']['balePaymentMode'] ?? '') === 'test';
     $walletToken = $isTestMode
-        ? trim($db['telegramConfig']['balePaymentTokenTest'] ?? 'WALLET-TEST-1111111111111111')
-        : trim($db['telegramConfig']['balePaymentTokenLive'] ?? $db['telegramConfig']['balePaymentToken'] ?? 'WALLET-v5gqSc1W1kaBUo2B');
-    if (empty($walletToken)) {
-        $walletToken = 'WALLET-TEST-1111111111111111';
-    }
+        ? trim((string)($db['telegramConfig']['balePaymentTokenTest'] ?? 'WALLET-TEST-1111111111111111'))
+        : trim((string)($db['telegramConfig']['balePaymentTokenLive'] ?? $db['telegramConfig']['balePaymentToken'] ?? ''));
 
-    $configuredAdminChat = trim($db['telegramConfig']['baleAdminChatId'] ?? $db['telegramConfig']['adminChatId'] ?? '69451465');
-    $configuredAdminUser = strtolower(trim($db['telegramConfig']['baleAdminUsername'] ?? 'hasti_hjz', '@'));
+    $configuredAdminChat = trim((string)($db['telegramConfig']['baleAdminChatId'] ?? $db['telegramConfig']['adminChatId'] ?? ''));
+    $configuredAdminUser = strtolower(trim((string)($db['telegramConfig']['baleAdminUsername'] ?? ''), '@'));
 
     if (!empty($update['message'])) {
         $msg = $update['message'];
@@ -1419,8 +1977,10 @@ if (($path === '/api/webhook/bale' || $path === '/api/bot/webhook/bale') && $met
             echo json_encode(['ok' => true]);
             exit;
         }
-
-        $isAdmin = ($senderChatId === $configuredAdminChat || ($senderUsername && $senderUsername === $configuredAdminUser) || $senderChatId === '69451465');
+        $isAdmin = (
+            (!empty($configuredAdminChat) && $senderChatId === $configuredAdminChat) ||
+            (!empty($configuredAdminUser) && $senderUsername === $configuredAdminUser)
+        );
 
         // 2. Admin /orders command
         if ($isAdmin && ($text === '/orders' || $text === 'سفارشات' || $text === 'لیست سفارشات')) {

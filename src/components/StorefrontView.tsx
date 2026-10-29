@@ -260,16 +260,19 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
     [publicProducts, publicCategories, publicPosts, siteContent]
   );
 
+  const syncRouteRef = React.useRef(syncRouteFromLocation);
+  syncRouteRef.current = syncRouteFromLocation;
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    syncRouteFromLocation(window.location.pathname);
+    syncRouteRef.current(window.location.pathname);
 
     const handlePopState = () => {
-      syncRouteFromLocation(window.location.pathname);
+      syncRouteRef.current(window.location.pathname);
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [syncRouteFromLocation]);
+  }, []);
 
   // Secret Admin Access Modal
   const [isAdminAuthModalOpen, setIsAdminAuthModalOpen] = useState(false);
@@ -333,8 +336,8 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
       siteContent?.paymentConfig?.cardDescription ||
       'لطفاً پس از انتقال وجه به شماره کارت فوق، تصویر واضح رسید یا اسکرین‌شات واریزی را در کادر زیر انتخاب و ارسال نمایید. شماره فاکتور شما به صورت خودکار به همراه تصویر فیش برای واحد مالی ارسال می‌شود و پس از تایید، می‌توانید با کد رهگیری وضعیت بسته‌بندی و ارسال مرسوله را پیگیری فرمایید.',
     baleBotUsername: activeBaleBotUsername,
-    baleAdminUsername: activeBotConfig.baleAdminUsername || siteContent?.paymentConfig?.baleAdminUsername || '@hasti_hjz',
-    baleWalletId: activeBotConfig.balePaymentTokenLive || siteContent?.paymentConfig?.baleWalletId || 'WALLET-v5gqSc1W1kaBUo2B',
+    baleAdminUsername: activeBotConfig.baleAdminUsername || siteContent?.paymentConfig?.baleAdminUsername || '',
+    baleWalletId: activeBotConfig.balePaymentTokenLive || siteContent?.paymentConfig?.baleWalletId || '',
     baleBotDescription:
       siteContent?.paymentConfig?.baleBotDescription ||
       'جهت تکمیل پرداخت امن و خودکار از طریق پیام‌رسان بله، روی دکمه زیر کلیک کرده و در ربات رسمی اونیوال گزینه شروع (Start) را بزنید.',
@@ -668,13 +671,48 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
 
   const hasExplicitHero = homeSections.some(s => s.enabled && normalizeSectionId(s.id) === 'hero');
 
-  // Special offers: published products with discount > 0
-  const specialOffers = publicProducts.filter(p => (p.discount || 0) > 0);
+  // Check if a specific product variant / packaging is active in special offer
+  const isSizeSpecialOfferActive = (product: Product, sizeName: string): boolean => {
+    const hasDiscount = (product.discount || 0) > 0;
+    if (!hasDiscount) return false;
+
+    // Check variant stock
+    const sizeObj = product.sizes?.find(s => s.name === sizeName);
+    const sizeStock = sizeObj?.stock !== undefined ? sizeObj.stock : product.stock;
+    const isOut = (sizeObj && (sizeObj.isOutOfStock || (sizeObj.stock !== undefined && sizeObj.stock <= 0))) ||
+      ((product.stock !== undefined && product.stock <= 0) || product.isOutOfStock || product.availability === 'OutOfStock');
+    if (isOut) return false;
+
+    // Check variant quota
+    if (sizeObj && sizeObj.specialOfferStock !== undefined) {
+      return sizeObj.specialOfferStock > 0;
+    }
+    return product.specialOfferStock === undefined || product.specialOfferStock > 0;
+  };
+
+  // Special offers: published products with discount > 0 and remaining specialOfferStock > 0 and in-stock
+  const isSpecialOfferActive = (p: Product): boolean => {
+    const hasDiscount = (p.discount || 0) > 0;
+    const inStock = (p.stock === undefined || p.stock > 0) && !p.isOutOfStock && p.availability !== 'OutOfStock';
+    if (!hasDiscount || !inStock) return false;
+
+    if (p.sizes && p.sizes.length > 0) {
+      return p.sizes.some(s => {
+        const szStock = s.stock !== undefined ? s.stock : (p.stock ?? 20);
+        const szQuota = s.specialOfferStock !== undefined ? s.specialOfferStock : (p.specialOfferStock ?? 3);
+        const szOut = Boolean(s.isOutOfStock || szStock <= 0);
+        return !szOut && szQuota > 0;
+      });
+    }
+    return p.specialOfferStock === undefined || p.specialOfferStock > 0;
+  };
+
+  const specialOffers = publicProducts.filter(p => isSpecialOfferActive(p));
 
   // Filter published products by category
   const filteredProducts = publicProducts.filter(p => {
     if (activeCategory === 'all') return true;
-    if (activeCategory === 'discounted') return (p.discount || 0) > 0;
+    if (activeCategory === 'discounted') return isSpecialOfferActive(p);
     if (p.type === activeCategory) return true;
     if (p.categoryTitle && p.categoryTitle.includes(activeCategory)) return true;
     const matchedCat = publicCategories.find(c => c.slug === activeCategory || c.title === activeCategory);
@@ -702,7 +740,8 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
   // Calculate final discounted price for product and size
   const calculateFinalPrice = (product: Product, sizeName: string): number => {
     const base = getBasePrice(product, sizeName);
-    const discount = product.discount || 0;
+    const activeOffer = isSizeSpecialOfferActive(product, sizeName);
+    const discount = activeOffer ? (product.discount || 0) : 0;
     return discount > 0 ? Math.round(base * (100 - discount) / 100) : base;
   };
 
@@ -714,18 +753,37 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
     return product.priceSmall || product.price;
   };
 
-  // Cart actions
+  // Cart actions with strict inventory stock validation per packaging variant
   const totalCartCount = cart.reduce((acc, item) => acc + item.qty, 0);
   const totalCartPrice = cart.reduce((acc, item) => acc + item.price * item.qty, 0);
 
   const addToCart = (product: Product, sizeName: string) => {
+    const sizeObj = product.sizes?.find(s => s.name === sizeName);
+    const availableStock = sizeObj?.stock !== undefined ? sizeObj.stock : (product.stock !== undefined ? product.stock : 999);
+    const isOutOfStock = (sizeObj && (sizeObj.isOutOfStock || (sizeObj.stock !== undefined && sizeObj.stock <= 0))) ||
+      ((product.stock !== undefined && product.stock <= 0) || product.isOutOfStock || product.availability === 'OutOfStock');
+
+    if (isOutOfStock || availableStock <= 0) {
+      alert(`بسته‌بندی «${sizeName}» این محصول در حال حاضر در انبار ناموجود است.`);
+      return;
+    }
+
     const finalPrice = calculateFinalPrice(product, sizeName);
     const cartId = `${product.id}-${sizeName}`;
 
+    let exceeded = false;
     setCart(prev => {
       const existing = prev.find(item => item.cartId === cartId);
       if (existing) {
+        if (existing.qty + 1 > availableStock) {
+          exceeded = true;
+          return prev;
+        }
         return prev.map(item => item.cartId === cartId ? { ...item, qty: item.qty + 1 } : item);
+      }
+      if (1 > availableStock) {
+        exceeded = true;
+        return prev;
       }
       return [
         ...prev,
@@ -741,12 +799,28 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
       ];
     });
 
+    if (exceeded) {
+      alert(`موجودی بسته «${sizeName}» در انبار ${availableStock} عدد است و امکان افزودن تعداد بیشتر وجود ندارد.`);
+      return;
+    }
+
     setIsCartOpen(true);
     setSelectedProduct(null);
   };
 
   const updateCartQty = (cartId: string, delta: number) => {
     setCart(prev => {
+      const targetItem = prev.find(item => item.cartId === cartId);
+      if (targetItem && delta > 0) {
+        const prod = publicProducts.find(p => p.id === targetItem.id);
+        const sizeObj = prod?.sizes?.find(s => s.name === targetItem.size);
+        const maxStock = sizeObj?.stock !== undefined ? sizeObj.stock : (prod && prod.stock !== undefined ? prod.stock : 999);
+        if (targetItem.qty + delta > maxStock) {
+          alert(`حداکثر موجودی قابل سفارش برای بسته «${targetItem.size || prod?.title}»، ${maxStock} عدد می‌باشد.`);
+          return prev;
+        }
+      }
+
       return prev
         .map(item => {
           if (item.cartId === cartId) {
@@ -1049,11 +1123,17 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
     e.preventDefault();
     setConsultBookingError('');
 
+    const cleanPhone = consultPhone
+      .replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d).toString())
+      .replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString())
+      .replace(/\s+/g, '')
+      .replace(/^\+98/, '0');
+
     if (!consultName.trim()) {
       setConsultBookingError('لطفاً نام و نام خانوادگی خود را وارد فرمایید.');
       return;
     }
-    if (!/^09\d{9}$/.test(consultPhone.trim())) {
+    if (!/^09\d{9}$/.test(cleanPhone)) {
       setConsultBookingError('لطفاً شماره موبایل معتبر ۱۱ رقمی (با شروع ۰۹) وارد نمایید.');
       return;
     }
@@ -1069,7 +1149,7 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           fullName: consultName.trim(),
-          phoneNumber: consultPhone.trim(),
+          phoneNumber: cleanPhone,
           topicId: activeConsultTopic?.id,
           topicTitle: activeConsultTopic?.title || 'مشاوره تخصصی سلامت',
           preferredDate: consultPreferredDate || 'فردا',
@@ -1084,23 +1164,23 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
 
       if (res.ok) {
         const data = await res.json();
-        onOrderUpdated?.();
 
-        if (activeConsultPrice > 0 && data.order) {
+        if (data.order) {
           // Open Official Invoice & 3-Mode Payment Screen (just like product checkout!)
           setReceiptPreview('');
           setReceiptNote('');
           setReceiptUploadError('');
           setSelectedPaymentTab(resolveDefaultPaymentTab());
           setCurrentInvoice(data.order);
-          setActivePage('checkout');
-          window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+          handleSelectPage('checkout');
         } else {
           setConsultSuccessCode(data.trackingCode || `ONV-CNS-${Math.floor(100 + Math.random() * 900)}`);
         }
         setConsultQuestion('');
+        onOrderUpdated?.();
       } else {
-        setConsultBookingError('خطا در ثبت رزرو مشاوره. لطفاً مجدداً تلاش کنید.');
+        const errData = await res.json().catch(() => ({}));
+        setConsultBookingError(errData.error || 'خطا در ثبت رزرو مشاوره. لطفاً مجدداً تلاش کنید.');
       }
     } catch (err) {
       setConsultBookingError('خطا در برقراری ارتباط با سرور.');
@@ -1356,25 +1436,7 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
         setAdminAuthError(data.error || 'نام کاربری یا رمز عبور مدیریت اشتباه است.');
       }
     } catch {
-      // Offline fallback only when network fails completely
-      const local = getCachedLocalState();
-      const creds = local.adminCredentials || DEFAULT_ADMIN_CREDENTIALS;
-      const isUserMatch =
-        u.toLowerCase() === (creds.username || '').toLowerCase() ||
-        u.toLowerCase() === (creds.email || '').toLowerCase();
-      const isPassMatch = Boolean(creds.password) && p === creds.password;
-
-      if (isUserMatch && isPassMatch) {
-        const token = `local_session_${btoa(`${creds.username}:${Date.now()}`).replace(/=/g, '')}`;
-        setAdminSessionToken(token);
-        setIsAdminAuthModalOpen(false);
-        setAdminUsernameInput('');
-        setAdminPasswordInput('');
-        setAdminAuthError('');
-        onBackToAdmin();
-      } else {
-        setAdminAuthError('نام کاربری یا رمز عبور مدیریت اشتباه است.');
-      }
+      setAdminAuthError('خطا در برقراری ارتباط با سرور. لطفاً اتصال اینترنت خود را بررسی نمایید.');
     } finally {
       setIsAuthenticatingAdmin(false);
     }
@@ -1914,6 +1976,8 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                         <div className="grid grid-cols-1 sm:flex sm:flex-wrap gap-2">
                           {selectedProduct.sizes.map((s, idx) => {
                             const isSel = selectedSize === s.name;
+                            const sizeStock = s.stock !== undefined ? s.stock : (selectedProduct.stock ?? 20);
+                            const isSizeOut = Boolean(s.isOutOfStock || sizeStock <= 0);
                             return (
                               <button
                                 key={idx}
@@ -1922,10 +1986,19 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                                 className={`px-4 py-3 sm:py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-between sm:justify-center gap-2 cursor-pointer border ${
                                   isSel
                                     ? 'bg-stone-900 text-white border-stone-900 shadow-md'
+                                    : isSizeOut
+                                    ? 'bg-stone-100 text-stone-400 border-stone-200'
                                     : 'bg-stone-50 text-stone-700 border-stone-200 hover:bg-stone-100'
                                 }`}
                               >
-                                <span>{s.name}</span>
+                                <div className="flex items-center gap-1.5">
+                                  <span>{s.name}</span>
+                                  {isSizeOut && (
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-bold">
+                                      ناموجود
+                                    </span>
+                                  )}
+                                </div>
                                 <span className={`text-[11px] font-extrabold ${isSel ? 'text-amber-300' : 'text-stone-500'}`}>
                                   ({formatPrice(s.price)} تومان)
                                 </span>
@@ -1961,12 +2034,46 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                       )}
                     </div>
 
+                    {/* Stock & Quota Status Indicator for Selected Packaging */}
+                    {(() => {
+                      const activeSizeObj = selectedProduct.sizes?.find(s => s.name === selectedSize);
+                      const currentSizeStock = activeSizeObj?.stock !== undefined ? activeSizeObj.stock : (selectedProduct.stock ?? 20);
+                      const isCurrentSizeOut = (activeSizeObj && (activeSizeObj.isOutOfStock || activeSizeObj.stock <= 0)) ||
+                        ((selectedProduct.stock !== undefined && selectedProduct.stock <= 0) || selectedProduct.isOutOfStock || selectedProduct.availability === 'OutOfStock');
+                      const isOffer = isSizeSpecialOfferActive(selectedProduct, selectedSize);
+                      const currentSizeQuota = activeSizeObj?.specialOfferStock !== undefined ? activeSizeObj.specialOfferStock : selectedProduct.specialOfferStock;
+
+                      return (
+                        <div className="flex flex-wrap items-center gap-2 mb-3">
+                          {isCurrentSizeOut ? (
+                            <span className="px-3 py-1 rounded-xl text-xs font-bold bg-slate-800 text-white flex items-center gap-1.5">
+                              <span>بسته‌بندی «{selectedSize}» در انبار ناموجود است</span>
+                            </span>
+                          ) : currentSizeStock <= 5 ? (
+                            <span className="px-3 py-1 rounded-xl text-xs font-bold bg-rose-100 text-rose-800 flex items-center gap-1.5 animate-pulse">
+                              <span>تنها {currentSizeStock} عدد از بسته «{selectedSize}» باقیست</span>
+                            </span>
+                          ) : (
+                            <span className="px-3 py-1 rounded-xl text-xs font-bold bg-emerald-100 text-emerald-800 flex items-center gap-1.5">
+                              <span>موجود در انبار: {currentSizeStock} عدد ({selectedSize})</span>
+                            </span>
+                          )}
+
+                          {isOffer && currentSizeQuota !== undefined && currentSizeQuota > 0 && (
+                            <span className="px-3 py-1 rounded-xl text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                              🔥 سهمیه با قیمت تخفیفی: {currentSizeQuota} عدد باقیست
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
+
                     {/* Price Display */}
                     <div className="p-4 rounded-2xl bg-amber-50/70 border border-amber-200/80 flex flex-wrap items-center justify-between gap-3">
                       <span className="text-xs font-bold text-stone-700">
                         قیمت اندازه «{selectedSize}»:
                       </span>
-                      {selectedProduct.discount ? (
+                      {isSizeSpecialOfferActive(selectedProduct, selectedSize) ? (
                         <div className="flex items-center gap-2.5 flex-wrap">
                           <span className="text-xs sm:text-sm text-stone-400 line-through">
                             {formatPrice(getBasePrice(selectedProduct, selectedSize))}
@@ -1984,14 +2091,33 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                   </div>
 
                   <div className="space-y-4 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => addToCart(selectedProduct, selectedSize)}
-                      className="w-full py-4 bg-[#f59e0b] hover:bg-[#d97706] text-white font-black text-sm rounded-2xl shadow-md transition active:scale-98 flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                      <ShoppingBag className="w-4 h-4" />
-                      <span>افزودن اندازه انتخابی به سبد خرید</span>
-                    </button>
+                    {(() => {
+                      const activeSizeObj = selectedProduct.sizes?.find(s => s.name === selectedSize);
+                      const isCurrentSizeOut = (activeSizeObj && (activeSizeObj.isOutOfStock || (activeSizeObj.stock !== undefined && activeSizeObj.stock <= 0))) ||
+                        ((selectedProduct.stock !== undefined && selectedProduct.stock <= 0) || selectedProduct.isOutOfStock || selectedProduct.availability === 'OutOfStock');
+
+                      if (isCurrentSizeOut) {
+                        return (
+                          <button
+                            type="button"
+                            disabled
+                            className="w-full py-4 bg-slate-200 text-slate-500 font-black text-sm rounded-2xl cursor-not-allowed flex items-center justify-center gap-2"
+                          >
+                            <span>بسته‌بندی «{selectedSize}» در حال حاضر ناموجود است</span>
+                          </button>
+                        );
+                      }
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => addToCart(selectedProduct, selectedSize)}
+                          className="w-full py-4 bg-[#f59e0b] hover:bg-[#d97706] text-white font-black text-sm rounded-2xl shadow-md transition active:scale-98 flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <ShoppingBag className="w-4 h-4" />
+                          <span>افزودن بسته‌بندی «{selectedSize}» به سبد خرید</span>
+                        </button>
+                      );
+                    })()}
 
                     {/* Features List */}
                     {selectedProduct.features && selectedProduct.features.length > 0 && (
@@ -2390,6 +2516,11 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                                   <div className="text-xs font-black text-stone-900 mt-0.5">
                                     {formatPrice(finalPrice)} ت
                                   </div>
+                                  {p.specialOfferStock !== undefined && p.specialOfferStock > 0 && (
+                                    <div className="text-[10px] font-bold text-rose-600 bg-rose-50 rounded px-1.5 py-0.5 mt-1 truncate">
+                                      تنها {p.specialOfferStock} عدد با تخفیف
+                                    </div>
+                                  )}
                                 </div>
                               );
                             })}
@@ -2624,17 +2755,26 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                                             cardFit === 'contain' ? 'object-contain p-2' : 'object-cover'
                                           }`}
                                         />
-                                        {hasDiscount && (
+                                        {hasDiscount && isSpecialOfferActive(product) && (
                                           <span className="absolute top-3 right-3 bg-[#ef394e] text-white text-[10px] font-black px-2 py-0.5 rounded-lg shadow-sm">
                                             {product.discount}% تخفیف
+                                            {product.specialOfferStock !== undefined && product.specialOfferStock > 0 ? ` (${product.specialOfferStock} عدد)` : ''}
                                           </span>
                                         )}
-                                        {product.videoUrl && (
+                                        {((product.stock !== undefined && product.stock <= 0) || product.isOutOfStock || product.availability === 'OutOfStock') ? (
+                                          <span className="absolute top-3 left-3 bg-slate-900/90 text-white text-[10px] font-bold px-2 py-0.5 rounded-md shadow-sm">
+                                            ناموجود
+                                          </span>
+                                        ) : (product.stock !== undefined && product.stock <= 5) ? (
+                                          <span className="absolute top-3 left-3 bg-amber-600/90 text-white text-[10px] font-bold px-2 py-0.5 rounded-md shadow-sm">
+                                            تنها {product.stock} عدد
+                                          </span>
+                                        ) : product.videoUrl ? (
                                           <span className="absolute top-3 left-3 bg-stone-900/80 backdrop-blur-xs text-white text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 shadow-sm">
                                             <Play className="w-2.5 h-2.5 text-amber-400 fill-amber-400" />
                                             <span>ویدیو</span>
                                           </span>
-                                        )}
+                                        ) : null}
                                         {product.sizes && product.sizes.length > 1 && (
                                           <span className="absolute bottom-2.5 right-2.5 bg-stone-900/80 backdrop-blur-xs text-white text-[10px] font-bold px-2 py-0.5 rounded-md">
                                             {product.sizes.length} اندازه مختلف
@@ -4882,7 +5022,7 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                   autoFocus
                   required
                   dir="ltr"
-                  placeholder="نام کاربری (مثال: admin)"
+                  placeholder="نام کاربری یا ایمیل مدیریت"
                   value={adminUsernameInput}
                   onChange={e => {
                     setAdminUsernameInput(e.target.value);
@@ -4900,7 +5040,7 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                   type="password"
                   required
                   dir="ltr"
-                  placeholder="رمز عبور (مثال: admin)"
+                  placeholder="••••••••"
                   value={adminPasswordInput}
                   onChange={e => {
                     setAdminPasswordInput(e.target.value);
@@ -4915,26 +5055,6 @@ export const StorefrontView: React.FC<StorefrontViewProps> = ({
                   {adminAuthError}
                 </div>
               )}
-
-              <div className="p-2.5 rounded-xl bg-amber-50/80 border border-amber-200/70 text-[11px] text-stone-600 flex items-center justify-between gap-2">
-                <div>
-                  <span className="font-bold text-stone-700">حساب پیش‌فرض مدیریت:</span>{' '}
-                  <code className="font-mono text-amber-800 font-bold">admin</code> یا{' '}
-                  <code className="font-mono text-amber-800 font-bold">admin@onival.com</code> | رمز:{' '}
-                  <code className="font-mono text-amber-800 font-bold">admin</code>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAdminUsernameInput('admin@onival.com');
-                    setAdminPasswordInput('admin');
-                    setAdminAuthError('');
-                  }}
-                  className="px-2 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-800 font-bold text-[10px] shrink-0 cursor-pointer transition"
-                >
-                  درج خودکار
-                </button>
-              </div>
 
               <div className="flex gap-2 pt-2">
                 <button

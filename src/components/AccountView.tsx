@@ -82,12 +82,17 @@ export const AccountView: React.FC<AccountViewProps> = ({
   });
   const [isSavingCredentials, setIsSavingCredentials] = useState(false);
 
+  const [originalUsername, setOriginalUsername] = useState('admin');
+
   useEffect(() => {
     apiFetch('/api/account/profile')
       .then(r => (r.ok ? r.json() : null))
       .then(data => {
         if (data) {
-          if (data.username) setUsername(data.username);
+          if (data.username) {
+            setUsername(data.username);
+            setOriginalUsername(data.username);
+          }
           if (data.email) setEmail(data.email);
           if (data.name) setAdminName(data.name);
           if (data.siteLogo !== undefined) setSiteLogo(data.siteLogo);
@@ -381,21 +386,28 @@ export const AccountView: React.FC<AccountViewProps> = ({
       return;
     }
 
-    // If changing password, current password must be provided
-    if (trimmedNewPass) {
+    const isChangingUser = Boolean(originalUsername && trimmedUser !== originalUsername);
+
+    // If changing password or username, current password must be provided
+    if (trimmedNewPass || isChangingUser) {
       if (!trimmedCurrentPass) {
         setStatus({
           type: 'error',
-          message: 'جهت تغییر رمز عبور، لطفاً «رمز عبور فعلی» خود را در کادر مربوطه وارد فرمایید.'
+          message: isChangingUser && !trimmedNewPass
+            ? 'جهت تغییر نام کاربری مدیریت، لطفاً «رمز عبور فعلی» خود را در کادر مربوطه وارد فرمایید.'
+            : 'جهت تغییر مشخصات امنیتی (نام کاربری یا رمز عبور)، لطفاً «رمز عبور فعلی» خود را در کادر مربوطه وارد فرمایید.'
         });
         return;
       }
+    }
+
+    if (trimmedNewPass) {
       if (trimmedNewPass !== confirmPassword.trim()) {
         setStatus({ type: 'error', message: 'رمز عبور جدید و تکرار آن با یکدیگر مطابقت ندارند.' });
         return;
       }
-      if (trimmedNewPass.length < 4) {
-        setStatus({ type: 'error', message: 'رمز عبور جدید باید حداقل ۴ کاراکتر باشد.' });
+      if (trimmedNewPass.length < 6) {
+        setStatus({ type: 'error', message: 'رمز عبور جدید باید حداقل ۶ کاراکتر باشد.' });
         return;
       }
     }
@@ -430,28 +442,16 @@ export const AccountView: React.FC<AccountViewProps> = ({
           setAdminSessionToken(data.token);
         }
 
-        // Synchronize browser local backup immediately
-        try {
-          const local = getCachedLocalState();
-          if (local) {
-            local.adminCredentials = {
-              ...local.adminCredentials,
-              username: trimmedUser,
-              email: email.trim(),
-              name: adminName.trim(),
-              password: trimmedNewPass ? trimmedNewPass : local.adminCredentials?.password
-            };
-            writeLocalBackup(local);
-          }
-        } catch {
-          // ignore storage error
-        }
+        setOriginalUsername(trimmedUser);
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
 
         setStatus({
           type: 'success',
-          message: trimmedNewPass
-            ? 'نام کاربری و رمز عبور جدید مدیریت با موفقیت در دیتابیس پایدار ذخیره شدند. از این پس فقط با مشخصات جدید می‌توانید وارد شوید.'
-            : 'اطلاعات کاربری و پروفایل مدیریت با موفقیت ذخیره شد.'
+          message: trimmedNewPass || isChangingUser
+            ? 'اطلاعات ورود مدیریت (نام کاربری و رمز عبور) با موفقیت در دیسک هاست شما ذخیره شدند. از این پس فقط با مشخصات جدید می‌توانید وارد شوید.'
+            : 'اطلاعات کاربری و پروفایل مدیریت با موفقیت در هاست ذخیره شد.'
         });
         setCurrentPassword('');
         setNewPassword('');
@@ -1033,7 +1033,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
                   dir="ltr"
                   value={username}
                   onChange={e => setUsername(e.target.value)}
-                  placeholder="admin"
+                  placeholder="نام کاربری مدیریت"
                   className="w-full pr-10 pl-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-amber-500 outline-none text-sm text-left font-mono font-bold text-slate-800"
                 />
               </div>
@@ -1095,7 +1095,7 @@ export const AccountView: React.FC<AccountViewProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-2">
-                رمز عبور فعلی (پیش‌فرض: admin)
+                رمز عبور فعلی
               </label>
               <div className="relative flex items-center">
                 <Lock className="w-4 h-4 text-slate-400 absolute right-3.5 pointer-events-none" />

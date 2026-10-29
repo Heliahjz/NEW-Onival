@@ -157,7 +157,7 @@ export const BotTechnicalLogBox: React.FC<BotTechnicalLogBoxProps> = ({
         body: JSON.stringify({
           command: cmd,
           trackingCode: currentOrder?.trackingCode,
-          chatId: config?.baleAdminChatId || '69451465'
+          chatId: config?.baleAdminChatId || config?.adminChatId || ''
         })
       });
 
